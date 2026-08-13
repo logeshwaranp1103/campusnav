@@ -111,4 +111,42 @@ describe("Geo-Calibration & Distance Calculations", () => {
     const farOutside = evaluateBuildingContainment(11.491000, 77.275000, 5, rpBuilding as any);
     expect(farOutside.status).toBe("OUTSIDE");
   });
+
+  it("enforces canonical building center anchoring and footprint alignment", async () => {
+    const { gpsToCanvas, canvasToGps } = await import("../lib/geo/projection");
+    const { evaluateBuildingContainment } = await import("../lib/geo/containment");
+
+    const bCenterLat = 11.49717809;
+    const bCenterLng = 77.27905242;
+    const width = 276;
+    const height = 498;
+
+    const bCanvasCenter = gpsToCanvas(bCenterLat, bCenterLng);
+
+    // Top-Left and Bottom-Right canvas bounds centered around bCanvasCenter
+    const tl = { x: bCanvasCenter.x - width / 2, y: bCanvasCenter.y - height / 2 };
+    const br = { x: bCanvasCenter.x + width / 2, y: bCanvasCenter.y + height / 2 };
+
+    // Verified Live GPS point inside RP
+    const liveLat = 11.497637015;
+    const liveLng = 77.278935357;
+    const liveCanvas = gpsToCanvas(liveLat, liveLng);
+
+    expect(liveCanvas.x).toBeGreaterThanOrEqual(tl.x);
+    expect(liveCanvas.x).toBeLessThanOrEqual(br.x);
+    expect(liveCanvas.y).toBeGreaterThanOrEqual(tl.y);
+    expect(liveCanvas.y).toBeLessThanOrEqual(br.y);
+
+    const bldRecord = {
+      id: "bld-rp",
+      name: "RP",
+      lat: bCenterLat,
+      lng: bCenterLng,
+      width,
+      height,
+    };
+
+    const evalResult = evaluateBuildingContainment(liveLat, liveLng, 5, bldRecord as any);
+    expect(evalResult.status).toBe("INSIDE");
+  });
 });

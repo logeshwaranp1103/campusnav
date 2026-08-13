@@ -7,12 +7,11 @@ import { campusStore } from "@/shared/lib/campus-store";
 import type { Node, Building, Floor, Edge, Destination } from "@/shared/data/campus";
 import type { Route } from "@/features/navigation/services/graph";
 import { getObstructedEdgeIds } from "@/lib/routing/graph";
-import { Building2, Layers, Compass, Locate, AlertTriangle, Sparkles, ZoomIn, ZoomOut, Maximize2, ChevronDown } from "lucide-react";
+import { Building2, Layers, Compass, Locate, AlertTriangle, ZoomIn, ZoomOut, Maximize2, ChevronDown } from "lucide-react";
 import { useVisitorGps } from "@/shared/hooks/use-visitor-gps";
 import { PIXELS_PER_METER, gpsToCanvas } from "@/lib/geo/projection";
 import { DestinationDetailsDrawer } from "./destination-details-drawer";
 import { isEventActive } from "@/shared/lib/event-utils";
-import { GpsDiagnosticsPanel } from "@/features/location/components/gps-diagnostics-panel";
 
 type Props = {
   route: Route | null;
@@ -29,7 +28,6 @@ export function CampusMap({ route, livePosition, progress, gps: passedGps, onNav
   const [selectedDestForDetails, setSelectedDestForDetails] = useState<Destination | null>(null);
   const [autoRotate, setAutoRotate] = useState(false);
   const [showFloorMenuMobile, setShowFloorMenuMobile] = useState(false);
-  const [showDiagnostics, setShowDiagnostics] = useState(false);
 
   // Map Zoom & Pan state passed down to MapCanvas via trigger actions
   const [zoomLevel, setZoomLevel] = useState(1);
@@ -221,29 +219,8 @@ export function CampusMap({ route, livePosition, progress, gps: passedGps, onNav
           >
             <Compass className="h-5 w-5 stroke-[2.25]" />
           </button>
-
-          {/* Dev-Only GPS Diagnostics Toggle Button */}
-          <button
-            onClick={() => setShowDiagnostics((prev) => !prev)}
-            className={`flex h-11 w-11 items-center justify-center rounded-xl active:scale-95 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 cursor-pointer shadow-xs ${
-              showDiagnostics
-                ? "bg-slate-900 text-emerald-400 border border-emerald-500/50 shadow-lg"
-                : "bg-slate-900/80 text-slate-300 hover:bg-slate-900 hover:text-white"
-            }`}
-            title="Toggle Live GPS Diagnostics Panel"
-            aria-label="Toggle GPS Diagnostics"
-          >
-            <Sparkles className="h-5 w-5 stroke-[2.25] text-emerald-400" />
-          </button>
         </div>
       </div>
-
-      {/* Dev-Only GPS Diagnostics Panel Overlay */}
-      {showDiagnostics && (
-        <div className="absolute left-3 top-3 z-50 pointer-events-auto">
-          <GpsDiagnosticsPanel gps={gps} onClose={() => setShowDiagnostics(false)} />
-        </div>
-      )}
 
       {/* Destination Details Drawer */}
       <DestinationDetailsDrawer
@@ -848,10 +825,12 @@ function MapCanvas({
       <g>
         {buildings.map((b) => {
           const bCanvas = (b.lat && b.lng) ? gpsToCanvas(b.lat, b.lng) : { x: 0, y: 0 };
-          const bx = b.x ?? bCanvas.x;
-          const by = b.y ?? bCanvas.y;
+          const centerCanvasX = b.x ?? bCanvas.x;
+          const centerCanvasY = b.y ?? bCanvas.y;
           const bw = b.width ?? 180;
           const bh = b.height ?? 120;
+          const bx = centerCanvasX - bw / 2;
+          const by = centerCanvasY - bh / 2;
 
           const buildingEvents = showEvents ? allEvents.filter((ev) => ev.buildingId === b.id) : [];
           const activeEvent = buildingEvents.find((ev) => isEventActive(ev, nowMs));

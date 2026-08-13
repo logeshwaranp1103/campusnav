@@ -55,6 +55,7 @@ import { PublishModal } from "@/shared/components/publish-modal";
 import { isEventActive, getEventStatus } from "@/shared/lib/event-utils";
 import { useVisitorGps } from "@/shared/hooks/use-visitor-gps";
 import { GpsStatusIndicator } from "@/features/location/components/gps-status-indicator";
+import { GpsDiagnosticsPanel } from "@/features/location/components/gps-diagnostics-panel";
 import {
   getFloorCode,
   type Building,
@@ -162,6 +163,7 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
   const [storeData, setStoreData] = useState(campusStore.getWorkingData());
   const [pendingChanges, setPendingChanges] = useState<PendingChange[]>(campusStore.getPendingChanges());
   const [showMobilePanels, setShowMobilePanels] = useState(false);
+  const [showDiagnostics, setShowDiagnostics] = useState(false);
   const gps = useVisitorGps();
 
   // Subscribe to live campusStore changes for instant CAD canvas update without page refresh
@@ -1534,8 +1536,8 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
     const code = buildingCode.trim().toUpperCase() || `B${storeData.buildings.length + 1}`;
     const newBldId = `b-${Date.now().toString(36)}`;
     const W = 180, H = 120;
-    // Fix #2: GPS from center of building rectangle
-    const { lat, lng } = canvasToGps(x + W / 2, y + H / 2);
+    // Canonical Convention: (x, y) is the CANVAS CENTER
+    const { lat, lng } = canvasToGps(x, y);
     const newBuilding: Building = {
       id: newBldId,
       campusId: "c1",
@@ -2704,8 +2706,9 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
               {/* Render Buildings — Styled 1-to-1 with User Navigation Map */}
               {visibleLayers.buildings &&
                 storeData.buildings.map((b) => {
-                  const bx = b.x ?? 0;
-                  const by = b.y ?? 0;
+                  const bCanvas = (b.lat && b.lng) ? gpsToCanvas(b.lat, b.lng) : { x: 0, y: 0 };
+                  const centerCanvasX = b.x ?? bCanvas.x;
+                  const centerCanvasY = b.y ?? bCanvas.y;
                   let bw = b.width ?? 180;
                   let bh = b.height ?? 120;
 
@@ -2723,6 +2726,8 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
                       bw = realRatio * bh;
                     }
                   }
+                  const bx = centerCanvasX - bw / 2;
+                  const by = centerCanvasY - bh / 2;
                   const isSelected = selectedElement?.type === "building" && selectedElement.id === b.id;
                   const isPlacementTool = activeTool === "NODE" || activeTool === "DESTINATION" || activeTool === "OBSTACLE" || activeTool === "EVENT" || activeTool === "EDGE" || activeTool === "DOOR" || activeTool === "ROAD" || activeTool === "ROOM" || activeTool === "PLACE_VERTICAL";
 
@@ -2744,7 +2749,7 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
                         if (isPlacementTool) return;
                         e.stopPropagation();
                         setDraggingId({ type: "building", id: b.id });
-                        setDragOffset({ x: mouseCanvasPos.x - bx, y: mouseCanvasPos.y - by });
+                        setDragOffset({ x: mouseCanvasPos.x - centerCanvasX, y: mouseCanvasPos.y - centerCanvasY });
                       }}
                       className={isPlacementTool ? "pointer-events-none" : "cursor-grab active:cursor-grabbing"}
                     >
@@ -3691,6 +3696,22 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
                 <span>Locate Me</span>
               </button>
               <GpsStatusIndicator status={gps.status} />
+
+              <div className="h-4 w-px bg-[rgb(var(--border))]" />
+
+              {/* GPS Diagnostics Engine Toggle Button */}
+              <button
+                onClick={() => setShowDiagnostics((prev) => !prev)}
+                className={`flex items-center gap-1.5 rounded px-2 py-1 text-[11px] font-semibold transition-colors cursor-pointer ${
+                  showDiagnostics
+                    ? "bg-slate-900 text-emerald-400 border border-emerald-500/50 shadow-md"
+                    : "text-[rgb(var(--muted-fg))] hover:bg-[rgb(var(--muted))] hover:text-[rgb(var(--fg))]"
+                }`}
+                title="Toggle Live GPS Diagnostics Engine"
+              >
+                <Sparkles className="h-3.5 w-3.5 text-emerald-400" />
+                <span>GPS Diagnostics</span>
+              </button>
             </div>
 
             {/* Delete All Button - Positioned Bottom to Reset Viewport */}
@@ -3703,6 +3724,13 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
               <span>Delete All</span>
             </button>
           </div>
+
+          {/* GPS Diagnostics Panel Overlay */}
+          {showDiagnostics && (
+            <div className="absolute left-3 top-16 z-50 pointer-events-auto">
+              <GpsDiagnosticsPanel gps={gps} onClose={() => setShowDiagnostics(false)} />
+            </div>
+          )}
 
           {/* Mini-Map Window */}
           <div

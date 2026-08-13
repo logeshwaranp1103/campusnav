@@ -6,6 +6,7 @@
  */
 
 import { calculateGeographicDistance } from "./haversine";
+import { gpsToCanvas, canvasToGps } from "./projection";
 import type { Building } from "../../shared/data/campus";
 
 export interface LatLngPoint {
@@ -147,6 +148,17 @@ export function getBuildingFootprintVertices(b: Building): LatLngPoint[] {
       { lat: b.corner3Lat, lng: b.corner3Lng },
       { lat: b.corner4Lat, lng: b.corner4Lng },
     ];
+  }
+
+  if (b.lat && b.lng) {
+    const centerCanvas = gpsToCanvas(b.lat, b.lng);
+    const bw = b.width ?? 180;
+    const bh = b.height ?? 120;
+    const tl = canvasToGps(centerCanvas.x - bw / 2, centerCanvas.y - bh / 2);
+    const tr = canvasToGps(centerCanvas.x + bw / 2, centerCanvas.y - bh / 2);
+    const br = canvasToGps(centerCanvas.x + bw / 2, centerCanvas.y + bh / 2);
+    const bl = canvasToGps(centerCanvas.x - bw / 2, centerCanvas.y + bh / 2);
+    return [tl, tr, br, bl];
   }
 
   return [];

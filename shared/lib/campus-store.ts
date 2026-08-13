@@ -585,37 +585,15 @@ class CampusStore {
     }
 
     if (isResizeOnly) {
-      const w = patch.width ?? oldW;
-      const h = patch.height ?? oldH;
-      let centerLat = prev.centerLat;
-      let centerLng = prev.centerLng;
-      
-      if (!centerLat || !centerLng) {
-        if (prev.corner1Lat && prev.corner1Lng && prev.corner2Lat && prev.corner2Lng && prev.corner3Lat && prev.corner3Lng && prev.corner4Lat && prev.corner4Lng) {
-          const corners = [
-            { lat: prev.corner1Lat, lng: prev.corner1Lng },
-            { lat: prev.corner2Lat, lng: prev.corner2Lng },
-            { lat: prev.corner3Lat, lng: prev.corner3Lng },
-            { lat: prev.corner4Lat, lng: prev.corner4Lng }
-          ];
-          const calculatedCenter = getCenterFromCorners(corners);
-          centerLat = calculatedCenter.lat;
-          centerLng = calculatedCenter.lng;
-        } else {
-          centerLat = 0;
-          centerLng = 0;
-        }
-      }
-      const centerCanvas = gpsToCanvas(centerLat, centerLng);
-      patch.x = centerCanvas.x - w / 2;
-      patch.y = centerCanvas.y - h / 2;
+      // Width/height resize preserves the canvas center (x, y) and geographic center (lat, lng)
+      patch.x = oldX;
+      patch.y = oldY;
     } else if ((patch.x !== undefined || patch.y !== undefined) && patch.lat === undefined && patch.lng === undefined) {
-      const newX = patch.x ?? oldX;
-      const newY = patch.y ?? oldY;
-      const w = patch.width ?? oldW;
-      const h = patch.height ?? oldH;
-      const centerCanvas = { x: newX + w / 2, y: newY + h / 2 };
-      const newCenterGPS = canvasToGps(centerCanvas.x, centerCanvas.y);
+      const newCenterX = patch.x ?? oldX;
+      const newCenterY = patch.y ?? oldY;
+      const newCenterGPS = canvasToGps(newCenterX, newCenterY);
+      patch.x = newCenterX;
+      patch.y = newCenterY;
       patch.centerLat = newCenterGPS.lat;
       patch.centerLng = newCenterGPS.lng;
       patch.lat = newCenterGPS.lat;
@@ -624,10 +602,8 @@ class CampusStore {
       const newLat = patch.lat ?? prev.lat ?? 0;
       const newLng = patch.lng ?? prev.lng ?? 0;
       const centerCanvas = gpsToCanvas(newLat, newLng);
-      const w = patch.width ?? oldW;
-      const h = patch.height ?? oldH;
-      patch.x = centerCanvas.x - w / 2;
-      patch.y = centerCanvas.y - h / 2;
+      patch.x = centerCanvas.x;
+      patch.y = centerCanvas.y;
       patch.centerLat = newLat;
       patch.centerLng = newLng;
     }
