@@ -1,0 +1,894 @@
+"use client";
+
+import { useEffect, useState, useMemo, useRef } from "react";
+import { useSearchParams } from "next/navigation";
+import { AnimatePresence, motion } from "framer-motion";
+import {
+  MapPin,
+  Navigation2,
+  Search,
+  X,
+  Timer,
+  Ruler,
+  ChevronDown,
+  ArrowRight,
+  AlertTriangle,
+  Plus,
+  Minus,
+} from "lucide-react";
+import { Button } from "@/shared/components/ui/button";
+import { Input } from "@/shared/components/ui/input";
+import { Badge } from "@/shared/components/ui/badge";
+import { useToast } from "@/shared/components/ui/toast";
+import { cn } from "@/shared/lib/utils";
+import type { Destination, Node as CampusNode, Edge } from "@/shared/data/campus";
+import { shortestPath, type Route, type RouteInstruction } from "@/features/navigation/services/graph";
+import { campusStore } from "@/shared/lib/campus-store";
+import { CampusMap } from "./campus-map";
+import { LiveRoutePanel } from "./live-route-panel";
+import { TurnByTurnBar } from "./turn-by-turn-bar";
+import { getValidNavigationDestinations } from "@/shared/lib/destination-utils";
+import { findNearestNodeByGps } from "@/lib/geo/haversine";
+import { useVisitorGps } from "@/shared/hooks/use-visitor-gps";
+import { useNavigationStore } from "@/features/navigation/navigation-store";
+
+type StopEntry = {
+  dest: Destination | null;
+  query: string;
+  focus: boolean;
+};
+
+const YOUR_LOCATION_ID = "dest-live-user-location";
+
+const YOUR_LOCATION_DEST: Destination = {
+  id: YOUR_LOCATION_ID,
+  name: "📍 Your Location",
+  category: "Live GPS Location",
+  nodeId: "n-live-user",
+  aliases: ["current location", "my location", "live location", "gps", "me"],
+};
+
+export function NavigateShell() {
+  const [mounted, setMounted] = useState(false);
+  const searchContainerRef = useRef<HTMLDivElement>(null);
+
+  // Published graph data loaded from store
+  const [publishedData, setPublishedData] = useState(() => campusStore.getPublishedData());
+  const gps = useVisitorGps();
+  const navSession = useNavigationStore();
+
+  // Search state for FROM (Start Location)
+  const [fromQuery, setFromQuery] = useState("");
+  const [fromSelected, setFromSelected] = useState<Destination | null>(null);
+  const [fromFocus, setFromFocus] = useState(false);
+
+  // Search state for TO (End Destination)
+  const [toQuery, setToQuery] = useState("");
+  const [toSelected, setToSelected] = useState<Destination | null>(null);
+  const [toFocus, setToFocus] = useState(false);
+
+  const [route, setRoute] = useState<Route | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [live, setLive] = useState(false);
+  const [livePos, setLivePos] = useState<{ node: CampusNode; progress: number } | null>(null);
+  const [mobileView, setMobileView] = useState<"panel" | "map">("panel");
+  // Fix #11: Multi-stop state
+  const [stops, setStops] = useState<StopEntry[]>([]);
+  const { toast } = useToast();
+  const params = useSearchParams();
+
+  // Close search popups when clicking outside search container
+  useEffect(() => {
+    function handleClickOutside(e: MouseEvent | TouchEvent) {
+      if (searchContainerRef.current && !searchContainerRef.current.contains(e.target as globalThis.Node)) {
+        setFromFocus(false);
+        setToFocus(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    document.addEventListener("touchstart", handleClickOutside);
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+      document.removeEventListener("touchstart", handleClickOutside);
+    };
+  }, []);
+
+  useEffect(() => {
+    setMounted(true);
+    const updateData = () => {
+      setPublishedData(campusStore.getPublishedData());
+    };
+    updateData();
+    const unsub = campusStore.subscribe(updateData);
+    return () => unsub();
+  }, []);
+
+  // Filter start/end destinations: no staircase, no lift group, no unnamed nodes. Show all named nodes.
+  const allDestinations: Destination[] = useMemo(() => {
+    return getValidNavigationDestinations(publishedData);
+  }, [publishedData]);
+
+  // Handle URL query parameter ?to=...
+  useEffect(() => {
+    if (!mounted) return;
+    const toId = params.get("to");
+    if (toId && allDestinations.length > 0) {
+      const match = allDestinations.find((x) => x.id === toId);
+      if (match) {
+        pickToDestination(match, fromSelected);
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mounted, params, allDestinations]);
+
+  // Suggestions for FROM (Always place "📍 Your Location" as the VERY FIRST option)
+  const fromSuggestions = useMemo(() => {
+    const q = fromQuery.trim().toLowerCase();
+    const list = [YOUR_LOCATION_DEST, ...allDestinations];
+    if (!q) return list;
+    return list.filter((d) => {
+      const nameMatch = d.name.toLowerCase().includes(q);
+      const catMatch = (d.category ?? "").toLowerCase().includes(q);
+      const aliasMatch = (d.aliases ?? []).some((a) => a.toLowerCase().includes(q));
+      return nameMatch || catMatch || aliasMatch;
+    });
+  }, [fromQuery, allDestinations]);
+
+  // Suggestions for TO
+  const toSuggestions = useMemo(() => {
+    const q = toQuery.trim().toLowerCase();
+    if (!q) return allDestinations;
+    return allDestinations.filter((d) => {
+      const nameMatch = d.name.toLowerCase().includes(q);
+      const catMatch = (d.category ?? "").toLowerCase().includes(q);
+      const aliasMatch = (d.aliases ?? []).some((a) => a.toLowerCase().includes(q));
+      return nameMatch || catMatch || aliasMatch;
+    });
+  }, [toQuery, allDestinations]);
+
+  async function calculateRoute(startDest: Destination | null, endDest: Destination | null, currentStops: StopEntry[] = stops) {
+    if (!endDest || !startDest) {
+      setRoute(null);
+      setLive(false);
+      setLivePos(null);
+      return;
+    }
+    setLoading(true);
+    setRoute(null);
+    setLive(false);
+    setLivePos(null);
+
+    // Build ordered waypoints: start → stop1 → stop2 → ... → end
+    const waypoints: Destination[] = [
+      startDest,
+      ...currentStops.map((s) => s.dest).filter((d): d is Destination => d !== null),
+      endDest,
+    ];
+
+    // Chain Dijkstra segments for each consecutive pair
+    let totalDistance = 0;
+    let totalDurationSec = 0;
+    let combinedNodes: CampusNode[] = [];
+    let combinedEdges: Edge[] = [];
+    let combinedInstructions: RouteInstruction[] = [];
+    let hasObstacles = false;
+
+    for (let i = 0; i < waypoints.length - 1; i++) {
+      const segStart = waypoints[i];
+      const segEnd = waypoints[i + 1];
+      const segRoute = shortestPath(segStart.id, segEnd.id);
+      if (!segRoute) {
+        setLoading(false);
+        toast({ type: "error", title: "No route found", description: `No path from "${segStart.name}" to "${segEnd.name}".` });
+        return;
+      }
+      totalDistance += segRoute.distance;
+      totalDurationSec += segRoute.durationSec;
+      if (segRoute.hasObstacles) hasObstacles = true;
+      // Merge (avoid duplicating the connecting node)
+      if (i === 0) {
+        combinedNodes = [...segRoute.nodes];
+        combinedEdges = [...segRoute.edges];
+      } else {
+        combinedNodes = [...combinedNodes, ...segRoute.nodes.slice(1)];
+        combinedEdges = [...combinedEdges, ...segRoute.edges];
+      }
+      // Merge instructions with a segment header
+      if (waypoints.length > 2 && i > 0) {
+        combinedInstructions.push({ text: `📍 Via ${segStart.name}`, distance: 0, transition: "arrive" });
+      }
+      combinedInstructions = combinedInstructions.concat(segRoute.instructions || []);
+    }
+
+    const clientRoute: Route = {
+      id: `multi-${Date.now()}`,
+      nodes: combinedNodes,
+      edges: combinedEdges,
+      distance: totalDistance,
+      durationSec: totalDurationSec,
+      instructions: combinedInstructions,
+      hasObstacles,
+    };
+
+    setRoute(clientRoute);
+    setLoading(false);
+
+    if (hasObstacles) {
+      toast({ type: "warning", title: "All Routes Have Obstacles", description: "No 100% obstacle-free path exists. Routing through the least obstructed path." });
+    } else {
+      const stopCount = currentStops.filter((s) => s.dest).length;
+      toast({
+        type: "success",
+        title: stopCount > 0 ? `Multi-Stop Route (${stopCount + 2} waypoints)` : `Route to ${endDest.name}`,
+        description: `${Math.round(totalDistance)} m · ~${Math.round(totalDurationSec / 60)} min`,
+      });
+    }
+  }
+
+  function handleSelectYourLocation() {
+    if (gps.status === "unavailable") {
+      toast({
+        type: "error",
+        title: "Geolocation Unavailable",
+        description: "Your browser or device does not support live GPS location.",
+      });
+      return;
+    }
+
+    if (gps.status === "denied") {
+      toast({
+        type: "error",
+        title: "Location Permission Required",
+        description: "Please turn on location / allow browser location permission to use live location.",
+      });
+      return;
+    }
+
+    // Use the hook's live GPS position if available
+    if (gps.isGpsActive && gps.lat !== 0 && gps.lng !== 0) {
+      const { node: nearestNode } = findNearestNodeByGps(gps.lat, gps.lng, publishedData.nodes || [], "f-out");
+      const liveNodeId = nearestNode ? nearestNode.id : (publishedData.nodes[0]?.id ?? "n1");
+      const liveDest: Destination = {
+        ...YOUR_LOCATION_DEST,
+        nodeId: liveNodeId,
+      };
+
+      setFromSelected(liveDest);
+      setFromQuery("📍 Your Location");
+      setFromFocus(false);
+      if (nearestNode) {
+        setLivePos({ node: nearestNode, progress: 0 });
+      }
+      toast({
+        type: "success",
+        title: "Live Location On",
+        description: `Acquired live location near ${nearestNode?.name ?? "Campus node"}.`,
+      });
+
+      if (toSelected) {
+        calculateRoute(liveDest, toSelected);
+      }
+    } else {
+      // GPS still acquiring — set up as "Your Location" and it will update via the useEffect below
+      toast({
+        type: "info",
+        title: "Requesting Location...",
+        description: "Please allow location access. Your position will update automatically.",
+      });
+      if (!gps.isTracking) {
+        gps.startTracking();
+      }
+      setFromSelected(YOUR_LOCATION_DEST);
+      setFromQuery("📍 Your Location");
+      setFromFocus(false);
+    }
+  }
+
+  function pickFromDestination(d: Destination) {
+    if (d.id === YOUR_LOCATION_ID) {
+      handleSelectYourLocation();
+      return;
+    }
+    setFromSelected(d);
+    setFromQuery(d.name);
+    setFromFocus(false);
+    calculateRoute(d, toSelected, stops);
+  }
+
+  function pickToDestination(d: Destination, currentFrom = fromSelected) {
+    setToSelected(d);
+    setToQuery(d.name);
+    setToFocus(false);
+    calculateRoute(currentFrom, d, stops);
+  }
+
+  function addStop() {
+    setStops((prev) => [...prev, { dest: null, query: "", focus: false }]);
+  }
+
+  function removeStop(index: number) {
+    const updated = stops.filter((_, i) => i !== index);
+    setStops(updated);
+    calculateRoute(fromSelected, toSelected, updated);
+  }
+
+  function updateStop(index: number, patch: Partial<StopEntry>) {
+    const updated = stops.map((s, i) => i === index ? { ...s, ...patch } : s);
+    setStops(updated);
+  }
+
+  function pickStop(index: number, d: Destination) {
+    const updated = stops.map((s, i) =>
+      i === index ? { ...s, dest: d, query: d.name, focus: false } : s
+    );
+    setStops(updated);
+    calculateRoute(fromSelected, toSelected, updated);
+  }
+
+  function reset() {
+    setFromSelected(null);
+    setFromQuery("");
+    setToSelected(null);
+    setToQuery("");
+    setRoute(null);
+    setLive(false);
+    setStops([]);
+  }
+
+  // Feed live GPS position into navigation store for route progress, off-route detection & rerouting
+  useEffect(() => {
+    if (!gps.isGpsActive || (gps.lat === 0 && gps.lng === 0)) {
+      if (gps.status === "error" || gps.status === "unavailable") {
+        useNavigationStore.getState().setGpsSignalLost();
+      }
+      return;
+    }
+
+    const { node: nearestNode } = findNearestNodeByGps(gps.lat, gps.lng, publishedData.nodes || [], "f-out");
+    if (nearestNode) {
+      setLivePos((prev) => {
+        if (prev?.node.id === nearestNode.id) return prev;
+        return { node: nearestNode, progress: 0 };
+      });
+
+      // Auto-update the from destination nodeId to keep route calculation current
+      if (fromSelected?.id === YOUR_LOCATION_ID && fromSelected.nodeId !== nearestNode.id) {
+        const updatedDest: Destination = { ...YOUR_LOCATION_DEST, nodeId: nearestNode.id };
+        setFromSelected(updatedDest);
+      }
+    }
+
+    // Trigger Phase 2 Route Progress & Rerouting Update
+    const store = useNavigationStore.getState();
+    if (store.status === "NAVIGATING" || store.status === "OFF_ROUTE" || store.status === "GPS_SIGNAL_LOST") {
+      store.updateGpsProgress(
+        gps.lat,
+        gps.lng,
+        nearestNode,
+        publishedData.nodes || [],
+        (fromId, toId) => shortestPath(fromId, toId)
+      );
+    }
+  }, [gps.isGpsActive, gps.lat, gps.lng, gps.status, fromSelected?.id, publishedData.nodes]);
+
+  function startLive() {
+    setLive(true);
+    setMobileView("map");
+    if (fromSelected && toSelected && route) {
+      useNavigationStore.getState().startNavigationSession(fromSelected, toSelected, route);
+    }
+  }
+
+  if (!mounted) {
+    return (
+      <div className="flex flex-1 items-center justify-center p-6 text-sm text-[rgb(var(--muted-fg))]">
+        <span className="h-5 w-5 animate-spin rounded-full border-2 border-[rgb(var(--primary))] border-t-transparent mr-2" />
+        Loading map and navigation data…
+      </div>
+    );
+  }
+
+  return (
+    <div className="relative flex flex-1 overflow-hidden">
+      {/* Left panel */}
+      <div
+        className={cn(
+          "z-10 w-full shrink-0 flex-col border-r bg-[rgb(var(--card))] md:flex md:w-[400px]",
+          mobileView === "panel" ? "flex" : "hidden",
+        )}
+      >
+        <div ref={searchContainerRef} className="border-b p-3 space-y-2">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <div className="flex h-6 w-6 items-center justify-center rounded-lg gradient-primary text-white">
+                <Navigation2 className="h-3 w-3" />
+              </div>
+              <h1 className="text-xs font-bold text-[rgb(var(--fg))]">Plan a Route</h1>
+            </div>
+            {live && (
+              <Badge variant="success" className="text-[10px]">
+                <span className="mr-1 inline-flex h-1.5 w-1.5 rounded-full bg-[rgb(var(--success))] pulse-dot" />
+                Live
+              </Badge>
+            )}
+
+          </div>
+
+          {/* FROM Search Field */}
+          <div className="relative">
+            <label className="mb-0.5 block text-[10px] font-semibold text-[rgb(var(--muted-fg))]">
+              From (Start Location)
+            </label>
+            <div className="flex h-8 items-center gap-2 rounded-lg border bg-[rgb(var(--bg))] px-2.5 transition-shadow focus-within:ring-2 focus-within:ring-[rgb(var(--ring))]">
+              <span className="flex h-2 w-2 shrink-0 items-center justify-center">
+                <span className="h-1.5 w-1.5 rounded-full bg-[rgb(var(--success))]" />
+              </span>
+              <Input
+                value={fromQuery}
+                onFocus={() => setFromFocus(true)}
+                onChange={(e) => {
+                  setFromQuery(e.target.value);
+                  setFromSelected(null);
+                  setFromFocus(true);
+                }}
+                placeholder="Search start building, entrance..."
+                className="h-7 border-0 bg-transparent px-0 text-xs shadow-none focus-visible:ring-0"
+              />
+              {fromQuery && (
+                <button onClick={() => { setFromQuery(""); setFromSelected(null); }} aria-label="Clear From" className="shrink-0">
+                  <X className="h-3 w-3 text-[rgb(var(--muted-fg))]" />
+                </button>
+              )}
+            </div>
+
+            {/* FROM Suggestions Dropdown */}
+            <AnimatePresence>
+              {fromFocus && fromSuggestions.length > 0 && !fromSelected && (
+                <motion.div
+                  initial={{ opacity: 0, y: -4 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -4 }}
+                  transition={{ duration: 0.15 }}
+                  className="card absolute left-0 right-0 top-full z-40 mt-1 max-h-56 overflow-y-auto p-1 shadow-2xl border bg-[rgb(var(--card))]/98 backdrop-blur-md"
+                >
+                  {fromSuggestions.map((d) => (
+                    <button
+                      key={d.id}
+                      onClick={() => pickFromDestination(d)}
+                      className={cn(
+                        "flex w-full items-center gap-2.5 rounded-md p-1.5 text-left transition-colors hover:bg-[rgb(var(--muted))]",
+                        d.id === YOUR_LOCATION_ID && "bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/30 mb-1"
+                      )}
+                    >
+                      <div className={cn(
+                        "rounded-md p-1 shrink-0",
+                        d.id === YOUR_LOCATION_ID ? "bg-emerald-500 text-white" : "bg-[rgb(var(--primary)/0.1)] text-[rgb(var(--primary))]"
+                      )}>
+                        {d.id === YOUR_LOCATION_ID ? <Navigation2 className="h-3 w-3 animate-pulse" /> : <MapPin className="h-3 w-3" />}
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <div className={cn("truncate text-xs font-medium", d.id === YOUR_LOCATION_ID && "font-bold text-emerald-600 dark:text-emerald-400")}>
+                          {d.name}
+                        </div>
+                        <div className="truncate text-[10px] text-[rgb(var(--muted-fg))]">{d.category}</div>
+                      </div>
+                      {d.id === YOUR_LOCATION_ID && (
+                        <Badge variant="success" className="shrink-0 text-[9px] px-1.5 py-0">
+                          Live GPS
+                        </Badge>
+                      )}
+                    </button>
+                  ))}
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
+
+          {/* Multi-Stop Fields */}
+          {stops.map((stop, idx) => {
+            const q = stop.query.trim().toLowerCase();
+            const stopSuggestions = q
+              ? allDestinations.filter((d) => {
+                  const nameMatch = d.name.toLowerCase().includes(q);
+                  const catMatch = (d.category ?? "").toLowerCase().includes(q);
+                  const aliasMatch = (d.aliases ?? []).some((a) => a.toLowerCase().includes(q));
+                  return nameMatch || catMatch || aliasMatch;
+                })
+              : allDestinations.slice(0, 10);
+
+            return (
+              <div key={idx} className="relative">
+                <label className="mb-0.5 flex items-center justify-between text-[10px] font-semibold text-[rgb(var(--muted-fg))]">
+                  <span>Stop {idx + 1}</span>
+                  <button onClick={() => removeStop(idx)} className="text-red-400 hover:text-red-500" aria-label="Remove Stop">
+                    <Minus className="h-3 w-3" />
+                  </button>
+                </label>
+                <div className="flex h-8 items-center gap-2 rounded-lg border bg-[rgb(var(--bg))] px-2.5 transition-shadow focus-within:ring-2 focus-within:ring-amber-400">
+                  <span className="flex h-2 w-2 shrink-0 items-center justify-center">
+                    <span className="h-1.5 w-1.5 rounded-full bg-amber-400" />
+                  </span>
+                  <input
+                    value={stop.query}
+                    onFocus={() => updateStop(idx, { focus: true })}
+                    onChange={(e) => updateStop(idx, { query: e.target.value, dest: null, focus: true })}
+                    placeholder="Search intermediate stop..."
+                    className="h-7 flex-1 border-0 bg-transparent px-0 text-xs focus:outline-none"
+                  />
+                  {stop.query && (
+                    <button onClick={() => updateStop(idx, { query: "", dest: null })} aria-label="Clear Stop" className="shrink-0">
+                      <X className="h-3 w-3 text-[rgb(var(--muted-fg))]" />
+                    </button>
+                  )}
+                </div>
+                <AnimatePresence>
+                  {stop.focus && stopSuggestions.length > 0 && !stop.dest && (
+                    <motion.div
+                      initial={{ opacity: 0, y: -4 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: -4 }}
+                      transition={{ duration: 0.15 }}
+                      className="card absolute left-0 right-0 top-full z-40 mt-1 max-h-48 overflow-y-auto p-1 shadow-2xl border bg-[rgb(var(--card))]/98 backdrop-blur-md"
+                    >
+                      {stopSuggestions.map((d) => (
+                        <button
+                          key={d.id}
+                          onClick={() => pickStop(idx, d)}
+                          className="flex w-full items-center gap-2.5 rounded-md p-1.5 text-left transition-colors hover:bg-[rgb(var(--muted))]"
+                        >
+                          <div className="rounded-md bg-amber-500/10 p-1 text-amber-500 shrink-0">
+                            <MapPin className="h-3 w-3" />
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <div className="truncate text-xs font-medium">{d.name}</div>
+                            <div className="truncate text-[10px] text-[rgb(var(--muted-fg))]">{d.category}</div>
+                          </div>
+                        </button>
+                      ))}
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              </div>
+            );
+          })}
+
+          {/* Add Stop button — shown between FROM and TO fields */}
+          <button
+            onClick={addStop}
+            className="flex w-full items-center justify-center gap-1 rounded-lg border border-dashed border-amber-400/60 bg-amber-400/5 py-1 text-[10px] font-medium text-amber-500 hover:bg-amber-400/10 transition-colors"
+          >
+            <Plus className="h-3 w-3" /> Add Stop
+          </button>
+
+          {/* TO Search Field */}
+          <div className="relative">
+            <label className="mb-0.5 block text-[10px] font-semibold text-[rgb(var(--muted-fg))]">
+              To (End Destination)
+            </label>
+            <div className="flex h-8 items-center gap-2 rounded-lg border bg-[rgb(var(--bg))] px-2.5 transition-shadow focus-within:ring-2 focus-within:ring-[rgb(var(--ring))]">
+              <Search className="h-3.5 w-3.5 shrink-0 text-[rgb(var(--primary))]" />
+              <Input
+                value={toQuery}
+                onFocus={() => setToFocus(true)}
+                onChange={(e) => {
+                  setToQuery(e.target.value);
+                  setToSelected(null);
+                  setToFocus(true);
+                }}
+                placeholder="Search destination building, room..."
+                className="h-7 border-0 bg-transparent px-0 text-xs shadow-none focus-visible:ring-0"
+              />
+              {toQuery && (
+                <button onClick={() => { setToQuery(""); setToSelected(null); setRoute(null); }} aria-label="Clear To" className="shrink-0">
+                  <X className="h-3 w-3 text-[rgb(var(--muted-fg))]" />
+                </button>
+              )}
+            </div>
+
+            {/* TO Suggestions Dropdown */}
+            <AnimatePresence>
+              {toFocus && toSuggestions.length > 0 && !toSelected && (
+                <motion.div
+                  initial={{ opacity: 0, y: -4 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -4 }}
+                  transition={{ duration: 0.15 }}
+                  className="card absolute left-0 right-0 top-full z-40 mt-1 max-h-56 overflow-y-auto p-1 shadow-2xl border bg-[rgb(var(--card))]/98 backdrop-blur-md"
+                >
+                  {toSuggestions.map((d) => (
+                    <button
+                      key={d.id}
+                      onClick={() => pickToDestination(d)}
+                      className="flex w-full items-center gap-2.5 rounded-md p-1.5 text-left transition-colors hover:bg-[rgb(var(--muted))]"
+                    >
+                      <div className="rounded-md bg-[rgb(var(--primary)/0.1)] p-1 text-[rgb(var(--primary))] shrink-0">
+                        <MapPin className="h-3 w-3" />
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <div className="truncate text-xs font-medium">{d.name}</div>
+                        <div className="truncate text-[10px] text-[rgb(var(--muted-fg))]">{d.category}</div>
+                      </div>
+                    </button>
+                  ))}
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
+
+          {(fromSelected || toSelected || route) && (
+            <Button size="sm" variant="ghost" onClick={reset} className="h-7 w-full text-[11px] text-[rgb(var(--muted-fg))]">
+              Clear route & inputs
+            </Button>
+          )}
+        </div>
+
+        <div className="scrollbar-thin flex-1 overflow-y-auto p-4 pb-24 md:pb-4">
+          {!toSelected && !route && <PopularList onPick={(d) => pickToDestination(d)} allDestinations={allDestinations} />}
+
+          {loading && (
+            <div className="space-y-2">
+              <div className="shimmer h-16 rounded-lg" />
+              <div className="shimmer h-16 rounded-lg" />
+              <div className="shimmer h-16 rounded-lg" />
+            </div>
+          )}
+
+          {route && toSelected && (
+            <div className="space-y-4">
+              <div className="card gradient-border p-4">
+                <div className="mb-2 flex items-center justify-between gap-2">
+                  <div className="min-w-0">
+                    <div className="text-[11px] uppercase tracking-widest text-[rgb(var(--muted-fg))]">
+                      Destination
+                    </div>
+                    <div className="truncate text-base font-semibold">
+                      {toSelected.name}
+                    </div>
+                    {fromSelected && (
+                      <div className="text-xs text-[rgb(var(--muted-fg))] mt-0.5">
+                        From: <span className="font-medium text-[rgb(var(--fg))]">{fromSelected.name}</span>
+                      </div>
+                    )}
+                  </div>
+                  <Badge variant="primary">{toSelected.category}</Badge>
+                </div>
+                <div className="mt-3 grid grid-cols-2 gap-2">
+                  <Stat icon={Ruler} label="Distance" value={`${Math.round(route.distance)} m`} />
+                  <Stat icon={Timer} label="ETA" value={`${Math.round(route.durationSec / 60)} min`} />
+                </div>
+
+                {route.hasObstacles && (
+                  <div className="mt-3 flex items-start gap-3 rounded-xl border border-[#fde047]/70 bg-[#fefce8] dark:border-[#78350f]/60 dark:bg-[#451a03]/40 p-3 shadow-xs">
+                    <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-[#fef08a] text-[#b45309] dark:bg-[#78350f]/50 dark:text-[#fde047]">
+                      <AlertTriangle className="h-4 w-4" />
+                    </div>
+                    <div className="space-y-0.5 text-xs">
+                      <div className="font-bold text-[#451a03] dark:text-[#fef08a]">All Available Routes Have Obstacles</div>
+                      <div className="text-[11px] text-[#78350f] dark:text-[#fde047] leading-relaxed font-medium">
+                        Every path to this location is currently obstructed by hazards or construction zones. Navigation is routing through the path with minimal obstacles.
+                      </div>
+                    </div>
+                  </div>
+                )}
+                <Button
+                  onClick={startLive}
+                  variant="gradient"
+                  className="mt-3 w-full flex items-center justify-center gap-1.5"
+                  disabled={live}
+                >
+                  <span>{live ? "Navigating live…" : "Start live navigation"}</span>
+                  <ArrowRight className="h-4 w-4" />
+                </Button>
+              </div>
+
+              {/* Turn-by-Turn Timeline Card */}
+              {route.instructions && route.instructions.length > 0 && !live && (
+                <div className="card space-y-3 p-4">
+                  <div className="text-[11px] font-bold uppercase tracking-wider text-[rgb(var(--muted-fg))]">
+                    Turn-by-Turn
+                  </div>
+                  <div className="relative space-y-4 pl-1 pt-1">
+                    {route.instructions.map((inst, idx) => {
+                      const isLast = idx === route.instructions.length - 1;
+                      const stepNum = idx + 1;
+                      return (
+                        <div key={idx} className="relative flex items-start gap-3">
+                          {!isLast && (
+                            <span
+                              className="absolute left-[13px] top-[26px] bottom-[-16px] w-[2px] bg-slate-200 dark:bg-slate-700"
+                              aria-hidden="true"
+                            />
+                          )}
+                          <div
+                            className={cn(
+                              "relative z-10 flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-semibold shadow-sm transition-all",
+                              isLast
+                                ? "bg-[rgb(var(--primary))] text-white ring-2 ring-[rgb(var(--primary)/0.3)]"
+                                : "bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-200"
+                            )}
+                          >
+                            {stepNum}
+                          </div>
+                          <div className="min-w-0 flex-1 pt-0.5">
+                            <div className="text-xs font-medium text-[rgb(var(--fg))]">
+                              {inst.text}
+                            </div>
+                            {inst.distance > 0 ? (
+                              <div className="mt-0.5 text-[11px] text-[rgb(var(--muted-fg))]">
+                                {Math.round(inst.distance)} m
+                                {inst.floor ? ` · ${inst.floor}` : inst.building ? ` · ${inst.building}` : " · Outdoor"}
+                              </div>
+                            ) : (
+                              <div className="mt-0.5 text-[11px] font-medium text-[rgb(var(--primary))]">
+                                Destination reached
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {live && toSelected && (
+                <LiveRoutePanel
+                  destinationId={toSelected.id}
+                  onPosition={(p) => setLivePos(p)}
+                  onArrive={() => toast({ type: "success", title: "Arrived at destination!" })}
+                />
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Map view area */}
+      <div className="relative flex-1 bg-[rgb(var(--card))]/30">
+
+
+        <CampusMap
+          route={route}
+          livePosition={livePos?.node}
+          progress={livePos?.progress}
+          gps={gps}
+          onNavigateToDest={(dest) => pickToDestination(dest)}
+        />
+
+        {/* Turn-by-turn Guidance Banner */}
+        {live && (navSession.status === "NAVIGATING" || navSession.status === "OFF_ROUTE" || navSession.status === "REROUTING" || navSession.status === "ARRIVED" || navSession.status === "GPS_SIGNAL_LOST") && (
+          <TurnByTurnBar
+            currentStep={
+              navSession.currentInstruction
+                ? {
+                    text: navSession.currentInstruction.text,
+                    distanceMeters: Math.round(navSession.currentInstruction.distance),
+                    icon: navSession.currentInstruction.transition === "arrive" ? "arrive" : "straight",
+                    targetNodeId: "",
+                  }
+                : (route?.instructions[0]
+                    ? {
+                        text: route.instructions[0].text,
+                        distanceMeters: Math.round(route.instructions[0].distance),
+                        icon: "straight",
+                        targetNodeId: route.nodes[0]?.id ?? "",
+                      }
+                    : null)
+            }
+            nextStep={
+              navSession.nextInstruction
+                ? {
+                    text: navSession.nextInstruction.text,
+                    distanceMeters: Math.round(navSession.nextInstruction.distance),
+                    icon: "straight",
+                    targetNodeId: "",
+                  }
+                : (route?.instructions[1]
+                    ? {
+                        text: route.instructions[1].text,
+                        distanceMeters: Math.round(route.instructions[1].distance),
+                        icon: "straight",
+                        targetNodeId: route.nodes[1]?.id ?? "",
+                      }
+                    : null)
+            }
+            totalDistanceMeters={Math.round(navSession.activeRoute?.distance ?? route?.distance ?? 0)}
+            remainingDistanceMeters={navSession.distanceRemaining}
+            currentStepIndex={navSession.currentSegmentIndex}
+            totalStepsCount={navSession.activeRoute?.instructions.length ?? route?.instructions?.length ?? 1}
+            isOffRoute={navSession.status === "OFF_ROUTE" || navSession.status === "REROUTING"}
+            onEndNavigation={() => {
+              setLive(false);
+              navSession.cancelNavigationSession();
+            }}
+            onRecalculate={() => {
+              if (fromSelected && toSelected) calculateRoute(fromSelected, toSelected);
+            }}
+          />
+        )}
+      </div>
+
+      {/* Fixed Bottom Mobile Navigation Bar (Mobile Screens Only) */}
+      <div className="fixed bottom-0 left-0 right-0 z-50 flex items-center justify-around border-t bg-[rgb(var(--card))]/95 p-1.5 backdrop-blur-md md:hidden shadow-lg">
+        <button
+          onClick={() => setMobileView("panel")}
+          className={cn(
+            "flex flex-1 items-center justify-center gap-1.5 rounded-lg py-2 text-xs font-semibold transition-all cursor-pointer",
+            mobileView === "panel"
+              ? "bg-[rgb(var(--primary))] text-white shadow-xs"
+              : "text-[rgb(var(--muted-fg))] hover:bg-[rgb(var(--muted))]"
+          )}
+        >
+          <Navigation2 className="h-3.5 w-3.5" />
+          <span>Route Planner</span>
+        </button>
+        <button
+          onClick={() => setMobileView("map")}
+          className={cn(
+            "flex flex-1 items-center justify-center gap-1.5 rounded-lg py-2 text-xs font-semibold transition-all cursor-pointer",
+            mobileView === "map"
+              ? "bg-[rgb(var(--primary))] text-white shadow-xs"
+              : "text-[rgb(var(--muted-fg))] hover:bg-[rgb(var(--muted))]"
+          )}
+        >
+          <MapPin className="h-3.5 w-3.5" />
+          <span>Map Focus</span>
+          {route && <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function Stat({ icon: Icon, label, value }: { icon: React.ComponentType<{ className?: string }>; label: string; value: string }) {
+  return (
+    <div className="rounded-lg border bg-[rgb(var(--bg))] p-2.5">
+      <div className="mb-1 flex items-center gap-1.5 text-xs text-[rgb(var(--muted-fg))]">
+        <Icon className="h-3.5 w-3.5" />
+        {label}
+      </div>
+      <div className="text-lg font-semibold tracking-tight">{value}</div>
+    </div>
+  );
+}
+
+function PopularList({
+  onPick,
+  allDestinations,
+}: {
+  onPick: (d: Destination) => void;
+  allDestinations: Destination[];
+}) {
+  const items = useMemo(() => allDestinations.slice(0, 6), [allDestinations]);
+
+  if (items.length === 0) return null;
+
+  return (
+    <div>
+      <div className="mb-3 text-[11px] font-semibold uppercase tracking-[0.16em] text-[rgb(var(--muted-fg))]">
+        Popular destinations
+      </div>
+      <div className="space-y-2">
+        {items.map((d) => (
+          <button
+            key={d.id}
+            suppressHydrationWarning
+            onClick={() => onPick(d)}
+            className="group flex w-full items-center gap-3 rounded-xl border p-3 text-left transition-all hover:border-[rgb(var(--border-strong))] hover:bg-[rgb(var(--muted))] hover:shadow-[var(--shadow-sm)]"
+          >
+            <div className="rounded-lg bg-[rgb(var(--primary)/0.1)] p-2 text-[rgb(var(--primary))]">
+              <MapPin className="h-4 w-4" />
+            </div>
+            <div className="min-w-0 flex-1">
+              <div className="truncate text-sm font-medium">{d.name}</div>
+              <div className="text-xs text-[rgb(var(--muted-fg))]">
+                {d.category}
+              </div>
+            </div>
+            <ArrowRight className="h-3.5 w-3.5 text-[rgb(var(--muted-fg))] opacity-0 transition-opacity group-hover:opacity-100" />
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}

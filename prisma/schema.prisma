@@ -1,0 +1,516 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id            String              @id @default(uuid())
+  email         String              @unique
+  name          String?
+  passwordHash  String?
+  role          RoleName            @default(ADMIN)
+  image         String?
+  emailVerified Boolean             @default(false)
+  createdAt     DateTime            @default(now())
+  updatedAt     DateTime            @updatedAt
+  auditLogs     AuditLog[]
+  navSessions   NavigationSession[]
+  sessions      Session[]
+  roles         UserRole[]
+}
+
+model Session {
+  id        String   @id @default(uuid())
+  userId    String
+  token     String   @unique
+  expiresAt DateTime
+  ipAddress String?
+  userAgent String?
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model Role {
+  id          String           @id @default(uuid())
+  name        String           @unique
+  description String?
+  isSystem    Boolean          @default(false)
+  createdAt   DateTime         @default(now())
+  permissions RolePermission[]
+  users       UserRole[]
+}
+
+model Permission {
+  id          String           @id @default(uuid())
+  key         String           @unique
+  resource    String
+  action      String
+  description String?
+  roles       RolePermission[]
+
+  @@index([resource, action])
+}
+
+model RolePermission {
+  roleId       String
+  permissionId String
+  permission   Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+  role         Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  @@id([roleId, permissionId])
+}
+
+model UserRole {
+  userId String
+  roleId String
+  role   Role   @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([userId, roleId])
+}
+
+model Campus {
+  id           String           @id @default(uuid())
+  name         String
+  slug         String           @unique
+  description  String?
+  latitude     Float
+  longitude    Float
+  boundary     Json?
+  status       MapStatus        @default(DRAFT)
+  createdAt    DateTime         @default(now())
+  updatedAt    DateTime         @updatedAt
+  buildings    Building[]
+  destinations Destination[]
+  doors        Door[]
+  events       Event[]
+  facilities   Facility[]
+  calibrations GeoCalibration[]
+  liftGroups   LiftGroup[]
+  mapVersions  MapVersion[]
+  mediaAssets  MediaAsset[]
+  nodes        Node[]
+  obstacles    Obstacle[]
+  stairGroups  StairGroup[]
+}
+
+model Building {
+  id             String    @id @default(uuid())
+  campusId       String
+  name           String
+  shortCode      String
+  description    String?
+  color          String?
+  icon           String?
+  photoUrl       String?
+  x              Float?
+  y              Float?
+  width          Float?
+  height         Float?
+  rotation       Float?    @default(0)
+  status         MapStatus @default(DRAFT)
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  basementsCount Int?      @default(0)
+  floorsCount    Int?      @default(0)
+  campus         Campus    @relation(fields: [campusId], references: [id], onDelete: Cascade)
+  floors         Floor[]
+
+  @@unique([campusId, shortCode])
+  @@index([campusId])
+}
+
+model Floor {
+  id         String    @id @default(uuid())
+  buildingId String
+  name       String
+  ordinal    Int
+  type       FloorType @default(GROUND)
+  svgUrl     String?
+  isVisible  Boolean   @default(true)
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+  doors      Door[]
+  building   Building  @relation(fields: [buildingId], references: [id], onDelete: Cascade)
+  nodes      Node[]
+  rooms      Room[]
+
+  @@unique([buildingId, ordinal])
+  @@index([buildingId])
+}
+
+model Room {
+  id                String   @id @default(uuid())
+  floorId           String
+  name              String
+  code              String
+  category          String?
+  department        String?
+  description       String?
+  destinationNodeId String?  @unique
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+  destinationNode   Node?    @relation("RoomDestination", fields: [destinationNodeId], references: [id])
+  floor             Floor    @relation(fields: [floorId], references: [id], onDelete: Cascade)
+
+  @@unique([floorId, code])
+  @@index([floorId])
+}
+
+model Door {
+  id              String   @id @default(uuid())
+  floorId         String
+  campusId        String?
+  type            DoorType @default(ROOM_DOOR)
+  name            String?
+  x               Float
+  y               Float
+  connectedNodeId String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  campus          Campus?  @relation(fields: [campusId], references: [id], onDelete: Cascade)
+  floor           Floor    @relation(fields: [floorId], references: [id], onDelete: Cascade)
+
+  @@index([floorId])
+}
+
+model StairGroup {
+  id              String   @id @default(uuid())
+  buildingId      String
+  campusId        String?
+  name            String
+  connectedFloors String[]
+  width           Float?   @default(1.2)
+  notes           String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  campus          Campus?  @relation(fields: [campusId], references: [id], onDelete: Cascade)
+
+  @@index([buildingId])
+}
+
+model LiftGroup {
+  id              String   @id @default(uuid())
+  buildingId      String
+  campusId        String?
+  name            String
+  connectedFloors String[]
+  capacity        Int?     @default(10)
+  accessible      Boolean  @default(true)
+  notes           String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  campus          Campus?  @relation(fields: [campusId], references: [id], onDelete: Cascade)
+
+  @@index([buildingId])
+}
+
+model Facility {
+  id          String   @id @default(uuid())
+  campusId    String
+  name        String
+  category    String
+  description String?
+  x           Float
+  y           Float
+  floorId     String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  campus      Campus   @relation(fields: [campusId], references: [id], onDelete: Cascade)
+
+  @@index([campusId])
+}
+
+model Node {
+  id           String        @id @default(uuid())
+  campusId     String
+  floorId      String?
+  type         NodeType
+  name         String?
+  description  String?
+  latitude     Float?
+  longitude    Float?
+  x            Float?
+  y            Float?
+  accessible   Boolean       @default(true)
+  searchable   Boolean       @default(false)
+  navigable    Boolean       @default(true)
+  tags         String[]      @default([])
+  metadata     Json?
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+  destinations Destination[]
+  edgesOut     Edge[]        @relation("EdgeFrom")
+  edgesIn      Edge[]        @relation("EdgeTo")
+  campus       Campus        @relation(fields: [campusId], references: [id], onDelete: Cascade)
+  floor        Floor?        @relation(fields: [floorId], references: [id])
+  room         Room?         @relation("RoomDestination")
+
+  @@index([campusId])
+  @@index([floorId])
+  @@index([type])
+}
+
+model Edge {
+  id              String    @id @default(uuid())
+  fromNodeId      String
+  toNodeId        String
+  type            EdgeType  @default(WALK)
+  distance        Float
+  displayDistance Float?
+  bidirectional   Boolean   @default(true)
+  accessible      Boolean   @default(true)
+  speedModifier   Float     @default(1.0)
+  closed          Boolean   @default(false)
+  closedReason    String?
+  closedUntil     DateTime?
+  status          MapStatus @default(DRAFT)
+  metadata        Json?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  from            Node      @relation("EdgeFrom", fields: [fromNodeId], references: [id], onDelete: Cascade)
+  to              Node      @relation("EdgeTo", fields: [toNodeId], references: [id], onDelete: Cascade)
+
+  @@unique([fromNodeId, toNodeId, type])
+  @@index([fromNodeId])
+  @@index([toNodeId])
+}
+
+model Obstacle {
+  id        String    @id @default(uuid())
+  campusId  String
+  floorId   String?
+  x         Float
+  y         Float
+  radius    Float     @default(15.0)
+  edgeIds   String[]  @default([])
+  reason    String?
+  expiresAt DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  campus    Campus    @relation(fields: [campusId], references: [id], onDelete: Cascade)
+
+  @@index([campusId])
+  @@index([floorId])
+}
+
+model Event {
+  id          String   @id @default(uuid())
+  campusId    String
+  title       String
+  nodeId      String?
+  buildingId  String?
+  x           Float?
+  y           Float?
+  color       String?
+  startsAt    DateTime
+  endsAt      DateTime
+  description String?
+  createdAt   DateTime @default(now())
+  campus      Campus   @relation(fields: [campusId], references: [id], onDelete: Cascade)
+
+  @@index([campusId])
+}
+
+model GeoCalibration {
+  id        String   @id @default(uuid())
+  campusId  String
+  floorId   String?
+  canvasX   Float
+  canvasY   Float
+  lat       Float
+  lng       Float
+  createdAt DateTime @default(now())
+  campus    Campus   @relation(fields: [campusId], references: [id], onDelete: Cascade)
+
+  @@index([campusId])
+}
+
+model Destination {
+  id          String        @id @default(uuid())
+  campusId    String
+  nodeId      String
+  name        String
+  category    String?
+  roomNumber  String?
+  floorId     String?
+  x           Float?
+  y           Float?
+  width       Float?
+  height      Float?
+  doorId      String?
+  description String?
+  popularity  Int           @default(0)
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+  campus      Campus        @relation(fields: [campusId], references: [id], onDelete: Cascade)
+  node        Node          @relation(fields: [nodeId], references: [id], onDelete: Cascade)
+  aliases     SearchAlias[]
+
+  @@index([campusId])
+  @@index([nodeId])
+}
+
+model SearchAlias {
+  id            String      @id @default(uuid())
+  destinationId String
+  alias         String
+  weight        Int         @default(1)
+  destination   Destination @relation(fields: [destinationId], references: [id], onDelete: Cascade)
+
+  @@unique([destinationId, alias])
+  @@index([alias])
+}
+
+model DraftGraph {
+  id        String   @id @default("active-draft")
+  snapshot  Json
+  updatedAt DateTime @updatedAt
+}
+
+model PublishedGraph {
+  id          String   @id @default("active-published")
+  version     Int      @default(1)
+  snapshot    Json
+  publishedAt DateTime @default(now())
+  publishedBy String?
+}
+
+model MapVersion {
+  id          String    @id @default(uuid())
+  campusId    String?
+  version     Int
+  status      MapStatus @default(PUBLISHED)
+  snapshot    Json
+  notes       String?
+  publishedAt DateTime? @default(now())
+  publishedBy String?
+  createdAt   DateTime  @default(now())
+  campus      Campus?   @relation(fields: [campusId], references: [id], onDelete: Cascade)
+
+  @@index([status])
+}
+
+model MediaAsset {
+  id         String   @id @default(uuid())
+  campusId   String?
+  name       String
+  url        String
+  mimeType   String
+  sizeBytes  Int
+  entityType String
+  entityId   String?
+  createdAt  DateTime @default(now())
+  campus     Campus?  @relation(fields: [campusId], references: [id], onDelete: Cascade)
+}
+
+model NavigationSession {
+  id            String   @id @default(uuid())
+  userId        String?
+  campusId      String
+  startNodeId   String
+  destinationId String
+  distance      Float?
+  durationMs    Int?
+  completed     Boolean  @default(false)
+  route         Json?
+  createdAt     DateTime @default(now())
+  user          User?    @relation(fields: [userId], references: [id])
+
+  @@index([campusId])
+  @@index([userId])
+}
+
+model AnalyticsEvent {
+  id        String   @id @default(uuid())
+  type      String
+  payload   Json
+  createdAt DateTime @default(now())
+
+  @@index([type, createdAt])
+}
+
+model AuditLog {
+  id         String   @id @default(uuid())
+  userId     String?
+  action     String
+  resource   String
+  resourceId String?
+  before     Json?
+  after      Json?
+  ipAddress  String?
+  userAgent  String?
+  createdAt  DateTime @default(now())
+  user       User?    @relation(fields: [userId], references: [id])
+
+  @@index([resource, resourceId])
+  @@index([userId])
+}
+
+enum RoleName {
+  ADMIN
+  EDITOR
+  VIEWER
+}
+
+enum MapStatus {
+  DRAFT
+  PUBLISHED
+  ARCHIVED
+}
+
+enum FloorType {
+  BASEMENT
+  GROUND
+  FIRST
+  SECOND
+  THIRD
+  ROOF
+  CUSTOM
+}
+
+enum DoorType {
+  ROOM_DOOR
+  BUILDING_ENTRANCE
+  EMERGENCY_DOOR
+}
+
+enum NodeType {
+  ENTRANCE
+  EXIT
+  RECEPTION
+  CORRIDOR
+  JUNCTION
+  ROOM
+  LABORATORY
+  OFFICE
+  LIFT
+  STAIR
+  RAMP
+  WASHROOM
+  PARKING
+  EMERGENCY_EXIT
+  WATER_POINT
+  BUS_STOP
+  OUTDOOR
+  CUSTOM
+  BUILDING_ENTRANCE
+}
+
+enum EdgeType {
+  WALK
+  ROAD
+  RAMP
+  STAIRS
+  LIFT
+  BRIDGE
+  SERVICE
+  RESTRICTED
+  EMERGENCY
+}

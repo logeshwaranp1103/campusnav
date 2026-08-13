@@ -1,0 +1,42 @@
+{
+  "version": 2,
+  "snapshot": {
+    "buildings": [
+      {
+        "id": "b-clean",
+        "campusId": "c1",
+        "name": "Clean Block",
+        "shortCode": "CB",
+        "color": "#10b981",
+        "lat": 11.4965,
+        "lng": 77.2774,
+        "floorsCount": 1
+      }
+    ],
+    "floors": [
+      {
+        "id": "f-clean-1",
+        "buildingId": "b-clean",
+        "name": "Ground Floor",
+        "ordinal": 0,
+        "code": "G"
+      }
+    ],
+    "nodes": [
+      {
+        "id": "n-ent-clean",
+        "type": "BUILDING_ENTRANCE",
+        "name": "Main Entrance",
+        "floorId": "f-clean-1",
+        "x": 50,
+        "y": 50
+      }
+    ],
+    "edges": [],
+    "destinations": [],
+    "obstacles": []
+  },
+  "publishedAt": "2026-08-07T08:56:30.112Z",
+  "publishedBy": "admin-1",
+  "notes": "Version 2 Release"
+}
