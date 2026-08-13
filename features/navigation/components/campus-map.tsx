@@ -196,13 +196,15 @@ export function CampusMap({ route, livePosition, progress, gps: passedGps, onNav
         <div className="flex flex-col gap-2 rounded-2xl border bg-[rgb(var(--card))]/95 p-1.5 shadow-xl backdrop-blur-md w-fit">
           <button
             onClick={() => {
+              if (gps && !gps.isTracking) {
+                gps.startTracking();
+              }
               setZoomLevel(1);
               setResetTrigger((t) => t + 1);
-              gps.recenter({ x: 400, y: 300, floorId: activeView });
             }}
             className="flex h-11 w-11 items-center justify-center rounded-xl bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/20 active:scale-95 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 cursor-pointer shadow-xs"
-            title="Recenter & Focus My Location"
-            aria-label="Recenter Location"
+            title="Focus & Center Live Location"
+            aria-label="Focus Live Location"
           >
             <Locate className="h-5 w-5 stroke-[2.25]" />
           </button>
@@ -306,11 +308,20 @@ function MapCanvas({
 
   // Reset pan & internal zoom when floorId changes or resetTrigger fires
   useEffect(() => {
-    setInternalZoom(1);
-    setPan({ x: 0, y: 0 });
     if (animFrameRef.current !== null) {
       cancelAnimationFrame(animFrameRef.current);
       animFrameRef.current = null;
+    }
+    const hasLiveGps = gps?.isGpsActive && (gps.lat !== 0 || (gps.canvasPos && (gps.canvasPos.x !== 400 || gps.canvasPos.y !== 300)));
+    if (hasLiveGps) {
+      const targetCanvas = (gps.lat && gps.lng) ? gpsToCanvas(gps.lat, gps.lng) : gps.canvasPos;
+      const centerX = bounds.x + bounds.w / 2;
+      const centerY = bounds.y + bounds.h / 2;
+      setPan({ x: centerX - targetCanvas.x, y: centerY - targetCanvas.y });
+      setInternalZoom(1.3);
+    } else {
+      setInternalZoom(1);
+      setPan({ x: 0, y: 0 });
     }
   }, [floorId, resetTrigger]);
 
