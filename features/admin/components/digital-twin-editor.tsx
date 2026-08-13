@@ -901,32 +901,16 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
   const handleRefresh = async () => {
     setIsRefreshing(true);
     try {
-      const res = await fetch("/api/admin/campus-graph/draft");
-      if (res.ok) {
-        const data = await res.json();
-        if (data && data.draft && Array.isArray(data.draft.buildings) && data.draft.buildings.length > 0) {
-          if (typeof localStorage !== "undefined") {
-            localStorage.setItem(
-              "campusnav_explicit_draft_v2",
-              JSON.stringify({
-                name: "Refreshed Server Draft",
-                timestamp: Date.now(),
-                snapshot: data.draft,
-              })
-            );
-          }
-        }
-      }
+      await campusStore.syncWithServer();
     } catch (e) {
-      console.warn("Soft refresh fallback to local store:", e);
+      console.warn("Soft refresh database sync notice:", e);
     } finally {
-      campusStore.loadSavedDraft();
       setStoreData(campusStore.getWorkingData());
       setSelectedElement(null);
       toast({
         type: "success",
         title: "CAD Canvas Refreshed",
-        description: "Editor graph & campus data re-synchronized without interrupting Fullscreen.",
+        description: "Editor graph & campus data re-synchronized from database.",
       });
       setTimeout(() => setIsRefreshing(false), 400);
     }

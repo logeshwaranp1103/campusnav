@@ -112,13 +112,6 @@ export async function publishDraftGraph(
 
       // 2. Relational Table Synchronization (Best-effort per entity)
       if (buildings && Array.isArray(buildings)) {
-        const publishedBldIds = buildings.map((b) => b.id);
-        if (publishedBldIds.length > 0) {
-          await prisma.building.deleteMany({
-            where: { id: { notIn: publishedBldIds } },
-          }).catch(() => {});
-        }
-
         for (const b of buildings) {
           const safeCode = b.shortCode ? `${b.shortCode}_${b.id.slice(-6)}` : b.id;
           await prisma.building.upsert({

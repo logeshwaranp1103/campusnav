@@ -27,15 +27,12 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
   const [resolved, setResolved] = useState<"light" | "dark">("light");
 
   useIsoLayout(() => {
-    const stored = localStorage.getItem("theme");
-    const validTheme: Theme = stored === "dark" ? "dark" : "light";
-    setThemeState(validTheme);
-    setResolved(apply(validTheme));
+    setThemeState("light");
+    setResolved(apply("light"));
   }, []);
 
   const setTheme = (t: Theme) => {
     const validTheme: Theme = t === "dark" ? "dark" : "light";
-    localStorage.setItem("theme", validTheme);
     setThemeState(validTheme);
     setResolved(apply(validTheme));
   };

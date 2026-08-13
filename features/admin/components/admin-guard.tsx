@@ -42,7 +42,6 @@ export function AdminGuard({ children }: { children: React.ReactNode }) {
   const logout = () => {
     if (typeof window !== "undefined") {
       sessionStorage.removeItem("campusnav_admin_auth");
-      localStorage.removeItem("campusnav_admin_auth");
     }
     setIsAuthenticated(false);
     toast({

@@ -240,75 +240,14 @@ class CampusStore {
   }
 
   private saveToLocalStorage() {
-    if (typeof window === "undefined") return;
-    try {
-      const workingData = this.getWorkingData();
-      const serialized = JSON.stringify(workingData);
-      localStorage.setItem("campusnav_working_store_v4", serialized);
-      localStorage.setItem(
-        "campusnav_explicit_draft_v3",
-        JSON.stringify({
-          name: "Active Store Draft",
-          timestamp: Date.now(),
-          snapshot: workingData,
-        })
-      );
-    } catch (e) {
-      // Ignore quota errors
-    }
     this.saveWorkingDraftToDatabase();
   }
 
   private async initializeStore() {
-    if (typeof window === "undefined") return;
     try {
-      const dbSuccess = await this.syncWithServer();
-      if (!dbSuccess) {
-        this.loadFromLocalStorageFallback();
-      }
+      await this.syncWithServer();
     } catch (e) {
-      console.warn("Notice during store initialization:", e);
-      this.loadFromLocalStorageFallback();
-    }
-  }
-
-  private loadFromLocalStorageFallback() {
-    if (typeof window === "undefined") return;
-    try {
-      const cached =
-        localStorage.getItem("campusnav_working_store_v4") ||
-        localStorage.getItem("campusnav_working_store_v3") ||
-        localStorage.getItem("campusnav_working_store_v2");
-      const explicitDraft =
-        localStorage.getItem("campusnav_explicit_draft_v3") ||
-        localStorage.getItem("campusnav_explicit_draft_v2");
-      let snapshotToLoad: any = null;
-
-      if (cached) {
-        snapshotToLoad = JSON.parse(cached);
-      } else if (explicitDraft) {
-        const parsedDraft = JSON.parse(explicitDraft);
-        if (parsedDraft?.snapshot) {
-          snapshotToLoad = parsedDraft.snapshot;
-        }
-      }
-
-      if (snapshotToLoad) {
-        if (Array.isArray(snapshotToLoad.buildings)) this.buildings = snapshotToLoad.buildings;
-        if (Array.isArray(snapshotToLoad.floors)) this.floors = snapshotToLoad.floors;
-        if (Array.isArray(snapshotToLoad.nodes)) this.nodes = snapshotToLoad.nodes;
-        if (Array.isArray(snapshotToLoad.edges)) this.edges = snapshotToLoad.edges;
-        if (Array.isArray(snapshotToLoad.destinations)) this.destinations = snapshotToLoad.destinations;
-        if (Array.isArray(snapshotToLoad.events)) this.events = snapshotToLoad.events;
-        if (Array.isArray(snapshotToLoad.obstacles)) this.obstacles = snapshotToLoad.obstacles;
-        if (Array.isArray(snapshotToLoad.stairGroups)) this.stairGroups = snapshotToLoad.stairGroups;
-        if (Array.isArray(snapshotToLoad.liftGroups)) this.liftGroups = snapshotToLoad.liftGroups;
-        if (Array.isArray(snapshotToLoad.doors)) this.doors = snapshotToLoad.doors;
-        this.ensureDefaultGroundFloors();
-        this.syncVerticalGroupPositions();
-      }
-    } catch (e) {
-      console.warn("Notice during fallback store initialization:", e);
+      console.warn("Notice during store initialization from database:", e);
     } finally {
       this.isInitialized = true;
       this.notify();
@@ -2768,9 +2707,6 @@ class CampusStore {
     };
     try {
       this.memoryDraft = JSON.stringify(draftPayload);
-      if (typeof localStorage !== "undefined") {
-        localStorage.setItem("campusnav_explicit_draft_v3", JSON.stringify(draftPayload));
-      }
       this.saveToLocalStorage();
       this.logAction("UPDATE", `Saved Draft "${draftName}"`);
       this.notify();
@@ -2800,7 +2736,7 @@ class CampusStore {
     };
   } | null {
     try {
-      const raw = typeof localStorage !== "undefined" ? localStorage.getItem("campusnav_explicit_draft_v3") || this.memoryDraft : this.memoryDraft;
+      const raw = this.memoryDraft;
       if (!raw) return null;
       const parsed = JSON.parse(raw);
       if (!parsed || !parsed.snapshot) return null;
@@ -2856,7 +2792,7 @@ class CampusStore {
 
   public loadSavedDraft(): boolean {
     try {
-      const raw = typeof localStorage !== "undefined" ? localStorage.getItem("campusnav_explicit_draft_v3") || this.memoryDraft : this.memoryDraft;
+      const raw = this.memoryDraft;
       if (raw) {
         const parsed = JSON.parse(raw);
         if (parsed && parsed.snapshot) {
@@ -2889,12 +2825,6 @@ class CampusStore {
   public discardDraft() {
     this.saveSnapshotToUndo();
     this.memoryDraft = null;
-    if (typeof localStorage !== "undefined") {
-      try {
-        localStorage.removeItem("campusnav_explicit_draft_v3");
-        localStorage.removeItem("campusnav_working_store_v2");
-      } catch (e) {}
-    }
     if (this.publishedGraph.buildings && this.publishedGraph.buildings.length > 0) {
       this.buildings = JSON.parse(JSON.stringify(this.publishedGraph.buildings));
       this.floors = JSON.parse(JSON.stringify(this.publishedGraph.floors));
