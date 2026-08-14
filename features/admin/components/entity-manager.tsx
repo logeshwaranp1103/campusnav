@@ -389,10 +389,16 @@ export function EntityManager() {
   });
 
   const handleAddBuildingCorner = () => {
-    setBuildingForm((prev) => ({
-      ...prev,
-      corners: [...prev.corners, { lat: "11.", lng: "77." }],
-    }));
+    setBuildingForm((prev) => {
+      const corners = prev.corners || [];
+      const lastCorner = corners[corners.length - 1];
+      const defaultLat = lastCorner && lastCorner.lat && lastCorner.lat.trim() !== "" ? lastCorner.lat : "11.";
+      const defaultLng = lastCorner && lastCorner.lng && lastCorner.lng.trim() !== "" ? lastCorner.lng : "77.";
+      return {
+        ...prev,
+        corners: [...corners, { lat: defaultLat, lng: defaultLng }],
+      };
+    });
   };
 
   const handleRemoveBuildingCorner = (index: number) => {
@@ -412,10 +418,16 @@ export function EntityManager() {
   };
 
   const handleAddEditBuildingCorner = () => {
-    setEditForm((prev: any) => ({
-      ...prev,
-      corners: [...(prev.corners || []), { lat: "11.", lng: "77." }],
-    }));
+    setEditForm((prev: any) => {
+      const corners = prev.corners || [];
+      const lastCorner = corners[corners.length - 1];
+      const defaultLat = lastCorner && lastCorner.lat && lastCorner.lat.trim() !== "" ? lastCorner.lat : "11.";
+      const defaultLng = lastCorner && lastCorner.lng && lastCorner.lng.trim() !== "" ? lastCorner.lng : "77.";
+      return {
+        ...prev,
+        corners: [...corners, { lat: defaultLat, lng: defaultLng }],
+      };
+    });
   };
 
   const handleRemoveEditBuildingCorner = (index: number) => {
@@ -2117,7 +2129,7 @@ export function EntityManager() {
                         <div>
                           <label className="text-[10px] text-[rgb(var(--muted-fg))] font-semibold">Latitude</label>
                           <Input
-                            placeholder="Lat"
+                            placeholder="11.XXXXXX"
                             value={c.lat}
                             onChange={(e) => handleUpdateBuildingCorner(idx, "lat", e.target.value)}
                             className="text-xs h-8 font-mono"
@@ -2126,7 +2138,7 @@ export function EntityManager() {
                         <div>
                           <label className="text-[10px] text-[rgb(var(--muted-fg))] font-semibold">Longitude</label>
                           <Input
-                            placeholder="Lng"
+                            placeholder="77.XXXXXX"
                             value={c.lng}
                             onChange={(e) => handleUpdateBuildingCorner(idx, "lng", e.target.value)}
                             className="text-xs h-8 font-mono"
@@ -3223,13 +3235,13 @@ export function EntityManager() {
                             </Button>
                           </div>
                           <Input
-                            placeholder="Lat"
+                            placeholder="11.XXXXXX"
                             value={c.lat}
                             onChange={(e) => handleUpdateEditBuildingCorner(idx, "lat", e.target.value)}
                             className="text-[11px] h-7 font-mono"
                           />
                           <Input
-                            placeholder="Lng"
+                            placeholder="77.XXXXXX"
                             value={c.lng}
                             onChange={(e) => handleUpdateEditBuildingCorner(idx, "lng", e.target.value)}
                             className="text-[11px] h-7 font-mono"
