@@ -138,4 +138,64 @@ describe("Production Backend & API Services", () => {
 
     await cleanupTestData();
   });
+
+  it("successfully persists edges and obstacles to relational database tables and retrieves them", async () => {
+    const bld: Building = {
+      id: "b-clean",
+      campusId: "c1",
+      name: "Clean Block",
+      shortCode: "CB",
+      color: "#10b981",
+      lat: 11.4965,
+      lng: 77.2774,
+      floorsCount: 1,
+    };
+    const fl: Floor = { id: "f-clean-1", buildingId: "b-clean", name: "Ground Floor", ordinal: 0, code: "G" };
+    const n1: Node = { id: "n-ent-clean", type: "BUILDING_ENTRANCE", name: "Main Entrance", floorId: fl.id, x: 10, y: 10 };
+    const n2: Node = { id: "n-corr-2", type: "CORRIDOR", name: "Main Hallway", floorId: fl.id, x: 30, y: 10 };
+    const edge: Edge = {
+      id: "e-test-1",
+      from: n1.id,
+      to: n2.id,
+      fromNodeId: n1.id,
+      toNodeId: n2.id,
+      type: "WALK",
+      pathType: "EV",
+      distance: 20,
+      bidirectional: true,
+    };
+    const obstacle = {
+      id: "obs-test-1",
+      campusId: "c1",
+      floorId: fl.id,
+      x: 50,
+      y: 50,
+      radius: 10,
+      edgeIds: [],
+      reason: "Maintenance",
+    };
+
+    const draftSnapshot = {
+      buildings: [bld],
+      floors: [fl],
+      nodes: [n1, n2],
+      edges: [edge],
+      destinations: [],
+      obstacles: [obstacle],
+    };
+
+    const result = await publishDraftGraph(draftSnapshot, "admin-1", "Edge and Obstacle Sync Test");
+    expect(result.success).toBe(true);
+
+    if (prisma) {
+      const dbEdge = await prisma.edge.findUnique({ where: { id: edge.id } });
+      expect(dbEdge).not.toBeNull();
+      expect(dbEdge?.fromNodeId).toBe(n1.id);
+      expect(dbEdge?.toNodeId).toBe(n2.id);
+
+      const dbObstacle = await prisma.obstacle.findUnique({ where: { id: obstacle.id } });
+      expect(dbObstacle).not.toBeNull();
+      expect(dbObstacle?.reason).toBe("Maintenance");
+    }
+  });
 });

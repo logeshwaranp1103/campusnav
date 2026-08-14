@@ -203,32 +203,102 @@ export async function publishDraftGraph(
       }
 
       if (edges && Array.isArray(edges)) {
-        const validNodeIds = new Set((nodes || []).map((n) => n.id));
+        const dbNodes = await prisma.node.findMany({ select: { id: true } }).catch(() => []);
+        const validNodeIds = new Set([
+          ...(nodes || []).map((n) => n.id),
+          ...dbNodes.map((n) => n.id),
+        ]);
         for (const e of edges) {
           const fromId = e.fromNodeId || e.from;
           const toId = e.toNodeId || e.to;
           if (fromId && toId && validNodeIds.has(fromId) && validNodeIds.has(toId)) {
-            await prisma.edge.upsert({
-              where: { id: e.id },
-              update: {
-                fromNodeId: fromId,
-                toNodeId: toId,
-                type: (e.type as any) || "WALK",
-                distance: e.distance ?? 1,
-                bidirectional: e.bidirectional ?? true,
-                status: "PUBLISHED",
-              },
-              create: {
-                id: e.id,
-                fromNodeId: fromId,
-                toNodeId: toId,
-                type: (e.type as any) || "WALK",
-                distance: e.distance ?? 1,
-                bidirectional: e.bidirectional ?? true,
-                status: "PUBLISHED",
-              },
-            }).catch((err) => console.warn(`Edge ${e.id} upsert deferred:`, err?.message));
+            const edgeType = (e.type as any) || "WALK";
+            const pathType = (e.pathType as any) || "WALK";
+            const distance = typeof e.distance === "number" && !isNaN(e.distance) ? e.distance : 1;
+            const bidirectional = e.bidirectional ?? true;
+
+            try {
+              const existingByNodes = await prisma.edge.findUnique({
+                where: {
+                  fromNodeId_toNodeId_type: {
+                    fromNodeId: fromId,
+                    toNodeId: toId,
+                    type: edgeType,
+                  },
+                },
+              });
+
+              if (existingByNodes) {
+                await prisma.edge.update({
+                  where: { id: existingByNodes.id },
+                  data: {
+                    fromNodeId: fromId,
+                    toNodeId: toId,
+                    type: edgeType,
+                    ...(pathType ? { pathType: pathType as any } : {}),
+                    distance,
+                    bidirectional,
+                    status: "PUBLISHED",
+                  },
+                });
+              } else {
+                await prisma.edge.upsert({
+                  where: { id: e.id },
+                  update: {
+                    fromNodeId: fromId,
+                    toNodeId: toId,
+                    type: edgeType,
+                    ...(pathType ? { pathType: pathType as any } : {}),
+                    distance,
+                    bidirectional,
+                    status: "PUBLISHED",
+                  },
+                  create: {
+                    id: e.id,
+                    fromNodeId: fromId,
+                    toNodeId: toId,
+                    type: edgeType,
+                    ...(pathType ? { pathType: pathType as any } : {}),
+                    distance,
+                    bidirectional,
+                    status: "PUBLISHED",
+                  },
+                });
+              }
+            } catch (err: any) {
+              console.warn(`Edge ${e.id} upsert notice:`, err?.message);
+            }
           }
+        }
+      }
+
+      if (obstacles && Array.isArray(obstacles)) {
+        for (const obs of obstacles) {
+          const floorId = obs.floorId && obs.floorId !== "f-out" ? obs.floorId : null;
+          await prisma.obstacle.upsert({
+            where: { id: obs.id },
+            update: {
+              campusId: obs.campusId || defaultCampusId,
+              floorId,
+              x: obs.x ?? 0,
+              y: obs.y ?? 0,
+              radius: obs.radius ?? 15,
+              edgeIds: obs.edgeIds || [],
+              reason: obs.reason || null,
+              expiresAt: obs.expiresAt ? new Date(obs.expiresAt) : null,
+            },
+            create: {
+              id: obs.id,
+              campusId: obs.campusId || defaultCampusId,
+              floorId,
+              x: obs.x ?? 0,
+              y: obs.y ?? 0,
+              radius: obs.radius ?? 15,
+              edgeIds: obs.edgeIds || [],
+              reason: obs.reason || null,
+              expiresAt: obs.expiresAt ? new Date(obs.expiresAt) : null,
+            },
+          }).catch((err) => console.warn(`Obstacle ${obs.id} upsert deferred:`, err?.message));
         }
       }
 
@@ -279,12 +349,13 @@ export async function publishDraftGraph(
 export async function getRelationalGraphFromDatabase(): Promise<DraftSnapshot | null> {
   if (!prisma) return null;
   try {
-    const [rawBuildings, rawFloors, rawNodes, rawEdges, rawDestinations] = await Promise.all([
+    const [rawBuildings, rawFloors, rawNodes, rawEdges, rawDestinations, rawObstacles] = await Promise.all([
       prisma.building.findMany(),
       prisma.floor.findMany(),
       prisma.node.findMany(),
       prisma.edge.findMany(),
       prisma.destination.findMany(),
+      prisma.obstacle.findMany(),
     ]);
 
     if (rawNodes.length === 0 && rawBuildings.length === 0) {
@@ -325,13 +396,14 @@ export async function getRelationalGraphFromDatabase(): Promise<DraftSnapshot | 
       searchable: n.searchable ?? true,
     }));
 
-    const edges: Edge[] = rawEdges.map((e) => ({
+    const edges: Edge[] = rawEdges.map((e: any) => ({
       id: e.id,
       from: e.fromNodeId,
       to: e.toNodeId,
       fromNodeId: e.fromNodeId,
       toNodeId: e.toNodeId,
       type: e.type as any,
+      pathType: (e.pathType as any) || "WALK",
       distance: e.distance,
       bidirectional: e.bidirectional ?? true,
     }));
@@ -344,13 +416,25 @@ export async function getRelationalGraphFromDatabase(): Promise<DraftSnapshot | 
       aliases: [],
     }));
 
+    const obstacles: Obstacle[] = rawObstacles.map((obs) => ({
+      id: obs.id,
+      campusId: obs.campusId,
+      floorId: obs.floorId ?? "f-out",
+      x: obs.x,
+      y: obs.y,
+      radius: obs.radius,
+      edgeIds: obs.edgeIds || [],
+      reason: obs.reason ?? undefined,
+      expiresAt: obs.expiresAt ? obs.expiresAt.toISOString() : undefined,
+    }));
+
     return {
       buildings,
       floors,
       nodes,
       edges,
       destinations,
-      obstacles: [],
+      obstacles,
     };
   } catch (e) {
     console.warn("Error building graph snapshot from relational database:", e);
