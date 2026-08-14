@@ -34,7 +34,7 @@ export default function Page() {
     return {
       id: sg.id,
       name: sg.name || "Staircase Group",
-      building: b ? `${b.name} (${b.shortCode || ""})` : "Campus-wide",
+      building: b ? b.name : "Campus-wide",
       connectedFloors,
       nodesCount: stairNodesCount,
       status: connectedFloors.length >= 2 ? "Multi-floor Connected" : "Single Floor",

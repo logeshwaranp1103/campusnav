@@ -262,6 +262,7 @@ model Edge {
   fromNodeId      String
   toNodeId        String
   type            EdgeType  @default(WALK)
+  pathType        PathType? @default(WALK)
   distance        Float
   displayDistance Float?
   bidirectional   Boolean   @default(true)
@@ -513,4 +514,9 @@ enum EdgeType {
   SERVICE
   RESTRICTED
   EMERGENCY
+}
+
+enum PathType {
+  EV
+  WALK
 }

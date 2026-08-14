@@ -569,7 +569,7 @@ export default function VisitorPage() {
                     : "text-[rgb(var(--muted-fg))]"
                 }`}
               >
-                {bld?.shortCode ? `${bld.shortCode} ${f.name}` : f.name}
+                {bld?.name ? `${bld.name} ${f.name}` : f.name}
               </button>
             );
           })}
@@ -619,7 +619,7 @@ export default function VisitorPage() {
                   strokeWidth="1.5"
                 />
                 <text x={bx + (b.width ?? 180) / 2} y={by + (b.height ?? 120) / 2} textAnchor="middle" fill="currentColor" className="text-xs font-semibold">
-                  {b.name}{b.shortCode ? ` (${b.shortCode})` : ""}
+                  {b.name}
                 </text>
               </g>
             );

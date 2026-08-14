@@ -12,6 +12,7 @@ import {
   Ruler,
   ChevronDown,
   ArrowRight,
+  ArrowDown,
   AlertTriangle,
   Plus,
   Minus,
@@ -42,7 +43,7 @@ const YOUR_LOCATION_ID = "dest-live-user-location";
 
 const YOUR_LOCATION_DEST: Destination = {
   id: YOUR_LOCATION_ID,
-  name: "📍 Your Location",
+  name: "Your Location",
   category: "Live GPS Location",
   nodeId: "n-live-user",
   aliases: ["current location", "my location", "live location", "gps", "me"],
@@ -254,7 +255,7 @@ export function NavigateShell() {
       };
 
       setFromSelected(liveDest);
-      setFromQuery("📍 Your Location");
+      setFromQuery("Your Location");
       setFromFocus(false);
       if (nearestNode) {
         setLivePos({ node: nearestNode, progress: 0 });
@@ -279,7 +280,7 @@ export function NavigateShell() {
         gps.startTracking();
       }
       setFromSelected(YOUR_LOCATION_DEST);
-      setFromQuery("📍 Your Location");
+      setFromQuery("Your Location");
       setFromFocus(false);
     }
   }
@@ -393,7 +394,7 @@ export function NavigateShell() {
       {/* Left panel */}
       <div
         className={cn(
-          "z-10 w-full shrink-0 flex-col border-r bg-[rgb(var(--card))] md:flex md:w-[400px]",
+          "z-10 w-full shrink-0 flex-col border-r bg-[rgb(var(--card))] md:flex md:w-80 lg:w-[320px]",
           mobileView === "panel" ? "flex" : "hidden",
         )}
       >
@@ -622,8 +623,28 @@ export function NavigateShell() {
           )}
         </div>
 
-        <div className="scrollbar-thin flex-1 overflow-y-auto p-4 pb-24 md:pb-4">
-          {!toSelected && !route && <PopularList onPick={(d) => pickToDestination(d)} allDestinations={allDestinations} />}
+        <div className="flex-1 overflow-y-auto p-3 pb-24 md:pb-4 scrollbar-thin [scrollbar-width:thin] [&::-webkit-scrollbar]:w-1 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-slate-300 dark:[&::-webkit-scrollbar-thumb]:bg-slate-700">
+          {/* Only show PopularList when neither from nor to is chosen */}
+          {!fromSelected && !toSelected && !route && (
+            <PopularList onPick={(d) => pickToDestination(d)} allDestinations={allDestinations} />
+          )}
+
+          {/* If only one point is selected, guide the user to select the other without showing the route box */}
+          {((fromSelected && !toSelected) || (!fromSelected && toSelected)) && !loading && (
+            <div className="card p-4 text-center space-y-2 border bg-[rgb(var(--card))]">
+              <div className="mx-auto flex h-9 w-9 items-center justify-center rounded-full bg-[rgb(var(--primary)/0.1)] text-[rgb(var(--primary))]">
+                <Navigation2 className="h-4 w-4" />
+              </div>
+              <div className="text-xs font-bold text-[rgb(var(--fg))]">
+                {!fromSelected ? "Select a Start Location" : "Select an End Destination"}
+              </div>
+              <p className="text-[11px] text-[rgb(var(--muted-fg))] leading-relaxed">
+                {!fromSelected
+                  ? "Choose where you are starting from to calculate the optimal route."
+                  : "Choose your destination point to display the complete navigation route."}
+              </p>
+            </div>
+          )}
 
           {loading && (
             <div className="space-y-2">
@@ -633,26 +654,50 @@ export function NavigateShell() {
             </div>
           )}
 
-          {route && toSelected && (
+          {/* Route unavailable state when both start and end are selected but no path exists */}
+          {fromSelected && toSelected && !route && !loading && (
+            <div className="card p-4 text-center space-y-2 border border-red-500/20 bg-red-500/5">
+              <div className="mx-auto flex h-9 w-9 items-center justify-center rounded-full bg-red-500/10 text-red-500">
+                <AlertTriangle className="h-4 w-4" />
+              </div>
+              <div className="text-xs font-bold text-red-600 dark:text-red-400">Route Unavailable</div>
+              <p className="text-[11px] text-[rgb(var(--muted-fg))] leading-relaxed">
+                No connected walkable path exists between <span className="font-semibold text-[rgb(var(--fg))]">{fromSelected.name}</span> and <span className="font-semibold text-[rgb(var(--fg))]">{toSelected.name}</span>.
+              </p>
+            </div>
+          )}
+
+          {/* Route Box: Only appears when BOTH Start and End are selected and a valid route exists */}
+          {route && fromSelected && toSelected && (
             <div className="space-y-4">
-              <div className="card gradient-border p-4">
-                <div className="mb-2 flex items-center justify-between gap-2">
-                  <div className="min-w-0">
-                    <div className="text-[11px] uppercase tracking-widest text-[rgb(var(--muted-fg))]">
-                      Destination
+              <div className="card gradient-border p-4 space-y-3">
+                <div className="space-y-2 border-b pb-3">
+                  <div className="flex items-center gap-2">
+                    <span className="flex h-2.5 w-2.5 shrink-0 rounded-full bg-emerald-500 ring-2 ring-emerald-500/20" />
+                    <div className="min-w-0 flex-1">
+                      <div className="text-[10px] font-bold uppercase tracking-wider text-emerald-600 dark:text-emerald-400">Start</div>
+                      <div className="text-xs font-bold truncate text-[rgb(var(--fg))]">{fromSelected.name}</div>
                     </div>
-                    <div className="truncate text-base font-semibold">
-                      {toSelected.name}
-                    </div>
-                    {fromSelected && (
-                      <div className="text-xs text-[rgb(var(--muted-fg))] mt-0.5">
-                        From: <span className="font-medium text-[rgb(var(--fg))]">{fromSelected.name}</span>
-                      </div>
-                    )}
                   </div>
-                  <Badge variant="primary">{toSelected.category}</Badge>
+
+                  <div className="ml-1 pl-3 border-l-2 border-dashed border-[rgb(var(--border))] py-0.5 space-y-0.5">
+                    <div className="text-[10px] font-semibold text-[rgb(var(--muted-fg))] flex items-center gap-1">
+                      <ArrowDown className="h-3 w-3 text-[rgb(var(--primary))]" />
+                      <span>{route.instructions?.length || 0} Route Waypoints ({Math.round(route.distance)}m)</span>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <span className="flex h-2.5 w-2.5 shrink-0 rounded-full bg-[rgb(var(--primary))] ring-2 ring-[rgb(var(--primary)/0.2)]" />
+                    <div className="min-w-0 flex-1">
+                      <div className="text-[10px] font-bold uppercase tracking-wider text-[rgb(var(--primary))]">Destination</div>
+                      <div className="text-xs font-bold truncate text-[rgb(var(--fg))]">{toSelected.name}</div>
+                    </div>
+                    <Badge variant="primary" className="shrink-0 text-[10px]">{toSelected.category}</Badge>
+                  </div>
                 </div>
-                <div className="mt-3 grid grid-cols-2 gap-2">
+
+                <div className="grid grid-cols-2 gap-2">
                   <Stat icon={Ruler} label="Distance" value={`${Math.round(route.distance)} m`} />
                   <Stat icon={Timer} label="ETA" value={`${Math.round(route.durationSec / 60)} min`} />
                 </div>

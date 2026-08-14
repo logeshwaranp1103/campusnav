@@ -68,9 +68,17 @@
   --radius-lg: 1.25rem;
 }
 
-* { border-color: rgb(var(--border)); }
-html, body { height: 100%; }
-html { scroll-behavior: smooth; }
+* {
+  border-color: rgb(var(--border));
+  box-sizing: border-box;
+}
+html, body {
+  height: 100%;
+  overflow-x: hidden;
+}
+html {
+  scrollbar-gutter: stable;
+}
 body {
   background: rgb(var(--bg));
   color: rgb(var(--fg));
@@ -84,7 +92,7 @@ body {
 ::selection { background: rgb(var(--primary) / 0.25); color: rgb(var(--fg)); }
 
 /* Scrollbar */
-.scrollbar-thin::-webkit-scrollbar { width: 8px; height: 8px; }
+.scrollbar-thin::-webkit-scrollbar { width: 6px; height: 6px; }
 .scrollbar-thin::-webkit-scrollbar-track { background: transparent; }
 .scrollbar-thin::-webkit-scrollbar-thumb {
   background: rgb(var(--border-strong));
@@ -105,18 +113,17 @@ body {
   -webkit-backdrop-filter: saturate(200%) blur(24px);
 }
 
-/* Card primitives */
+/* Card primitives — Unified layer rendering locked to section background */
 .card {
   background: rgb(var(--card));
   border: 1px solid rgb(var(--border));
   border-radius: var(--radius);
   box-shadow: var(--shadow-sm);
-  transition: box-shadow 0.25s ease, transform 0.25s ease, border-color 0.25s ease;
+  transition: box-shadow 0.2s ease, border-color 0.2s ease, background-color 0.2s ease;
 }
 .card-hover:hover {
   box-shadow: var(--shadow-md);
   border-color: rgb(var(--border-strong));
-  transform: translateY(-2px);
 }
 
 /* Gradient utilities */
@@ -167,8 +174,8 @@ body {
 
 /* Animations */
 @keyframes pulseDot {
-  0%, 100% { transform: scale(1); opacity: 1; }
-  50% { transform: scale(1.35); opacity: 0.65; }
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.65; }
 }
 .pulse-dot { animation: pulseDot 1.6s ease-in-out infinite; }
 
@@ -181,18 +188,6 @@ body {
   background-size: 200% 100%;
   animation: shimmer 1.6s linear infinite;
 }
-
-@keyframes float {
-  0%, 100% { transform: translateY(0px); }
-  50% { transform: translateY(-8px); }
-}
-.animate-float { animation: float 6s ease-in-out infinite; }
-
-@keyframes floatSlow {
-  0%, 100% { transform: translate(0, 0); }
-  50% { transform: translate(6px, -10px); }
-}
-.animate-float-slow { animation: floatSlow 9s ease-in-out infinite; }
 
 @keyframes glow {
   0%, 100% { opacity: 0.55; }

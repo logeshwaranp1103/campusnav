@@ -116,7 +116,7 @@ export function Sidebar() {
 
   return (
     <aside className="hidden w-64 shrink-0 border-r bg-[rgb(var(--bg-elev))]/60 lg:block">
-      <div className="scrollbar-thin sticky top-0 flex h-screen flex-col overflow-y-auto">
+      <div className="scrollbar-thin sticky top-0 flex h-dvh flex-col overflow-y-auto">
         {/* Brand Header */}
         <div className="flex h-16 items-center border-b px-4 shrink-0">
           <Link href="/" className="group flex items-center justify-between w-full min-w-0">

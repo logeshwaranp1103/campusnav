@@ -1,12 +1,14 @@
-import type { Node, Edge, Obstacle, Floor } from "../../shared/data/campus";
+import type { Node, Edge, Obstacle, Floor, PathType } from "../../shared/data/campus";
 import { calculateHaversineDistance } from "../geo/haversine";
 import { canvasToGps } from "../geo/projection";
+import { canTraverseEdge, getEdgePathType, type TravelMode } from "./edge-accessibility";
 
 export type AdjacencyEdge = {
   edgeId: string;
   from: string;
   to: string;
   type: Edge["type"];
+  pathType?: PathType;
   distance: number;
   bidirectional: boolean;
   weight: number;
@@ -21,6 +23,7 @@ export interface BuildGraphOptions {
   floors?: Floor[];
   activeEdgeIds?: Set<string>;
   allowObstaclePenalties?: boolean;
+  travelMode?: TravelMode;
 }
 
 export function getObstructedEdgeIds(
@@ -112,6 +115,8 @@ export function buildAdjacencyGraph(
   const graph: GraphAdjacencyMap = new Map();
   nodes.forEach((n) => graph.set(n.id, []));
 
+  const travelMode: TravelMode = options.travelMode ?? "WALK";
+
   // Track directed adjacency entries to avoid duplicates.
   // Key: "fromId->toId" — only skip if the exact same directed link was already added.
   const addedDirected = new Set<string>();
@@ -123,12 +128,13 @@ export function buildAdjacencyGraph(
     type: Edge["type"],
     dist: number,
     weight: number,
-    force = false
+    force = false,
+    pathType?: PathType
   ) => {
     if (!graph.has(from)) graph.set(from, []);
     if (!graph.has(to)) graph.set(to, []);
 
-    const dirKey = `${from}->${to}:${type}:${dist}`;
+    const dirKey = `${from}->${to}:${type}:${dist}:${pathType ?? ""}`;
     if (addedDirected.has(dirKey) && !force) return;
     addedDirected.add(dirKey);
 
@@ -137,6 +143,7 @@ export function buildAdjacencyGraph(
       from,
       to,
       type,
+      pathType,
       distance: dist,
       bidirectional: true,
       weight,
@@ -252,6 +259,11 @@ export function buildAdjacencyGraph(
       }
     }
 
+    // Exclude edges not traversable in current travel mode (e.g. EV cannot traverse Only Walk Path)
+    if (!canTraverseEdge(e, travelMode)) {
+      return;
+    }
+
     const isVerticalTransition = e.type === "STAIRS" || e.type === "LIFT" || (fn && tn && fn.floorId !== tn.floorId);
 
     let computedDist = 0;
@@ -268,10 +280,11 @@ export function buildAdjacencyGraph(
 
     const dist = Math.max(1, Math.round(computedDist || 1));
     const weight = Math.max(1, dist * (extEdge.speedModifier ?? 1.0) + modePenalty);
+    const edgePathType = getEdgePathType(e);
 
     // ALWAYS add both forward AND backward — every campus edge is walkable in both directions
-    addDirectedEdge(fromId, toId, e.id, e.type, dist, weight);
-    addDirectedEdge(toId, fromId, `${e.id}_rev`, e.type, dist, weight);
+    addDirectedEdge(fromId, toId, e.id, e.type, dist, weight, false, edgePathType);
+    addDirectedEdge(toId, fromId, `${e.id}_rev`, e.type, dist, weight, false, edgePathType);
   });
 
   // ── Ensure consecutive vertical STAIRS edges link stair nodes in exact floor order ──
@@ -343,53 +356,57 @@ export function buildAdjacencyGraph(
         sequentialNodes.push(nodeOnRank);
       }
 
-      for (let i = 0; i < sequentialNodes.length - 1; i++) {
-        const fn = sequentialNodes[i];
-        const tn = sequentialNodes[i + 1];
-        if (fn.floorId !== tn.floorId) {
-          const autoStairEdgeId = `e-stair-seq-${fn.id}-${tn.id}`;
-          const dist = 15;
-          const weight = 17; // 15m + 2 penalty for STAIRS
-          addDirectedEdge(fn.id, tn.id, autoStairEdgeId, "STAIRS", dist, weight, true);
-          addDirectedEdge(tn.id, fn.id, `${autoStairEdgeId}_rev`, "STAIRS", dist, weight, true);
+      if (travelMode === "WALK") {
+        for (let i = 0; i < sequentialNodes.length - 1; i++) {
+          const fn = sequentialNodes[i];
+          const tn = sequentialNodes[i + 1];
+          if (fn.floorId !== tn.floorId) {
+            const autoStairEdgeId = `e-stair-seq-${fn.id}-${tn.id}`;
+            const dist = 15;
+            const weight = 17; // 15m + 2 penalty for STAIRS
+            addDirectedEdge(fn.id, tn.id, autoStairEdgeId, "STAIRS", dist, weight, true, "WALK");
+            addDirectedEdge(tn.id, fn.id, `${autoStairEdgeId}_rev`, "STAIRS", dist, weight, true, "WALK");
+          }
         }
       }
     }
   });
 
   // ── Ensure every stair node is connected to nearest node on the same floor ──
-  nodes.forEach((stairNode) => {
-    const isStair =
-      stairNode.type === "STAIR" ||
-      Boolean(stairNode.stairGroupId) ||
-      (stairNode.name && /stair|sts|rs/i.test(stairNode.name));
+  if (travelMode === "WALK") {
+    nodes.forEach((stairNode) => {
+      const isStair =
+        stairNode.type === "STAIR" ||
+        Boolean(stairNode.stairGroupId) ||
+        (stairNode.name && /stair|sts|rs/i.test(stairNode.name));
 
-    if (isStair) {
-      const sameFloorNodes = nodes.filter(
-        (n) => n.floorId === stairNode.floorId && n.id !== stairNode.id
-      );
+      if (isStair) {
+        const sameFloorNodes = nodes.filter(
+          (n) => n.floorId === stairNode.floorId && n.id !== stairNode.id
+        );
 
-      if (sameFloorNodes.length > 0) {
-        let closest: Node | null = null;
-        let minDist = Infinity;
-        sameFloorNodes.forEach((n) => {
-          const d = Math.hypot(n.x - stairNode.x, n.y - stairNode.y);
-          if (d < minDist) {
-            minDist = d;
-            closest = n;
+        if (sameFloorNodes.length > 0) {
+          let closest: Node | null = null;
+          let minDist = Infinity;
+          sameFloorNodes.forEach((n) => {
+            const d = Math.hypot(n.x - stairNode.x, n.y - stairNode.y);
+            if (d < minDist) {
+              minDist = d;
+              closest = n;
+            }
+          });
+
+          if (closest && minDist <= 500) {
+            const targetNode = closest as Node;
+            const autoFloorEdgeId = `e-stair-floorlink-${stairNode.id}-${targetNode.id}`;
+            const dist = Math.max(1, Math.round(minDist / 4));
+            addDirectedEdge(stairNode.id, targetNode.id, autoFloorEdgeId, "WALK", dist, dist, true, "WALK");
+            addDirectedEdge(targetNode.id, stairNode.id, `${autoFloorEdgeId}_rev`, "WALK", dist, dist, true, "WALK");
           }
-        });
-
-        if (closest && minDist <= 500) {
-          const targetNode = closest as Node;
-          const autoFloorEdgeId = `e-stair-floorlink-${stairNode.id}-${targetNode.id}`;
-          const dist = Math.max(1, Math.round(minDist / 4));
-          addDirectedEdge(stairNode.id, targetNode.id, autoFloorEdgeId, "WALK", dist, dist, true);
-          addDirectedEdge(targetNode.id, stairNode.id, `${autoFloorEdgeId}_rev`, "WALK", dist, dist, true);
         }
       }
-    }
-  });
+    });
+  }
 
   return { graph, nodeMap };
 }

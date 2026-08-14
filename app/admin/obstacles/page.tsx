@@ -32,7 +32,7 @@ export default function Page() {
       reason: obs.reason || "Hazard / Obstacle",
       mode: isRouteOnly ? "Route-Only Edge" : "Spatial Area",
       radius: isRouteOnly ? "N/A (Blocked Edge)" : `${obs.radius} px`,
-      location: f ? `${b?.shortCode ?? ""} ${f.name}` : "Outdoor Campus",
+      location: f ? `${b?.name ? `${b.name} - ` : ""}${f.name}` : "Outdoor Campus",
       severity: obs.severity ?? "HIGH",
     };
   });

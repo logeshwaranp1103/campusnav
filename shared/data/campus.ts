@@ -23,6 +23,8 @@ export type NodeType =
 
 export type EdgeType = "WALK" | "ROAD" | "STAIRS" | "LIFT" | "RAMP" | "ESCALATOR";
 
+export type PathType = "EV" | "WALK";
+
 export type Node = {
   id: string;
   campusId?: string;
@@ -48,6 +50,7 @@ export type Edge = {
   fromNodeId?: string;
   toNodeId?: string;
   type: EdgeType;
+  pathType?: PathType;
   distance: number;
   bidirectional?: boolean;
   stairGroupId?: string;

@@ -10,14 +10,14 @@ export function HomeHero() {
     <section className="relative overflow-hidden mesh-bg">
       <div aria-hidden className="pointer-events-none absolute inset-0 -z-10 grid-pattern opacity-40" />
 
-      {/* Floating orbs */}
+      {/* Ambient background blur backdrops */}
       <div
         aria-hidden
-        className="pointer-events-none absolute -left-24 top-24 -z-10 h-72 w-72 rounded-full bg-[rgb(var(--primary)/0.3)] blur-3xl animate-float-slow"
+        className="pointer-events-none absolute -left-24 top-24 -z-10 h-72 w-72 rounded-full bg-[rgb(var(--primary)/0.25)] blur-3xl opacity-60"
       />
       <div
         aria-hidden
-        className="pointer-events-none absolute -right-16 bottom-16 -z-10 h-80 w-80 rounded-full bg-[rgb(var(--accent)/0.22)] blur-3xl animate-float"
+        className="pointer-events-none absolute -right-16 bottom-16 -z-10 h-80 w-80 rounded-full bg-[rgb(var(--accent)/0.18)] blur-3xl opacity-60"
       />
 
       <div className="mx-auto flex max-w-5xl flex-col items-center gap-6 px-4 py-24 text-center md:px-6 md:py-36">

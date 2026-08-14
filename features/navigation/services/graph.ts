@@ -25,21 +25,23 @@ export type Route = {
 const WALK_SPEED = 1.3; // m/s
 
 import { validateCampusGraph } from "@/shared/lib/graph-validator";
+import { type TravelMode } from "@/lib/routing/edge-accessibility";
 
 export function shortestPath(
   startId: string,
   endId: string,
-  options?: { isDraftMode?: boolean }
+  options?: { isDraftMode?: boolean; travelMode?: TravelMode }
 ): Route | null {
   if (!startId || !endId) return null;
 
   const isDraft = options?.isDraftMode ?? false;
+  const travelMode = options?.travelMode ?? "WALK";
   const work = campusStore.getWorkingData();
 
   if (isDraft) {
     // Admin Draft Mode: Stay strictly in draft context to display exact error diagnostics
     if (work.nodes.length > 0) {
-      return computeShortestPathForData(work, startId, endId);
+      return computeShortestPathForData(work, startId, endId, travelMode);
     }
     return null;
   }
@@ -47,14 +49,14 @@ export function shortestPath(
   // User Published Mode: Validate graph. If valid, use working data directly
   const healthReport = validateCampusGraph(work);
   if (healthReport.canPublish && work.nodes.length > 0) {
-    const workResult = computeShortestPathForData(work, startId, endId);
+    const workResult = computeShortestPathForData(work, startId, endId, travelMode);
     if (workResult) return workResult;
   }
 
   // Graceful Fallback: Use last published valid snapshot if draft has critical errors
   const pub = campusStore.getPublishedData();
   if (pub.nodes.length > 0) {
-    return computeShortestPathForData(pub, startId, endId);
+    return computeShortestPathForData(pub, startId, endId, travelMode);
   }
 
   return null;
@@ -63,7 +65,8 @@ export function shortestPath(
 function computeShortestPathForData(
   data: ReturnType<typeof campusStore.getWorkingData> | ReturnType<typeof campusStore.getPublishedData>,
   startId: string,
-  endId: string
+  endId: string,
+  travelMode: TravelMode = "WALK"
 ): Route | null {
   if (data.nodes.length === 0) return null;
 
@@ -74,6 +77,7 @@ function computeShortestPathForData(
     obstacles,
     floors: data.floors,
     allowObstaclePenalties: false,
+    travelMode,
   });
 
   // Aggregating helper to collect candidate node IDs for a location query
@@ -198,6 +202,7 @@ function computeShortestPathForData(
       obstacles,
       floors: data.floors,
       allowObstaclePenalties: true,
+      travelMode,
     });
 
     for (const sId of startNodeIds) {

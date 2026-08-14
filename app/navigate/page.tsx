@@ -6,7 +6,7 @@ export const metadata = { title: "Navigate · CampusNav" };
 
 export default function NavigatePage() {
   return (
-    <div className="flex h-screen flex-col overflow-hidden">
+    <div className="flex h-dvh flex-col overflow-hidden">
       <Navbar />
       <Suspense
         fallback={

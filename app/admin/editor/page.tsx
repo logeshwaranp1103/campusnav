@@ -7,7 +7,7 @@ export default function CADEditorPage() {
   return (
     <div className="h-[calc(100vh-1rem)] w-full overflow-hidden">
       <Suspense fallback={<div className="p-8 text-xs text-muted-foreground">Loading CAD Editor...</div>}>
-        <DigitalTwinEditor initialTool="BUILDING" />
+        <DigitalTwinEditor initialTool="SELECT" />
       </Suspense>
     </div>
   );

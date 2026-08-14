@@ -73,18 +73,18 @@ export default function Page() {
           }))}
           columns={[
             {
-              key: "shortCode",
-              label: "Code",
+              key: "name",
+              label: "Building Name",
               render: (b) => (
-                <span
-                  className="inline-flex items-center rounded-md px-2 py-0.5 text-xs font-semibold text-white"
-                  style={{ background: b.color as string }}
-                >
-                  {String(b.shortCode)}
-                </span>
+                <div className="flex items-center gap-2">
+                  <span
+                    className="inline-block h-3 w-3 rounded-full shrink-0"
+                    style={{ backgroundColor: (b.color as string) || "#4f46e5" }}
+                  />
+                  <span className="font-semibold">{String(b.name)}</span>
+                </div>
               ),
             },
-            { key: "name", label: "Name" },
             { key: "floors", label: "Floors" },
             {
               key: "coords",

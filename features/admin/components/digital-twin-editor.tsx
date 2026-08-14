@@ -40,6 +40,8 @@ import {
   Pencil,
   RefreshCw,
   Locate,
+  MapPin,
+  Share2,
 } from "lucide-react";
 
 import { Button } from "@/shared/components/ui/button";
@@ -65,6 +67,7 @@ import {
   type Destination,
   type NodeType,
   type EdgeType,
+  type PathType,
   type Event,
   type Obstacle,
   type Door,
@@ -79,6 +82,7 @@ import {
 } from "@/lib/validation/graph-validator";
 import { buildAdjacencyGraph, getObstructedEdgeIds } from "@/lib/routing/graph";
 import { findShortestPath, findMultiWaypointPath, type PathResult } from "@/lib/routing/dijkstra";
+import { getEdgePathType, getPathTypeLabel, type TravelMode } from "@/lib/routing/edge-accessibility";
 
 type ToolMode =
   | "BUILDING"
@@ -93,8 +97,7 @@ type ToolMode =
   | "SIMULATE"
   | "SELECT"
   | "TEST_ROUTE"
-  | "PLACE_VERTICAL"
-  | "ROAD";
+  | "PLACE_VERTICAL";
 
 function DimensionInput({
   label,
@@ -179,8 +182,45 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
   const [activeTool, setActiveTool] = useState<ToolMode>(initialTool);
   const [activeFloorId, setActiveFloorId] = useState<string>("f-out");
 
-  // Road Tool Chain State
-  const [roadLastNodeId, setRoadLastNodeId] = useState<string | null>(null);
+  // Unsaved Changes Leave Warning Modal State
+  const [isLeaveModalOpen, setIsLeaveModalOpen] = useState(false);
+  const [pendingLeaveUrl, setPendingLeaveUrl] = useState<string | null>(null);
+
+  // Warn on browser unload/refresh if unpublished changes exist
+  useEffect(() => {
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (campusStore.getPendingChanges().length > 0) {
+        e.preventDefault();
+        e.returnValue = "";
+        return "";
+      }
+    };
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+  }, []);
+
+  // Intercept in-app link clicks when unpublished changes exist
+  useEffect(() => {
+    const handleAnchorClick = (e: MouseEvent) => {
+      if (campusStore.getPendingChanges().length === 0) return;
+
+      const target = (e.target as HTMLElement).closest("a");
+      if (!target) return;
+      const href = target.getAttribute("href");
+      if (!href || href.startsWith("#") || href.startsWith("javascript:")) return;
+
+      // If navigating to another page/route
+      if (href !== window.location.pathname && href !== window.location.pathname + window.location.search) {
+        e.preventDefault();
+        e.stopPropagation();
+        setPendingLeaveUrl(href);
+        setIsLeaveModalOpen(true);
+      }
+    };
+
+    document.addEventListener("click", handleAnchorClick, true);
+    return () => document.removeEventListener("click", handleAnchorClick, true);
+  }, []);
 
   // In-Editor Search State
   const [searchQuery, setSearchQuery] = useState("");
@@ -199,8 +239,6 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
   const [isDrawingRoom, setIsDrawingRoom] = useState(false);
   const [roomDragStart, setRoomDragStart] = useState<{ x: number; y: number } | null>(null);
   const [roomDragCurrent, setRoomDragCurrent] = useState<{ x: number; y: number } | null>(null);
-  // Interactive Road Tool State
-  const [roadWidth, setRoadWidth] = useState<number>(30);
 
 
 
@@ -211,6 +249,7 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
   // Mini-Map Navigation State
   const [isAnimatingPan, setIsAnimatingPan] = useState(false);
   const [isMinimapDragging, setIsMinimapDragging] = useState(false);
+  const [isMinimapExpanded, setIsMinimapExpanded] = useState(false);
 
   // Live Route Test State (with multi-stop support)
   const [liveRouteStartId, setLiveRouteStartId] = useState<string | null>(null);
@@ -279,20 +318,6 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
   const [renameInputValue, setRenameInputValue] = useState("");
   const [renameShortCodeValue, setRenameShortCodeValue] = useState("");
 
-  // Smart Floor Duplication Modal State
-  const [isSmartDupOpen, setIsSmartDupOpen] = useState(false);
-  const [dupSourceFloorId, setDupSourceFloorId] = useState("");
-  const [dupOptions, setDupOptions] = useState({
-    copyRooms: true,
-    copyNodes: true,
-    copyEdges: true,
-    copyFacilities: true,
-    copyDestinations: true,
-    copyObstacles: false,
-  });
-
-
-
   // Delete All Confirmation Modal State
   const [isDeleteAllModalOpen, setIsDeleteAllModalOpen] = useState(false);
 
@@ -327,7 +352,7 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
   // Pan & Zoom Viewport State
   const [snapToGrid, setSnapToGrid] = useState(true);
   const [showSoftBounds, setShowSoftBounds] = useState(true);
-  const [zoom, setZoom] = useState(0.625);
+  const [zoom, setZoom] = useState(0.20);
   const [panOffset, setPanOffset] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
   const [isPanning, setIsPanning] = useState(false);
   const [panStart, setPanStart] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
@@ -345,10 +370,6 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
   const [showPendingDrawer, setShowPendingDrawer] = useState(false);
   const [showDiagnosticsPanel, setShowDiagnosticsPanel] = useState(false);
   const [showPublishModal, setShowPublishModal] = useState(false);
-  const [showDraftPromptModal, setShowDraftPromptModal] = useState(false);
-  const [draftMeta, setDraftMeta] = useState<ReturnType<typeof campusStore.getSavedDraftMetadata>>(null);
-  const [showDraftMenuModal, setShowDraftMenuModal] = useState(false);
-  const [checkpointNameInput, setCheckpointNameInput] = useState("");
   const [showHistoryModal, setShowHistoryModal] = useState(false);
 
   // Forms State
@@ -362,6 +383,14 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
   const [buildingCode, setBuildingCode] = useState("");
   const [buildingColor, setBuildingColor] = useState("#4f46e5");
   const [edgeType, setEdgeType] = useState<EdgeType>("WALK");
+  const [pendingEdgeModal, setPendingEdgeModal] = useState<{
+    startNodeId: string;
+    endNodeId: string;
+    dist: number;
+  } | null>(null);
+  const [edgeModalPathType, setEdgeModalPathType] = useState<PathType | "">("");
+  const [edgeModalType, setEdgeModalType] = useState<EdgeType>("WALK");
+  const [simTravelMode, setSimTravelMode] = useState<TravelMode>("WALK");
   const [destName, setDestName] = useState("");
   const [destCategory, setDestCategory] = useState("Academic");
   const [destAliases, setDestAliases] = useState("");
@@ -423,8 +452,9 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
       const cx = (minX + maxX) / 2;
       const cy = (minY + maxY) / 2;
       const rect = canvasRef.current.getBoundingClientRect();
-      const curZoom = zoomRef.current || 0.8;
+      const curZoom = 0.20;
       
+      setZoom(0.20);
       setPanOffset({ 
         x: (rect.width / 2) - cx * curZoom, 
         y: (rect.height / 2) - cy * curZoom 
@@ -580,7 +610,7 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
     }
     const d = new Date(baseDate.getTime() + 8 * 3600 * 1000);
     const pad = (n: number) => String(n).padStart(2, "0");
-    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${d.getHours()}:${pad(d.getMinutes())}`;
   };
 
   const [isAddEventOpen, setIsAddEventOpen] = useState(false);
@@ -871,11 +901,22 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
   }, [activeTool]);
 
   const containerRef = useRef<HTMLDivElement | null>(null);
-  const [isFullscreen, setIsFullscreen] = useState(false);
+  const [isFullscreen, setIsFullscreen] = useState(() => {
+    if (typeof window !== "undefined") {
+      return sessionStorage.getItem("cad_editor_fullscreen_active") === "true";
+    }
+    return false;
+  });
 
   const toggleFullscreen = () => {
     const target = containerRef.current || document.documentElement;
-    if (!document.fullscreenElement && !isFullscreen) {
+    const nextState = !isFullscreen;
+    setIsFullscreen(nextState);
+    if (typeof window !== "undefined") {
+      sessionStorage.setItem("cad_editor_fullscreen_active", String(nextState));
+    }
+
+    if (nextState) {
       if (target.requestFullscreen) {
         target.requestFullscreen().catch(() => {});
       } else if ((target as any).webkitRequestFullscreen) {
@@ -883,7 +924,6 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
       } else if ((target as any).msRequestFullscreen) {
         (target as any).msRequestFullscreen();
       }
-      setIsFullscreen(true);
     } else {
       if (document.exitFullscreen && document.fullscreenElement) {
         document.exitFullscreen().catch(() => {});
@@ -892,7 +932,6 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
       } else if ((document as any).msExitFullscreen) {
         (document as any).msExitFullscreen();
       }
-      setIsFullscreen(false);
     }
   };
 
@@ -918,7 +957,10 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
 
   useEffect(() => {
     const handleFSChange = () => {
-      setIsFullscreen(!!document.fullscreenElement);
+      const isNativeFS = !!document.fullscreenElement;
+      if (!isNativeFS && sessionStorage.getItem("cad_editor_fullscreen_active") !== "true") {
+        setIsFullscreen(false);
+      }
     };
     document.addEventListener("fullscreenchange", handleFSChange);
     document.addEventListener("webkitfullscreenchange", handleFSChange);
@@ -959,18 +1001,6 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
     return () => unsubscribe();
   }, []);
 
-  // Check for unsaved draft / previous edits on initial mount
-  useEffect(() => {
-    if (typeof window !== "undefined") {
-      const meta = campusStore.getSavedDraftMetadata();
-      const hasUnsaved = campusStore.hasUnsavedEdits();
-      if (meta && hasUnsaved) {
-        setDraftMeta(meta);
-        setShowDraftPromptModal(true);
-      }
-    }
-  }, []);
-
   const handleUndo = () => {
     const res = campusStore.undo();
     if (res.success) {
@@ -1009,85 +1039,6 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
     }
   };
 
-  const handleSaveDraft = (customName?: string) => {
-    const result = campusStore.saveDraft(customName);
-    if (result.success) {
-      toast({
-        type: "success",
-        title: "Draft Snapshot Saved",
-        description: `Saved draft as "${result.name}".`,
-      });
-      setAutoSaveStatus("Draft Saved");
-      setDraftMeta(campusStore.getSavedDraftMetadata());
-    } else {
-      toast({
-        type: "error",
-        title: "Draft Save Failed",
-        description: "Could not save draft to local storage.",
-      });
-    }
-  };
-
-  const handleRestoreDraft = () => {
-    const success = campusStore.loadSavedDraft();
-    if (success) {
-      setStoreData(campusStore.getWorkingData());
-      setPendingChanges([...campusStore.getPendingChanges()]);
-      setZoom(1.0);
-      setPanOffset({ x: 0, y: 0 });
-      setShowDraftPromptModal(false);
-      setShowDraftMenuModal(false);
-      const meta = campusStore.getSavedDraftMetadata();
-      const count = meta?.entityCount ?? (storeData.buildings.length + storeData.nodes.length + storeData.edges.length);
-      toast({
-        type: "success",
-        title: "100% Draft & View Restored!",
-        description: `Recovered full state (${count} items) and reset view scale to 100%.`,
-      });
-    } else {
-      toast({
-        type: "error",
-        title: "Draft Restore Failed",
-        description: "Could not load saved draft state.",
-      });
-    }
-  };
-
-  const handleRestoreCheckpoint = (cpId: string, cpName: string) => {
-    const success = campusStore.restoreCheckpoint(cpId);
-    if (success) {
-      setStoreData(campusStore.getWorkingData());
-      setPendingChanges([...campusStore.getPendingChanges()]);
-      setZoom(1.0);
-      setPanOffset({ x: 0, y: 0 });
-      setShowDraftMenuModal(false);
-      toast({
-        type: "success",
-        title: "100% Checkpoint Restored!",
-        description: `Restored checkpoint "${cpName}" with 100% view scale.`,
-      });
-    } else {
-      toast({
-        type: "error",
-        title: "Checkpoint Restore Failed",
-        description: "Could not restore selected checkpoint.",
-      });
-    }
-  };
-
-  const handleDiscardDraft = () => {
-    campusStore.discardDraft();
-    setStoreData(campusStore.getWorkingData());
-    setPendingChanges([...campusStore.getPendingChanges()]);
-    setShowDraftPromptModal(false);
-    setShowDraftMenuModal(false);
-    toast({
-      type: "info",
-      title: "Draft Discarded",
-      description: "Reset workspace to clean published campus graph.",
-    });
-  };
-
   const handleDeleteAll = () => {
     setIsDeleteAllModalOpen(true);
   };
@@ -1100,7 +1051,6 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
     setLiveRouteStops([]);
     setLiveRouteDestId(null);
     setEdgeStartNodeId(null);
-    setRoadLastNodeId(null);
     campusStore.clearAll();
     setIsDeleteAllModalOpen(false);
     toast({
@@ -1115,11 +1065,11 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
     const waypoints = [liveRouteStartId, ...liveRouteStops, liveRouteDestId].filter((id): id is string => Boolean(id));
     if (activeTool === "TEST_ROUTE" && waypoints.length >= 2 && liveRouteStartId && liveRouteDestId) {
       // 1. Primary path (allowing obstacle penalties if obstructed -> red line)
-      const { graph, nodeMap } = buildAdjacencyGraph(storeData.nodes, storeData.edges, { obstacles: storeData.obstacles, allowObstaclePenalties: true });
+      const { graph, nodeMap } = buildAdjacencyGraph(storeData.nodes, storeData.edges, { obstacles: storeData.obstacles, allowObstaclePenalties: true, travelMode: simTravelMode });
       const path = findMultiWaypointPath(graph, nodeMap, waypoints);
 
       // 2. Alternate obstacle-free path (hard-blocks obstacle edges -> green line)
-      const { graph: altGraph, nodeMap: altMap } = buildAdjacencyGraph(storeData.nodes, storeData.edges, { obstacles: storeData.obstacles, allowObstaclePenalties: false });
+      const { graph: altGraph, nodeMap: altMap } = buildAdjacencyGraph(storeData.nodes, storeData.edges, { obstacles: storeData.obstacles, allowObstaclePenalties: false, travelMode: simTravelMode });
       const altPath = findMultiWaypointPath(altGraph, altMap, waypoints);
 
       setSimResult(path);
@@ -1132,13 +1082,13 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
           description: `Shortest: ${Math.round(path.totalDistance)}m ${altPath ? `| Alt Obstacle-Free: ${Math.round(altPath.totalDistance)}m` : ""}`,
         });
       } else {
-        toast({ type: "error", title: "No Route Found", description: "Path is disconnected between waypoints." });
+        toast({ type: "error", title: "No Route Found", description: simTravelMode === "EV" ? "No EV-accessible path connects these points (blocked by walk-only edges)." : "Path is disconnected between waypoints." });
       }
     } else {
       setSimResult(null);
       setAltSimResult(null);
     }
-  }, [activeTool, liveRouteStartId, liveRouteStops, liveRouteDestId, storeData.nodes, storeData.edges, storeData.obstacles, toast]);
+  }, [activeTool, liveRouteStartId, liveRouteStops, liveRouteDestId, simTravelMode, storeData.nodes, storeData.edges, storeData.obstacles, toast]);
 
   // Compute live Graph Validation Report
   const validationReport: GraphValidationReport = useMemo(() => {
@@ -1377,10 +1327,10 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
       toast({ type: "error", title: "Select Route Points", description: "Please select both Start and Destination nodes." });
       return;
     }
-    const { graph, nodeMap } = buildAdjacencyGraph(storeData.nodes, storeData.edges, { obstacles: storeData.obstacles, allowObstaclePenalties: true });
+    const { graph, nodeMap } = buildAdjacencyGraph(storeData.nodes, storeData.edges, { obstacles: storeData.obstacles, allowObstaclePenalties: true, travelMode: simTravelMode });
     const path = findShortestPath(graph, nodeMap, simStartNodeId, simEndNodeId);
 
-    const { graph: altGraph, nodeMap: altMap } = buildAdjacencyGraph(storeData.nodes, storeData.edges, { obstacles: storeData.obstacles, allowObstaclePenalties: false });
+    const { graph: altGraph, nodeMap: altMap } = buildAdjacencyGraph(storeData.nodes, storeData.edges, { obstacles: storeData.obstacles, allowObstaclePenalties: false, travelMode: simTravelMode });
     const altPath = findShortestPath(altGraph, altMap, simStartNodeId, simEndNodeId);
 
     if (path) {
@@ -1389,7 +1339,7 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
       toast({
         type: "success",
         title: "Route Simulated",
-        description: `Found ${path.totalDistance}m path ${altPath ? `| Alt Obstacle-Free: ${altPath.totalDistance}m` : ""}.`,
+        description: `Found ${path.totalDistance}m path (${simTravelMode === "EV" ? "EV Mode" : "Walking"})${altPath ? ` | Alt: ${altPath.totalDistance}m` : ""}.`,
       });
     } else {
       setSimResult(null);
@@ -1397,7 +1347,7 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
       toast({
         type: "error",
         title: "No Path Found",
-        description: "Dijkstra routing engine could not connect the selected nodes.",
+        description: simTravelMode === "EV" ? "No EV-accessible path connects these nodes (requires EV Path edges)." : "Dijkstra routing engine could not connect the selected nodes.",
       });
     }
   };
@@ -1853,47 +1803,6 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
         setEventBuildingId(clickedBuilding.id);
       }
       setIsAddEventOpen(true);
-    } else if (activeTool === "ROAD") {
-      const newNodeId = `n-road-${Date.now().toString(36)}`;
-      const roadNode: Node = {
-        id: newNodeId,
-        type: "OUTDOOR",
-        name: `Road Point ${storeData.nodes.filter((n) => n.name?.startsWith("Road Point")).length + 1}`,
-        floorId: effectiveFloorId,
-        x,
-        y,
-        searchable: true,
-      };
-      campusStore.addNode(roadNode, false);
-
-      if (roadLastNodeId && roadLastNodeId !== newNodeId) {
-        const prevNode = storeData.nodes.find((n) => n.id === roadLastNodeId);
-        const pGps = prevNode ? (prevNode.lat && prevNode.lng ? { lat: prevNode.lat, lng: prevNode.lng } : canvasToGps(prevNode.x, prevNode.y)) : canvasToGps(x, y);
-        const curGps = canvasToGps(x, y);
-        const dist = prevNode ? calculateGeographicDistance(pGps.lat, pGps.lng, curGps.lat, curGps.lng) : 10;
-        campusStore.addEdge({
-          id: `e-road-${roadLastNodeId}-${newNodeId}`,
-          from: roadLastNodeId,
-          to: newNodeId,
-          type: "ROAD",
-          distance: Math.max(1, dist),
-          bidirectional: true,
-        });
-        toast({
-          type: "success",
-          title: "Road Extended",
-          description: `Connected road node to previous point (${x}, ${y}).`,
-        });
-      } else {
-        toast({
-          type: "info",
-          title: "Road Started",
-          description: "First road node placed. Click next location to extend road automatically.",
-        });
-      }
-
-      setRoadLastNodeId(newNodeId);
-      setSelectedElement({ type: "node", id: newNodeId });
     } else if (activeTool === "PLACE_VERTICAL") {
       if (pendingVerticalConnection) {
         const { type, name, buildingId, selectedFloorIds } = pendingVerticalConnection;
@@ -1983,52 +1892,17 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
         const sGps = startN ? (startN.lat && startN.lng ? { lat: startN.lat, lng: startN.lng } : canvasToGps(startN.x, startN.y)) : canvasToGps(0, 0);
         const nGps = node.lat && node.lng ? { lat: node.lat, lng: node.lng } : canvasToGps(node.x, node.y);
         const dist = calculateGeographicDistance(sGps.lat, sGps.lng, nGps.lat, nGps.lng);
-        const result = campusStore.addEdge({
-          id: `e-${edgeStartNodeId}-${node.id}`,
-          from: edgeStartNodeId,
-          to: node.id,
-          type: edgeType,
-          distance: dist > 0 ? dist : 15,
-          bidirectional: true,
-        });
+        const roundedDist = Math.max(1, Math.round(dist > 0 ? dist : 15));
 
-        if (result.success) {
-          toast({
-            type: "success",
-            title: "Edge Connected",
-            description: `Connected ${edgeType} edge (${dist}m).`,
-          });
-        } else {
-          toast({
-            type: "error",
-            title: "Duplicate Edge",
-            description: result.error ?? "Connection already exists.",
-          });
-        }
+        setPendingEdgeModal({
+          startNodeId: edgeStartNodeId,
+          endNodeId: node.id,
+          dist: roundedDist,
+        });
+        setEdgeModalPathType(""); // Required to be selected
+        setEdgeModalType(edgeType);
         setEdgeStartNodeId(null);
       }
-    } else if (activeTool === "ROAD") {
-      if (roadLastNodeId && roadLastNodeId !== node.id) {
-        const prevNode = storeData.nodes.find((n) => n.id === roadLastNodeId);
-        const pGps = prevNode ? (prevNode.lat && prevNode.lng ? { lat: prevNode.lat, lng: prevNode.lng } : canvasToGps(prevNode.x, prevNode.y)) : canvasToGps(node.x, node.y);
-        const nGps = node.lat && node.lng ? { lat: node.lat, lng: node.lng } : canvasToGps(node.x, node.y);
-        const dist = prevNode ? calculateGeographicDistance(pGps.lat, pGps.lng, nGps.lat, nGps.lng) : 10;
-        campusStore.addEdge({
-          id: `e-road-${roadLastNodeId}-${node.id}`,
-          from: roadLastNodeId,
-          to: node.id,
-          type: "ROAD",
-          distance: Math.max(1, dist),
-          bidirectional: true,
-        });
-        toast({
-          type: "success",
-          title: "Road Connected",
-          description: `Connected road to existing node ${node.name ?? node.id}.`,
-        });
-      }
-      setRoadLastNodeId(node.id);
-      setSelectedElement({ type: "node", id: node.id });
     } else {
       setSelectedElement({ type: "node", id: node.id });
     }
@@ -2090,6 +1964,62 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
   const selectedDest = selectedElement?.type === "destination" ? storeData.destinations.find((d) => d.id === selectedElement.id) : null;
   const selectedObstacle = selectedElement?.type === "obstacle" ? storeData.obstacles.find((o) => o.id === selectedElement.id) : null;
 
+  // Dynamic Minimap Auto-Fit Bounding Box (Ensures ALL buildings & nodes are ALWAYS visible)
+  const minimapBounds = useMemo(() => {
+    let minX = 0;
+    let minY = 0;
+    let maxX = 2500;
+    let maxY = 1800;
+
+    const xs: number[] = [];
+    const ys: number[] = [];
+
+    storeData.buildings.forEach((b) => {
+      const cx = b.x ?? 100;
+      const cy = b.y ?? 100;
+      const bw = b.width ?? 180;
+      const bh = b.height ?? 120;
+      xs.push(cx - bw / 2, cx + bw / 2);
+      ys.push(cy - bh / 2, cy + bh / 2);
+    });
+
+    storeData.nodes.forEach((n) => {
+      xs.push(n.x);
+      ys.push(n.y);
+    });
+
+    if (xs.length > 0 && ys.length > 0) {
+      minX = Math.min(...xs) - 250;
+      minY = Math.min(...ys) - 250;
+      maxX = Math.max(...xs) + 250;
+      maxY = Math.max(...ys) + 250;
+    }
+
+    const width = Math.max(1200, maxX - minX);
+    const height = Math.max(900, maxY - minY);
+
+    return { minX, minY, width, height };
+  }, [storeData.buildings, storeData.nodes]);
+
+  const handleMinimapPointerMove = (e: React.MouseEvent<HTMLDivElement>) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    if (rect.width === 0 || rect.height === 0) return;
+    const clickX = Math.max(0, Math.min(rect.width, e.clientX - rect.left));
+    const clickY = Math.max(0, Math.min(rect.height, e.clientY - rect.top));
+
+    const targetWorldX = minimapBounds.minX + (clickX / rect.width) * minimapBounds.width;
+    const targetWorldY = minimapBounds.minY + (clickY / rect.height) * minimapBounds.height;
+
+    const mainCanvas = canvasRef.current;
+    const viewportW = mainCanvas ? mainCanvas.clientWidth : 800;
+    const viewportH = mainCanvas ? mainCanvas.clientHeight : 600;
+
+    setPanOffset({
+      x: viewportW / 2 - targetWorldX * zoom,
+      y: viewportH / 2 - targetWorldY * zoom,
+    });
+  };
+
   return (
     <div
       ref={containerRef}
@@ -2107,12 +2037,6 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
             onClick={() => setActiveTool("SELECT")}
             icon={MousePointer}
             label="Select (V)"
-          />
-          <ToolButton
-            active={activeTool === "ROAD"}
-            onClick={() => setActiveTool("ROAD")}
-            icon={GitFork}
-            label="Road Tool"
           />
           <ToolButton
             active={activeTool === "DOOR"}
@@ -2162,7 +2086,6 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
               setLiveRouteStops([]);
               setLiveRouteDestId(null);
               setEdgeStartNodeId(null);
-              setRoadLastNodeId(null);
               toast({ type: "info", title: "Tools Deselected", description: "Unselected all toolbar tools & elements." });
             }}
             icon={XCircle}
@@ -2186,7 +2109,7 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
                 const bld = storeData.buildings.find((b) => b.id === f.buildingId);
                 return (
                   <option key={f.id} value={f.id}>
-                    {bld?.shortCode ?? ""} {f.name}
+                    {bld?.name ? `${bld.name} - ` : ""}{f.name}
                   </option>
                 );
               })}
@@ -2284,7 +2207,7 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
                     .map((n) => ({
                       id: n.id,
                       type: "node",
-                      label: `📍 ${n.name ?? n.id} (${n.type})`,
+                      label: `${n.name ?? n.id} (${n.type})`,
                       floorId: n.floorId,
                       x: n.x,
                       y: n.y,
@@ -2294,7 +2217,7 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
                     .map((b) => ({
                       id: b.id,
                       type: "building",
-                      label: `🏢 ${b.name} (${b.shortCode})`,
+                      label: `🏢 ${b.name}`,
                       floorId: "f-out",
                       x: b.x ?? 100,
                       y: b.y ?? 100,
@@ -2382,29 +2305,7 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
               <Zap className="h-3.5 w-3.5 text-[rgb(var(--primary))]" />
             </h4>
             <div className="space-y-1.5">
-              {/* Save Draft option FIRST in Quick Actions */}
-              <div className="flex items-center gap-1.5">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => {
-                    handleSaveDraft();
-                    setShowDraftMenuModal(true);
-                  }}
-                  className="flex-1 justify-start text-[11px] font-bold text-amber-600 border-amber-500/40 bg-amber-500/10 hover:bg-amber-500/20 dark:text-amber-400"
-                >
-                  <Sparkles className="mr-1.5 h-3.5 w-3.5 text-amber-500" /> Save Draft
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setShowDraftMenuModal(true)}
-                  className="h-8 px-2 text-[10px] font-semibold border-purple-500/30 text-purple-600 dark:text-purple-400 hover:bg-purple-500/10"
-                  title="Manage Draft Checkpoints & Restore"
-                >
-                  <GitFork className="h-3.5 w-3.5" />
-                </Button>
-              </div>
+
 
               {/* Add Room tool (places room node on canvas, editable in Element Inspector) */}
               <Button
@@ -2448,22 +2349,6 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
                 className="w-full justify-start text-[11px] text-indigo-600 border-indigo-500/30 bg-indigo-500/10 hover:bg-indigo-500/20 dark:text-indigo-400"
               >
                 <Layers className="mr-1.5 h-3.5 w-3.5 text-indigo-500" /> Create Stair / Lift Group
-              </Button>
-
-
-
-
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => {
-                  if (activeFloorId !== "f-out") setDupSourceFloorId(activeFloorId);
-                  else if (storeData.floors.length > 0) setDupSourceFloorId(storeData.floors[0].id);
-                  setIsSmartDupOpen(true);
-                }}
-                className="w-full justify-start text-[11px] text-amber-600 border-amber-500/30 bg-amber-500/10 hover:bg-amber-500/20 dark:text-amber-400"
-              >
-                <Layers className="mr-1.5 h-3.5 w-3.5 text-amber-500" /> Smart Duplicate Floor
               </Button>
 
               <Button
@@ -2573,8 +2458,8 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
           {/* Google Maps Style Floating Indoor Floor Selector Overlay */}
           {activeBuildingForSelector && buildingFloorsForSelector.length > 0 && (
             <div className="absolute right-4 top-4 z-20 flex flex-col items-center gap-1.5 rounded-2xl border bg-[rgb(var(--card))]/90 p-2 shadow-2xl backdrop-blur-md">
-              <span className="text-[10px] font-black uppercase tracking-wider text-[rgb(var(--primary))] px-1">
-                {activeBuildingForSelector.shortCode}
+              <span className="text-[10px] font-bold text-[rgb(var(--primary))] uppercase tracking-wider block text-center truncate max-w-full">
+                {activeBuildingForSelector.name}
               </span>
               <div className="flex flex-col gap-1 max-h-72 overflow-y-auto scrollbar-none">
                 {buildingFloorsForSelector.map((fl) => {
@@ -2669,8 +2554,7 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
                         />
                       )}
 
-                      {/* Small red dot pin at obstacle anchor */}
-                      <circle r={isSelected ? "6" : "4"} fill="#ef4444" stroke="#ffffff" strokeWidth="1.5" />
+                      {/* Red pin removed */}
 
                       {/* Warning Icon & Reason Text Label */}
                       <text
@@ -2713,10 +2597,10 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
                   const bx = centerCanvasX - bw / 2;
                   const by = centerCanvasY - bh / 2;
                   const isSelected = selectedElement?.type === "building" && selectedElement.id === b.id;
-                  const isPlacementTool = activeTool === "NODE" || activeTool === "DESTINATION" || activeTool === "OBSTACLE" || activeTool === "EVENT" || activeTool === "EDGE" || activeTool === "DOOR" || activeTool === "ROAD" || activeTool === "ROOM" || activeTool === "PLACE_VERTICAL";
+                  const isPlacementTool = activeTool === "NODE" || activeTool === "DESTINATION" || activeTool === "OBSTACLE" || activeTool === "EVENT" || activeTool === "EDGE" || activeTool === "DOOR" || activeTool === "ROOM" || activeTool === "PLACE_VERTICAL";
 
                   const buildingEvent = storeData.events.find((ev) => ev.buildingId === b.id && isEventActive(ev, nowMs));
-                  const bName = `${b.name}${b.shortCode ? ` (${b.shortCode})` : ""}`;
+                  const bName = b.name;
                   const badgeWidth = Math.max(145, bName.length * 9.5 + 32);
                   const strokeColor = isSelected ? "#4f46e5" : buildingEvent?.color || b.color || "#4f46e5";
 
@@ -3500,7 +3384,7 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
               {/* Pulsing Blue GPS Marker Dot */}
               <circle r="8" fill="#3b82f6" stroke="#ffffff" strokeWidth="2.5" className="shadow-md" />
               <text x="12" y="4" fontSize="10" fontWeight="bold" fill="#3b82f6" className="drop-shadow-xs">
-                📍 You (Live GPS)
+                You (Live GPS)
               </text>
             </g>
           )}
@@ -3508,9 +3392,9 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
             </g>
           </svg>
 
-          {/* Floating CAD Zoom & Viewport Controls Container */}
-          <div className="absolute bottom-3 left-1/2 -translate-x-1/2 flex flex-col items-center gap-1.5 z-20 pointer-events-auto">
-            <div className="flex items-center gap-2 rounded-xl border bg-[rgb(var(--card))]/95 px-3 py-1.5 shadow-xl backdrop-blur-md text-xs border-[rgb(var(--border))]">
+          {/* Floating CAD Zoom & Viewport Controls Container (Single Line Bar) */}
+          <div className="absolute bottom-3 left-1/2 -translate-x-1/2 z-20 pointer-events-auto max-w-[calc(100%-1.5rem)]">
+            <div className="flex items-center gap-1.5 rounded-xl border bg-[rgb(var(--card))]/95 px-2.5 py-1.5 shadow-xl backdrop-blur-md text-xs border-[rgb(var(--border))] whitespace-nowrap overflow-x-auto scrollbar-none">
               <button
                 onClick={() => {
                   const prev = zoom;
@@ -3526,7 +3410,7 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
                   }
                   setZoom(next);
                 }}
-                className="rounded p-1 text-[rgb(var(--fg))] hover:bg-[rgb(var(--muted))] transition-colors"
+                className="rounded p-1 text-[rgb(var(--fg))] hover:bg-[rgb(var(--muted))] transition-colors shrink-0"
                 title="Zoom Out (-15%)"
               >
                 <ZoomOut className="h-4 w-4 text-[rgb(var(--muted-fg))]" />
@@ -3552,7 +3436,7 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
                   }
                   setZoom(next);
                 }}
-                className="h-1.5 w-24 cursor-pointer accent-[rgb(var(--primary))]"
+                className="h-1.5 w-14 sm:w-20 cursor-pointer accent-[rgb(var(--primary))] shrink-0"
                 title="Zoom Level Slider"
               />
 
@@ -3571,13 +3455,13 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
                   }
                   setZoom(next);
                 }}
-                className="rounded p-1 text-[rgb(var(--fg))] hover:bg-[rgb(var(--muted))] transition-colors"
+                className="rounded p-1 text-[rgb(var(--fg))] hover:bg-[rgb(var(--muted))] transition-colors shrink-0"
                 title="Zoom In (+15%)"
               >
                 <ZoomIn className="h-4 w-4 text-[rgb(var(--primary))]" />
               </button>
 
-              <div className="h-4 w-px bg-[rgb(var(--border))]" />
+              <div className="h-4 w-px bg-[rgb(var(--border-strong))] opacity-80 shrink-0" />
 
               {(() => {
                 const currentPct = Math.round(zoom * 100);
@@ -3600,7 +3484,7 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
                       }
                       setZoom(next);
                     }}
-                    className="rounded border bg-[rgb(var(--bg))] px-2 py-0.5 font-mono text-[11px] font-semibold text-[rgb(var(--fg))] cursor-pointer focus:outline-none"
+                    className="rounded border bg-[rgb(var(--bg))] px-2 py-0.5 font-mono text-[11px] font-semibold text-[rgb(var(--fg))] cursor-pointer focus:outline-none shrink-0"
                   >
                     {zoomOptions.map((pct) => (
                       <option key={pct} value={pct}>
@@ -3611,34 +3495,55 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
                 );
               })()}
 
-              <div className="h-4 w-px bg-[rgb(var(--border))]" />
+              <div className="h-4 w-px bg-[rgb(var(--border-strong))] opacity-80 shrink-0" />
 
               <button
                 onClick={() => {
+                  const mainCanvas = canvasRef.current;
+                  const viewportW = mainCanvas ? mainCanvas.clientWidth : 800;
+                  const viewportH = mainCanvas ? mainCanvas.clientHeight : 600;
+                  const centerX = minimapBounds.minX + minimapBounds.width / 2;
+                  const centerY = minimapBounds.minY + minimapBounds.height / 2;
+                  setIsAnimatingPan(true);
+                  setTimeout(() => setIsAnimatingPan(false), 400);
                   setZoom(1.0);
-                  setPanOffset({ x: 0, y: 0 });
-                  toast({ type: "info", title: "100% Scale View", description: "Zoom set to 100% (1:1 scale)." });
+                  setPanOffset({
+                    x: viewportW / 2 - centerX * 1.0,
+                    y: viewportH / 2 - centerY * 1.0,
+                  });
+                  toast({ type: "info", title: "100% Scale View", description: "Centered viewport on campus buildings at 100% scale." });
                 }}
-                className="flex items-center gap-1 rounded px-2 py-1 text-[11px] font-bold text-blue-600 dark:text-blue-400 bg-blue-500/10 hover:bg-blue-500/20 transition-colors"
-                title="Set View Zoom to 100%"
+                className="flex items-center gap-1 rounded px-2 py-1 text-[11px] font-bold text-blue-600 dark:text-blue-400 bg-blue-500/10 hover:bg-blue-500/20 transition-colors shrink-0 whitespace-nowrap"
+                title="Set View Zoom to 100% & Center Buildings"
               >
                 <span>100%</span>
               </button>
 
               <button
                 onClick={() => {
-                  setZoom(1);
-                  setPanOffset({ x: 0, y: 0 });
-                  toast({ type: "info", title: "View Reset", description: "Zoom set to 100%, position centered." });
+                  const mainCanvas = canvasRef.current;
+                  const viewportW = mainCanvas ? mainCanvas.clientWidth : 800;
+                  const viewportH = mainCanvas ? mainCanvas.clientHeight : 600;
+                  const centerX = minimapBounds.minX + minimapBounds.width / 2;
+                  const centerY = minimapBounds.minY + minimapBounds.height / 2;
+                  const defaultResetZoom = 0.20;
+                  setIsAnimatingPan(true);
+                  setTimeout(() => setIsAnimatingPan(false), 400);
+                  setZoom(defaultResetZoom);
+                  setPanOffset({
+                    x: viewportW / 2 - centerX * defaultResetZoom,
+                    y: viewportH / 2 - centerY * defaultResetZoom,
+                  });
+                  toast({ type: "info", title: "View Reset", description: "Centered viewport on campus buildings at 20% scale." });
                 }}
-                className="flex items-center gap-1 rounded px-2 py-1 text-[11px] font-medium text-[rgb(var(--muted-fg))] hover:bg-[rgb(var(--muted))] hover:text-[rgb(var(--fg))] transition-colors"
-                title="Reset Viewport (100% Center)"
+                className="flex items-center gap-1 rounded px-2 py-1 text-[11px] font-medium text-[rgb(var(--muted-fg))] hover:bg-[rgb(var(--muted))] hover:text-[rgb(var(--fg))] transition-colors shrink-0 whitespace-nowrap"
+                title="Reset Viewport (Center Campus Buildings at 20% Scale)"
               >
                 <RotateCcw className="h-3.5 w-3.5" />
                 <span>Reset</span>
               </button>
 
-              <div className="h-4 w-px bg-[rgb(var(--border))]" />
+              <div className="h-4 w-px bg-[rgb(var(--border-strong))] opacity-80 shrink-0" />
 
               {/* Locate Me Button */}
               <button
@@ -3669,7 +3574,7 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
                     });
                   }
                 }}
-                className={`flex items-center gap-1 rounded px-2 py-1 text-[11px] font-semibold transition-colors cursor-pointer ${
+                className={`flex items-center gap-1 rounded px-2 py-1 text-[11px] font-semibold transition-colors cursor-pointer shrink-0 whitespace-nowrap ${
                   gps.isGpsActive
                     ? "text-emerald-600 dark:text-emerald-400 bg-emerald-500/15 border border-emerald-500/30"
                     : "text-[rgb(var(--muted-fg))] hover:bg-[rgb(var(--muted))] hover:text-[rgb(var(--fg))]"
@@ -3679,14 +3584,14 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
                 <Locate className="h-3.5 w-3.5" />
                 <span>Locate Me</span>
               </button>
-              <GpsStatusIndicator status={gps.status} />
+              <GpsStatusIndicator status={gps.status} className="shrink-0 whitespace-nowrap" />
 
-              <div className="h-4 w-px bg-[rgb(var(--border))]" />
+              <div className="h-4 w-px bg-[rgb(var(--border-strong))] opacity-80 shrink-0" />
 
               {/* GPS Diagnostics Engine Toggle Button */}
               <button
                 onClick={() => setShowDiagnostics((prev) => !prev)}
-                className={`flex items-center gap-1.5 rounded px-2 py-1 text-[11px] font-semibold transition-colors cursor-pointer ${
+                className={`flex items-center gap-1.5 rounded px-2 py-1 text-[11px] font-semibold transition-colors cursor-pointer shrink-0 whitespace-nowrap ${
                   showDiagnostics
                     ? "bg-slate-900 text-emerald-400 border border-emerald-500/50 shadow-md"
                     : "text-[rgb(var(--muted-fg))] hover:bg-[rgb(var(--muted))] hover:text-[rgb(var(--fg))]"
@@ -3696,17 +3601,19 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
                 <Sparkles className="h-3.5 w-3.5 text-emerald-400" />
                 <span>GPS Diagnostics</span>
               </button>
-            </div>
 
-            {/* Delete All Button - Positioned Bottom to Reset Viewport */}
-            <button
-              onClick={handleDeleteAll}
-              className="flex items-center gap-1.5 rounded-xl border border-red-500/30 bg-[rgb(var(--card))]/95 px-3 py-1.5 shadow-xl backdrop-blur-md text-xs font-semibold text-red-500 hover:bg-red-500/10 transition-all border-[rgb(var(--border))]"
-              title="Delete All Elements"
-            >
-              <Trash2 className="h-3.5 w-3.5 text-red-500" />
-              <span>Delete All</span>
-            </button>
+              <div className="h-4 w-px bg-[rgb(var(--border-strong))] opacity-80 shrink-0" />
+
+              {/* Delete All Button */}
+              <button
+                onClick={handleDeleteAll}
+                className="flex items-center gap-1.5 rounded px-2 py-1 text-[11px] font-semibold text-red-500 hover:bg-red-500/10 transition-colors shrink-0 whitespace-nowrap"
+                title="Delete All Elements"
+              >
+                <Trash2 className="h-3.5 w-3.5 text-red-500" />
+                <span>Delete All</span>
+              </button>
+            </div>
           </div>
 
           {/* GPS Diagnostics Panel Overlay */}
@@ -3716,49 +3623,112 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
             </div>
           )}
 
-          {/* Mini-Map Window */}
+          {/* Enhanced Mini-Map Window with Dynamic Campus Auto-Fit */}
           <div
-            className="absolute bottom-3 left-3 h-28 w-40 rounded-lg border bg-[rgb(var(--card))]/90 p-1 shadow-lg backdrop-blur-md overflow-hidden pointer-events-auto cursor-pointer select-none"
-            onMouseDown={(e) => {
-              setIsMinimapDragging(true);
-              const rect = e.currentTarget.getBoundingClientRect();
-              if (rect.width === 0 || rect.height === 0) return;
-              const clickX = Math.max(0, Math.min(rect.width, e.clientX - rect.left));
-              const clickY = Math.max(0, Math.min(rect.height, e.clientY - rect.top));
-              const targetCanvasX = (clickX / rect.width) * 2500;
-              const targetCanvasY = (clickY / rect.height) * 2000;
-              const mainCanvas = canvasRef.current;
-              const viewportW = mainCanvas ? mainCanvas.clientWidth : 800;
-              const viewportH = mainCanvas ? mainCanvas.clientHeight : 600;
-              setIsAnimatingPan(true);
-              setTimeout(() => setIsAnimatingPan(false), 400);
-              setPanOffset({
-                x: viewportW / 2 - targetCanvasX * zoom,
-                y: viewportH / 2 - targetCanvasY * zoom,
-              });
-            }}
-            onMouseMove={(e) => {
-              if (!isMinimapDragging) return;
-              const rect = e.currentTarget.getBoundingClientRect();
-              if (rect.width === 0 || rect.height === 0) return;
-              const clickX = Math.max(0, Math.min(rect.width, e.clientX - rect.left));
-              const clickY = Math.max(0, Math.min(rect.height, e.clientY - rect.top));
-              const targetCanvasX = (clickX / rect.width) * 2500;
-              const targetCanvasY = (clickY / rect.height) * 2000;
-              const mainCanvas = canvasRef.current;
-              const viewportW = mainCanvas ? mainCanvas.clientWidth : 800;
-              const viewportH = mainCanvas ? mainCanvas.clientHeight : 600;
-              setPanOffset({
-                x: viewportW / 2 - targetCanvasX * zoom,
-                y: viewportH / 2 - targetCanvasY * zoom,
-              });
-            }}
-            onMouseUp={() => setIsMinimapDragging(false)}
-            onMouseLeave={() => setIsMinimapDragging(false)}
+            className={cn(
+              "absolute bottom-16 left-3 rounded-xl border bg-[rgb(var(--card))]/95 shadow-2xl backdrop-blur-md overflow-hidden pointer-events-auto select-none transition-all duration-300 z-20 border-[rgb(var(--border))]",
+              isMinimapExpanded ? "w-72 h-52 sm:w-80 sm:h-60" : "w-48 h-32 sm:w-56 sm:h-36"
+            )}
           >
-            <div className="relative h-full w-full bg-[rgb(var(--bg))] rounded overflow-hidden">
-              <svg className="h-full w-full" viewBox="0 0 2500 2000">
+            {/* Header / Title bar with Expand & Fit buttons */}
+            <div className="flex items-center justify-between border-b px-2 py-1 bg-[rgb(var(--card))]/80 text-[10px] font-bold text-[rgb(var(--fg))]">
+              <span className="flex items-center gap-1.5 text-[rgb(var(--primary))] truncate max-w-[150px]">
+                <MapPin className="h-3 w-3 shrink-0" /> Minimap ({storeData.buildings.length} Bldgs)
+              </span>
+              <div className="flex items-center gap-1 shrink-0">
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    const mainCanvas = canvasRef.current;
+                    const viewportW = mainCanvas ? mainCanvas.clientWidth : 800;
+                    const viewportH = mainCanvas ? mainCanvas.clientHeight : 600;
+                    const centerX = minimapBounds.minX + minimapBounds.width / 2;
+                    const centerY = minimapBounds.minY + minimapBounds.height / 2;
+                    const scaleX = viewportW / minimapBounds.width;
+                    const scaleY = viewportH / minimapBounds.height;
+                    const fitZoom = Math.max(0.2, Math.min(1.5, Number((Math.min(scaleX, scaleY) * 0.85).toFixed(2))));
+
+                    setIsAnimatingPan(true);
+                    setTimeout(() => setIsAnimatingPan(false), 400);
+                    setZoom(fitZoom);
+                    setPanOffset({
+                      x: viewportW / 2 - centerX * fitZoom,
+                      y: viewportH / 2 - centerY * fitZoom,
+                    });
+                    toast({ type: "info", title: "Campus Auto-Fitted", description: "Centered and scaled view to fit all buildings." });
+                  }}
+                  className="rounded p-0.5 hover:bg-[rgb(var(--muted))] text-[rgb(var(--muted-fg))] hover:text-[rgb(var(--fg))] transition-colors"
+                  title="Fit All Buildings into View"
+                >
+                  <Compass className="h-3 w-3" />
+                </button>
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setIsMinimapExpanded((prev) => !prev);
+                  }}
+                  className="rounded p-0.5 hover:bg-[rgb(var(--muted))] text-[rgb(var(--muted-fg))] hover:text-[rgb(var(--fg))] transition-colors"
+                  title={isMinimapExpanded ? "Minimize Mini-Map" : "Expand Mini-Map"}
+                >
+                  {isMinimapExpanded ? <Minimize2 className="h-3 w-3" /> : <Maximize2 className="h-3 w-3" />}
+                </button>
+              </div>
+            </div>
+
+            {/* Minimap SVG Canvas */}
+            <div
+              className="relative h-[calc(100%-1.75rem)] w-full bg-[rgb(var(--bg))] cursor-crosshair overflow-hidden"
+              onMouseDown={(e) => {
+                setIsMinimapDragging(true);
+                setIsAnimatingPan(true);
+                setTimeout(() => setIsAnimatingPan(false), 400);
+                handleMinimapPointerMove(e);
+              }}
+              onMouseMove={(e) => {
+                if (isMinimapDragging) handleMinimapPointerMove(e);
+              }}
+              onMouseUp={() => setIsMinimapDragging(false)}
+              onMouseLeave={() => setIsMinimapDragging(false)}
+            >
+              <svg
+                className="h-full w-full"
+                viewBox={`${minimapBounds.minX} ${minimapBounds.minY} ${minimapBounds.width} ${minimapBounds.height}`}
+                preserveAspectRatio="xMidYMid meet"
+              >
+                {/* Background Grid Pattern */}
+                <rect
+                  x={minimapBounds.minX}
+                  y={minimapBounds.minY}
+                  width={minimapBounds.width}
+                  height={minimapBounds.height}
+                  fill="rgb(var(--bg))"
+                />
+
+                {/* Render Edges/Roads in Minimap */}
+                {storeData.edges.map((e) => {
+                  const fromN = storeData.nodes.find((n) => n.id === e.from);
+                  const toN = storeData.nodes.find((n) => n.id === e.to);
+                  if (!fromN || !toN) return null;
+                  return (
+                    <line
+                      key={`mini-edge-${e.id}`}
+                      x1={fromN.x}
+                      y1={fromN.y}
+                      x2={toN.x}
+                      y2={toN.y}
+                      stroke="#94a3b8"
+                      strokeWidth={Math.max(2, minimapBounds.width / 400)}
+                      strokeOpacity="0.4"
+                    />
+                  );
+                })}
+
+                {/* Render ALL Buildings in Minimap with Accurate Footprints & Labels */}
                 {storeData.buildings.map((b) => {
+                  const cx = b.x ?? 100;
+                  const cy = b.y ?? 100;
                   let bw = b.width ?? 180;
                   let bh = b.height ?? 120;
 
@@ -3777,42 +3747,92 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
                     }
                   }
 
+                  const bx = cx - bw / 2;
+                  const by = cy - bh / 2;
+                  const bColor = b.color || "#4f46e5";
+
                   return (
-                    <rect
-                      key={`mini-b-${b.id}`}
-                      x={b.x ?? 0}
-                      y={b.y ?? 0}
-                      width={bw}
-                      height={bh}
-                      fill={b.color ?? "#4f46e5"}
-                      opacity="0.5"
-                    />
+                    <g key={`mini-b-${b.id}`}>
+                      <rect
+                        x={bx}
+                        y={by}
+                        width={bw}
+                        height={bh}
+                        rx={6}
+                        fill={bColor}
+                        fillOpacity="0.55"
+                        stroke={bColor}
+                        strokeWidth={Math.max(2, minimapBounds.width / 350)}
+                      />
+                      <text
+                        x={cx}
+                        y={cy + 4}
+                        textAnchor="middle"
+                        fill="#ffffff"
+                        fontSize={Math.max(14, minimapBounds.width / 55)}
+                        fontWeight="bold"
+                        className="pointer-events-none drop-shadow-sm"
+                      >
+                        {b.name}
+                      </text>
+                    </g>
                   );
                 })}
-                <rect
-                  x={-panOffset.x / zoom}
-                  y={-panOffset.y / zoom}
-                  width={600 / zoom}
-                  height={400 / zoom}
-                  fill="none"
-                  stroke="#4f46e5"
-                  strokeWidth="20"
-                />
+
+                {/* Render Nodes in Minimap */}
+                {storeData.nodes.map((n) => (
+                  <circle
+                    key={`mini-node-${n.id}`}
+                    cx={n.x}
+                    cy={n.y}
+                    r={Math.max(4, minimapBounds.width / 250)}
+                    fill={n.type === "BUILDING_ENTRANCE" || n.type === "ENTRANCE" ? "#10b981" : "#64748b"}
+                    stroke="#ffffff"
+                    strokeWidth="1"
+                  />
+                ))}
+
+                {/* Active Viewport Lens Indicator Box */}
+                {(() => {
+                  const mainCanvas = canvasRef.current;
+                  const viewportW = mainCanvas ? mainCanvas.clientWidth : 800;
+                  const viewportH = mainCanvas ? mainCanvas.clientHeight : 600;
+                  const viewWorldX = -panOffset.x / zoom;
+                  const viewWorldY = -panOffset.y / zoom;
+                  const viewWorldW = viewportW / zoom;
+                  const viewWorldH = viewportH / zoom;
+                  const strokeW = Math.max(3, minimapBounds.width / 150);
+
+                  return (
+                    <rect
+                      x={viewWorldX}
+                      y={viewWorldY}
+                      width={viewWorldW}
+                      height={viewWorldH}
+                      fill="rgba(79, 70, 229, 0.18)"
+                      stroke="#4f46e5"
+                      strokeWidth={strokeW}
+                      rx={6}
+                      className="transition-all"
+                    />
+                  );
+                })()}
               </svg>
             </div>
           </div>
         </div>
 
         {/* Right Inspector Panel */}
-        <div className="w-80 border-l bg-[rgb(var(--card))]/80 p-4 overflow-y-auto space-y-4 shrink-0 backdrop-blur-md">
-          <div className="flex items-center justify-between border-b pb-2">
-            <h3 className="font-semibold text-sm text-[rgb(var(--fg))]">Element Inspector</h3>
-            {selectedElement && (
-              <Button size="sm" variant="ghost" onClick={() => setSelectedElement(null)}>
-                <X className="h-3.5 w-3.5" />
-              </Button>
-            )}
-          </div>
+        {Boolean(selectedElement || selectedEntityIds.size > 0 || ["ROOM", "EVENT"].includes(activeTool)) && (
+          <div className="w-80 border-l bg-[rgb(var(--card))]/80 p-4 overflow-y-auto space-y-4 shrink-0 backdrop-blur-md">
+            <div className="flex items-center justify-between border-b pb-2">
+              <h3 className="font-semibold text-sm text-[rgb(var(--fg))]">Element Inspector</h3>
+              {selectedElement && (
+                <Button size="sm" variant="ghost" onClick={() => setSelectedElement(null)}>
+                  <X className="h-3.5 w-3.5" />
+                </Button>
+              )}
+            </div>
 
           {/* Multi-Selection Bulk Editing Panel */}
           {selectedEntityIds.size > 0 && (
@@ -3916,32 +3936,50 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
             </div>
           )}
 
-          {activeTool === "ROAD" && (
-            <div className="rounded-lg border p-3 bg-[rgb(var(--card))] space-y-3 text-xs">
-              <Badge className="bg-purple-600 text-white">Road Tool</Badge>
-              <div>
-                <label className="mb-1 block font-semibold">Road Width ({roadWidth}px)</label>
-                <input
-                  type="range"
-                  min="12"
-                  max="60"
-                  value={roadWidth}
-                  onChange={(e) => setRoadWidth(Number(e.target.value))}
-                  className="w-full accent-purple-600"
-                />
-              </div>
-              <p className="text-[11px] text-[rgb(var(--muted-fg))]">Click canvas to define road polyline path centerlines.</p>
-            </div>
-          )}
-
           {activeTool === "TEST_ROUTE" && (
             <div className="rounded-lg border p-3 bg-[rgb(var(--card))] space-y-3 text-xs">
-              <Badge className="bg-emerald-600 text-white flex items-center gap-1">
-                <Play className="h-3 w-3" /> Live Route Test
-              </Badge>
+              <div className="flex items-center justify-between">
+                <Badge className="bg-emerald-600 text-white flex items-center gap-1">
+                  <Play className="h-3 w-3" /> Live Route Test
+                </Badge>
+                <Badge variant={simTravelMode === "EV" ? "success" : "default"}>
+                  {simTravelMode === "EV" ? "⚡ EV Mode" : "🚶 Walking"}
+                </Badge>
+              </div>
               <p className="text-[11px] text-[rgb(var(--muted-fg))]">
                 Click nodes on map or select locations below to test multi-stop campus routes.
               </p>
+
+              {/* Travel Mode Selector */}
+              <div>
+                <label className="font-semibold text-[rgb(var(--fg))] block mb-1">Travel Mode</label>
+                <div className="grid grid-cols-2 gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => setSimTravelMode("WALK")}
+                    className={cn(
+                      "flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-lg border text-xs font-bold transition-all",
+                      simTravelMode === "WALK"
+                        ? "border-blue-500 bg-blue-500/15 text-blue-700 dark:text-blue-300 ring-1 ring-blue-500 shadow-xs"
+                        : "border-[rgb(var(--border))] text-[rgb(var(--muted-fg))] hover:bg-[rgb(var(--muted)/0.5)]"
+                    )}
+                  >
+                    🚶 Walking
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setSimTravelMode("EV")}
+                    className={cn(
+                      "flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-lg border text-xs font-bold transition-all",
+                      simTravelMode === "EV"
+                        ? "border-emerald-500 bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 ring-1 ring-emerald-500 shadow-xs"
+                        : "border-[rgb(var(--border))] text-[rgb(var(--muted-fg))] hover:bg-[rgb(var(--muted)/0.5)]"
+                    )}
+                  >
+                    ⚡ EV Vehicle
+                  </button>
+                </div>
+              </div>
 
               {/* Start Location */}
               <div>
@@ -3966,7 +4004,7 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
                   <option value="">-- Select Start Node / Room --</option>
                   {allowedNodes.map((n) => (
                     <option key={n.id} value={n.id}>
-                      {n.name ? `📍 ${n.name}` : `Node ${n.id}`}
+                      {n.name ? n.name : `Node ${n.id}`}
                     </option>
                   ))}
                 </select>
@@ -3997,7 +4035,7 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
                     <option value="">-- Select Intermediate Stop --</option>
                     {allowedNodes.map((n) => (
                       <option key={n.id} value={n.id}>
-                        {n.name ? `📍 ${n.name}` : `Node ${n.id}`}
+                        {n.name ? n.name : `Node ${n.id}`}
                       </option>
                     ))}
                   </select>
@@ -4036,7 +4074,7 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
                   <option value="">-- Select Destination Node / Room --</option>
                   {allowedNodes.map((n) => (
                     <option key={n.id} value={n.id}>
-                      {n.name ? `📍 ${n.name}` : `Node ${n.id}`}
+                      {n.name ? n.name : `Node ${n.id}`}
                     </option>
                   ))}
                 </select>
@@ -4163,7 +4201,7 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
                   <option value="outdoor">🌳 Outdoor Campus (No Building)</option>
                   {storeData.buildings.map((b) => (
                     <option key={b.id} value={b.id}>
-                      🏢 {b.name} ({b.shortCode})
+                      🏢 {b.name}
                     </option>
                   ))}
                 </select>
@@ -4324,12 +4362,7 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
             );
           })()}
 
-          {!selectedElement && selectedEntityIds.size === 0 && activeTool !== "EVENT" && activeTool !== "ROOM" && activeTool !== "DOOR" && activeTool !== "NODE" && activeTool !== "ROAD" && activeTool !== "TEST_ROUTE" && (
-            <div className="py-8 text-center text-xs text-[rgb(var(--muted-fg))] space-y-2">
-              <Compass className="mx-auto h-8 w-8 text-[rgb(var(--muted-fg))]/50" />
-              <p>Click any room, node, door, stair, or lift on the canvas to inspect properties.</p>
-            </div>
-          )}
+
 
           {/* Event Inspector Form */}
           {(activeTool === "EVENT" || selectedElement?.type === "event") && (
@@ -4357,7 +4390,7 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
                   <option value="">-- Campus Wide (No Building) --</option>
                   {storeData.buildings.map((b) => (
                     <option key={b.id} value={b.id}>
-                      {b.name} ({b.shortCode})
+                      {b.name}
                     </option>
                   ))}
                 </select>
@@ -4437,13 +4470,6 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
                 <Input
                   value={selectedBuilding.name}
                   onChange={(e) => campusStore.updateBuilding(selectedBuilding.id, { name: e.target.value })}
-                />
-              </div>
-              <div>
-                <label className="mb-1 block font-medium">Short Code</label>
-                <Input
-                  value={selectedBuilding.shortCode}
-                  onChange={(e) => campusStore.updateBuilding(selectedBuilding.id, { shortCode: e.target.value })}
                 />
               </div>
 
@@ -4768,7 +4794,7 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
                   }}
                   className="w-full text-amber-600 border-amber-500/30 hover:bg-amber-500/10"
                 >
-                  <Plus className="mr-1.5 h-3.5 w-3.5" /> Add Event for {selectedBuilding.shortCode || "Building"}
+                  <Plus className="mr-1.5 h-3.5 w-3.5" /> Add Event for {selectedBuilding.name || "Building"}
                 </Button>
               </div>
 
@@ -4842,7 +4868,7 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
                     <option value="outdoor">🌳 Outdoor Campus (No Building)</option>
                     {storeData.buildings.map((b) => (
                       <option key={b.id} value={b.id}>
-                        🏢 {b.name} ({b.shortCode})
+                        🏢 {b.name}
                       </option>
                     ))}
                   </select>
@@ -5045,7 +5071,7 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
                       <optgroup key={bld.id} label={`🏢 ${bld.name}`}>
                         {bFloors.map((f) => (
                           <option key={f.id} value={f.id}>
-                            {bld.shortCode ? `[${bld.shortCode}] ` : ""}{f.name} (Level {f.ordinal})
+                            {bld.name ? `${bld.name} - ` : ""}{f.name} (Level {f.ordinal})
                           </option>
                         ))}
                       </optgroup>
@@ -5163,7 +5189,12 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
           {/* Edge Inspector */}
           {selectedEdge && (
             <div className="space-y-3 text-xs">
-              <Badge variant="primary">{selectedEdge.type} Edge</Badge>
+              <div className="flex items-center gap-1.5 flex-wrap">
+                <Badge variant="primary">{selectedEdge.type} Edge</Badge>
+                <Badge variant={getEdgePathType(selectedEdge) === "EV" ? "success" : "default"}>
+                  {getEdgePathType(selectedEdge) === "EV" ? "⚡ EV Path" : "🚶 Only Walk"}
+                </Badge>
+              </div>
 
               <div>
                 <label className="mb-1 block font-medium">Edge Type</label>
@@ -5173,10 +5204,22 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
                   className="w-full rounded-md border bg-[rgb(var(--bg))] p-2 text-xs text-[rgb(var(--fg))]"
                 >
                   <option value="WALK">WALK (Path / Corridor)</option>
-                  <option value="ROAD">ROAD (Outdoor Street)</option>
+                  <option value="ROAD">ROAD (Outdoor Street / Road)</option>
                   <option value="STAIRS">STAIRS (Vertical Flow)</option>
                   <option value="LIFT">LIFT (Elevator)</option>
                   <option value="RAMP">RAMP (Accessible Slope)</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="mb-1 block font-medium">Path Type (Vehicle / Walking Access)</label>
+                <select
+                  value={getEdgePathType(selectedEdge)}
+                  onChange={(e) => campusStore.updateEdge(selectedEdge.id, { pathType: e.target.value as PathType })}
+                  className="w-full rounded-md border bg-[rgb(var(--bg))] p-2 text-xs text-[rgb(var(--fg))]"
+                >
+                  <option value="EV">⚡ EV Path (Electric vehicle + walking)</option>
+                  <option value="WALK">🚶 Only Walk Path (Walking only — EV prohibited)</option>
                 </select>
               </div>
 
@@ -5216,18 +5259,8 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
             </div>
           )}
 
-          {!selectedElement && !selectedBuilding && !selectedNode && !selectedObstacle && !selectedDest && !selectedEdge && selectedEntityIds.size === 0 && (
-            <div className="flex flex-col items-center justify-center py-20 px-4 text-center my-auto min-h-[300px]">
-              <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-[rgb(var(--primary)/0.1)] text-[rgb(var(--primary))] mb-3 shadow-inner">
-                <Compass className="h-6 w-6" />
-              </div>
-              <h4 className="text-xs font-bold text-[rgb(var(--fg))] mb-1">Element Inspector</h4>
-              <p className="text-[11px] text-[rgb(var(--muted-fg))] leading-relaxed max-w-[200px]">
-                Click any room, node, door, corridor, stair, or lift on the canvas to inspect properties.
-              </p>
-            </div>
-          )}
-        </div>
+          </div>
+        )}
       </div>
 
 
@@ -5236,9 +5269,37 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
 
       {activeTool === "SIMULATE" && (
         <div className="border-t bg-[rgb(var(--card))] p-4 space-y-3 text-xs">
-          <h4 className="font-semibold text-sm flex items-center gap-2">
-            <Navigation className="h-4 w-4 text-emerald-500" /> Interactive Dijkstra Route Simulator
-          </h4>
+          <div className="flex items-center justify-between">
+            <h4 className="font-semibold text-sm flex items-center gap-2">
+              <Navigation className="h-4 w-4 text-emerald-500" /> Interactive Dijkstra Route Simulator
+            </h4>
+            <div className="flex items-center gap-1 bg-[rgb(var(--muted)/0.5)] p-0.5 rounded-lg border">
+              <button
+                type="button"
+                onClick={() => setSimTravelMode("WALK")}
+                className={cn(
+                  "px-2.5 py-1 rounded-md text-[11px] font-bold transition-all",
+                  simTravelMode === "WALK"
+                    ? "bg-[rgb(var(--card))] text-[rgb(var(--fg))] shadow-xs"
+                    : "text-[rgb(var(--muted-fg))] hover:text-[rgb(var(--fg))]"
+                )}
+              >
+                🚶 Walking
+              </button>
+              <button
+                type="button"
+                onClick={() => setSimTravelMode("EV")}
+                className={cn(
+                  "px-2.5 py-1 rounded-md text-[11px] font-bold transition-all",
+                  simTravelMode === "EV"
+                    ? "bg-emerald-600 text-white shadow-xs"
+                    : "text-[rgb(var(--muted-fg))] hover:text-[rgb(var(--fg))]"
+                )}
+              >
+                ⚡ EV Vehicle
+              </button>
+            </div>
+          </div>
           <div className="grid grid-cols-3 gap-3">
             <div>
               <label className="mb-1 block font-medium">Start Node</label>
@@ -5455,7 +5516,7 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
                     <option value="">-- Choose Building --</option>
                     {storeData.buildings.map((b) => (
                       <option key={b.id} value={b.id}>
-                        {b.name} ({b.shortCode})
+                        {b.name}
                       </option>
                     ))}
                   </select>
@@ -5528,398 +5589,9 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
         )}
       </AnimatePresence>
 
-      {/* Smart Floor Duplication Modal */}
-      <AnimatePresence>
-        {isSmartDupOpen && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4"
-          >
-            <motion.div
-              initial={{ scale: 0.95, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.95, opacity: 0 }}
-              className="card w-full max-w-md p-6 shadow-2xl border bg-[rgb(var(--card))]"
-            >
-              <div className="flex items-center justify-between mb-4">
-                <div className="flex items-center gap-2">
-                  <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-amber-500/10 text-amber-500">
-                    <Layers className="h-4 w-4" />
-                  </div>
-                  <h3 className="text-base font-bold">Smart Floor Duplication</h3>
-                </div>
-                <button onClick={() => setIsSmartDupOpen(false)} className="rounded p-1 hover:bg-[rgb(var(--muted))]">
-                  <X className="h-4 w-4" />
-                </button>
-              </div>
-
-              <div className="space-y-4 text-xs">
-                <div>
-                  <label className="mb-1 block font-semibold text-[rgb(var(--fg))]">Source Floor *</label>
-                  <select
-                    value={dupSourceFloorId}
-                    onChange={(e) => setDupSourceFloorId(e.target.value)}
-                    className="w-full rounded-md border bg-[rgb(var(--bg))] p-2 text-xs text-[rgb(var(--fg))]"
-                  >
-                    {storeData.floors.map((f) => {
-                      const bld = storeData.buildings.find((b) => b.id === f.buildingId);
-                      return (
-                        <option key={f.id} value={f.id}>
-                          {bld?.name ?? "Building"} - {f.name} (Level {f.ordinal})
-                        </option>
-                      );
-                    })}
-                  </select>
-                </div>
-
-                <div>
-                  <label className="mb-2 block font-semibold text-[rgb(var(--fg))]">Select Elements to Copy</label>
-                  <div className="space-y-2 rounded-lg border p-3 bg-[rgb(var(--muted))]/20">
-                    {[
-                      { key: "copyRooms", label: "Rooms & Destinations" },
-                      { key: "copyNodes", label: "Navigation Nodes" },
-                      { key: "copyEdges", label: "Floor Edges" },
-                      { key: "copyFacilities", label: "Facilities & Washrooms" },
-                      { key: "copyDestinations", label: "Destinations & Labels" },
-                      { key: "copyObstacles", label: "Obstacles & Closed Paths" },
-                    ].map((opt) => (
-                      <label key={opt.key} className="flex items-center gap-2 cursor-pointer">
-                        <input
-                          type="checkbox"
-                          checked={(dupOptions as any)[opt.key]}
-                          onChange={(e) =>
-                            setDupOptions((prev) => ({ ...prev, [opt.key]: e.target.checked }))
-                          }
-                          className="rounded text-amber-600 focus:ring-amber-500"
-                        />
-                        <span>{opt.label}</span>
-                      </label>
-                    ))}
-                  </div>
-                </div>
-              </div>
-
-              <div className="flex items-center justify-end gap-2 mt-6">
-                <Button variant="outline" size="sm" onClick={() => setIsSmartDupOpen(false)}>
-                  Cancel
-                </Button>
-                <Button
-                  size="sm"
-                  onClick={() => {
-                    if (!dupSourceFloorId) return;
-                    const createdFloor = campusStore.duplicateFloor(dupSourceFloorId, dupOptions);
-                    if (createdFloor) {
-                      setActiveFloorId(createdFloor.id);
-                      setIsSmartDupOpen(false);
-                      toast({
-                        type: "success",
-                        title: "Floor Duplicated",
-                        description: `Created "${createdFloor.name}" and switched editor.`,
-                      });
-                    }
-                  }}
-                  className="bg-amber-600 text-white hover:bg-amber-700"
-                >
-                  <Plus className="mr-1 h-3.5 w-3.5" /> Duplicate Floor
-                </Button>
-              </div>
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
 
 
 
-      {/* Draft Retain / Prompt Modal on Load */}
-      <AnimatePresence>
-        {showDraftPromptModal && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4">
-            <motion.div
-              initial={{ opacity: 0, scale: 0.95 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.95 }}
-              className="w-full max-w-lg rounded-2xl border border-[rgb(var(--border))] bg-[rgb(var(--card))] p-6 shadow-2xl space-y-4 text-xs"
-            >
-              <div className="flex items-center justify-between border-b border-[rgb(var(--border))] pb-3">
-                <div className="flex items-center gap-3">
-                  <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-amber-500/10 text-amber-600 dark:text-amber-400">
-                    <Sparkles className="h-5 w-5" />
-                  </div>
-                  <div>
-                    <h3 className="text-base font-bold text-[rgb(var(--fg))]">Unsaved Draft Detected</h3>
-                    <p className="text-xs text-[rgb(var(--muted-fg))]">Previous editing session snapshot ready to restore</p>
-                  </div>
-                </div>
-                <button
-                  onClick={() => setShowDraftPromptModal(false)}
-                  className="rounded-lg p-1 text-[rgb(var(--muted-fg))] hover:bg-[rgb(var(--muted))]"
-                >
-                  <X className="h-4 w-4" />
-                </button>
-              </div>
-
-              <div className="space-y-3 text-xs text-[rgb(var(--muted-fg))]">
-                <p>
-                  You have a saved draft from a previous session. Click <strong className="text-[rgb(var(--fg))]">Restore 100% Draft</strong> to reload all your previous edits (buildings, floors, nodes, edges, doors, elevators, corridors, etc.) into the workspace with 100% view scale.
-                </p>
-
-                {draftMeta && (
-                  <div className="rounded-xl border border-[rgb(var(--border))] bg-[rgb(var(--bg))] p-3.5 space-y-2 text-xs">
-                    <div className="flex justify-between items-center">
-                      <span className="text-[rgb(var(--muted-fg))] font-medium">Session Name:</span>
-                      <span className="font-bold text-[rgb(var(--fg))]">{draftMeta.name}</span>
-                    </div>
-                    <div className="flex justify-between items-center">
-                      <span className="text-[rgb(var(--muted-fg))] font-medium">Saved Timestamp:</span>
-                      <span className="font-semibold text-[rgb(var(--fg))]">
-                        {new Date(draftMeta.timestamp).toLocaleString([], { dateStyle: "medium", timeStyle: "short" })}
-                      </span>
-                    </div>
-
-                    {draftMeta.breakdown && (
-                      <div className="pt-2 border-t border-[rgb(var(--border))]/50">
-                        <div className="mb-1.5 font-semibold text-[11px] text-[rgb(var(--fg))] flex items-center justify-between">
-                          <span>100% State Recovery Breakdown:</span>
-                          <span className="text-amber-600 dark:text-amber-400 font-bold">{draftMeta.entityCount} Total Items</span>
-                        </div>
-                        <div className="grid grid-cols-3 gap-1.5 text-[10px]">
-                          <div className="rounded border bg-[rgb(var(--card))] px-2 py-1 flex justify-between">
-                            <span className="text-[rgb(var(--muted-fg))]">Buildings:</span>
-                            <span className="font-bold text-[rgb(var(--fg))]">{draftMeta.breakdown.buildings}</span>
-                          </div>
-                          <div className="rounded border bg-[rgb(var(--card))] px-2 py-1 flex justify-between">
-                            <span className="text-[rgb(var(--muted-fg))]">Floors:</span>
-                            <span className="font-bold text-[rgb(var(--fg))]">{draftMeta.breakdown.floors}</span>
-                          </div>
-                          <div className="rounded border bg-[rgb(var(--card))] px-2 py-1 flex justify-between">
-                            <span className="text-[rgb(var(--muted-fg))]">Nodes:</span>
-                            <span className="font-bold text-[rgb(var(--fg))]">{draftMeta.breakdown.nodes}</span>
-                          </div>
-                          <div className="rounded border bg-[rgb(var(--card))] px-2 py-1 flex justify-between">
-                            <span className="text-[rgb(var(--muted-fg))]">Edges:</span>
-                            <span className="font-bold text-[rgb(var(--fg))]">{draftMeta.breakdown.edges}</span>
-                          </div>
-                          <div className="rounded border bg-[rgb(var(--card))] px-2 py-1 flex justify-between">
-                            <span className="text-[rgb(var(--muted-fg))]">Doors:</span>
-                            <span className="font-bold text-[rgb(var(--fg))]">{draftMeta.breakdown.doors}</span>
-                          </div>
-                          <div className="rounded border bg-[rgb(var(--card))] px-2 py-1 flex justify-between">
-                            <span className="text-[rgb(var(--muted-fg))]">Elevators:</span>
-                            <span className="font-bold text-[rgb(var(--fg))]">{draftMeta.breakdown.lifts}</span>
-                          </div>
-
-                          <div className="rounded border bg-[rgb(var(--card))] px-2 py-1 flex justify-between">
-                            <span className="text-[rgb(var(--muted-fg))]">Rooms:</span>
-                            <span className="font-bold text-[rgb(var(--fg))]">{draftMeta.breakdown.destinations}</span>
-                          </div>
-                          <div className="rounded border bg-[rgb(var(--card))] px-2 py-1 flex justify-between">
-                            <span className="text-[rgb(var(--muted-fg))]">Obstacles:</span>
-                            <span className="font-bold text-[rgb(var(--fg))]">{draftMeta.breakdown.obstacles}</span>
-                          </div>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
-
-              <div className="flex flex-col gap-2 pt-2 sm:flex-row">
-                <Button
-                  onClick={handleRestoreDraft}
-                  className="flex-1 bg-amber-600 hover:bg-amber-700 text-white font-bold shadow-md"
-                >
-                  <RotateCcw className="mr-1.5 h-4 w-4" /> Restore 100% Draft & View
-                </Button>
-                <Button
-                  variant="outline"
-                  onClick={handleDiscardDraft}
-                  className="border-red-500/30 text-red-600 dark:text-red-400 hover:bg-red-500/10"
-                >
-                  <Trash2 className="mr-1.5 h-4 w-4" /> Discard Draft
-                </Button>
-              </div>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
-
-      {/* Manage Draft Options & Checkpoints Modal */}
-      <AnimatePresence>
-        {showDraftMenuModal && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4">
-            <motion.div
-              initial={{ opacity: 0, scale: 0.95 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.95 }}
-              className="w-full max-w-lg rounded-2xl border border-[rgb(var(--border))] bg-[rgb(var(--card))] p-6 shadow-2xl space-y-4 text-xs max-h-[90vh] overflow-y-auto"
-            >
-              <div className="flex items-center justify-between border-b border-[rgb(var(--border))] pb-3">
-                <div className="flex items-center gap-3">
-                  <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-purple-500/10 text-purple-600 dark:text-purple-400">
-                    <GitFork className="h-5 w-5" />
-                  </div>
-                  <div>
-                    <h3 className="text-base font-bold text-[rgb(var(--fg))]">Manage Editor Draft & Checkpoints</h3>
-                    <p className="text-xs text-[rgb(var(--muted-fg))]">Save snapshot, restore previous edits (100%), or view checkpoints</p>
-                  </div>
-                </div>
-                <button
-                  onClick={() => setShowDraftMenuModal(false)}
-                  className="rounded-lg p-1 text-[rgb(var(--muted-fg))] hover:bg-[rgb(var(--muted))]"
-                >
-                  <X className="h-4 w-4" />
-                </button>
-              </div>
-
-              <div className="space-y-4">
-                {/* Save Draft Snapshot Section */}
-                <div className="rounded-xl border border-[rgb(var(--border))] bg-[rgb(var(--bg))] p-3.5 space-y-2.5">
-                  <h4 className="font-bold text-xs text-[rgb(var(--fg))] flex items-center justify-between">
-                    <span className="flex items-center gap-1.5"><Sparkles className="h-4 w-4 text-amber-500" /> Save & Overwrite Draft</span>
-                    {draftMeta && (
-                      <span className="text-[10px] text-[rgb(var(--muted-fg))] font-medium">Current: {draftMeta.name}</span>
-                    )}
-                  </h4>
-                  <div className="flex flex-col gap-2">
-                    <Button
-                      size="sm"
-                      onClick={() => {
-                        handleSaveDraft();
-                        setShowDraftMenuModal(false);
-                      }}
-                      className="w-full h-8 bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs"
-                    >
-                      <Sparkles className="mr-1.5 h-3.5 w-3.5" /> Save / Overwrite Active Draft
-                    </Button>
-                    <div className="flex items-center gap-2 pt-1">
-                      <Input
-                        placeholder="Or create named checkpoint (e.g. Floor 2 Done)..."
-                        value={checkpointNameInput}
-                        onChange={(e) => setCheckpointNameInput(e.target.value)}
-                        className="h-8 text-xs flex-1"
-                      />
-                      <Button
-                        size="sm"
-                        onClick={() => {
-                          const title = checkpointNameInput.trim() || `Draft Checkpoint ${Date.now().toString(36)}`;
-                          campusStore.createCheckpoint(title);
-                          handleSaveDraft(title);
-                          setCheckpointNameInput("");
-                          setShowDraftMenuModal(false);
-                          toast({ type: "success", title: "Checkpoint Created", description: `Saved snapshot "${title}".` });
-                        }}
-                        className="h-8 bg-purple-600 hover:bg-purple-700 text-white font-semibold text-xs px-3 shrink-0"
-                      >
-                        <Plus className="mr-1 h-3.5 w-3.5" /> New Checkpoint
-                      </Button>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Restore Latest Draft Button */}
-                <Button
-                  onClick={handleRestoreDraft}
-                  className="w-full justify-center h-9 bg-blue-600 hover:bg-blue-700 text-white font-bold shadow-md text-xs"
-                >
-                  <RotateCcw className="mr-2 h-4 w-4" /> Restore Latest Draft (100% Data & View)
-                </Button>
-
-                {/* Saved Version Checkpoints List */}
-                <div className="space-y-2">
-                  <h4 className="font-bold text-xs text-[rgb(var(--fg))] flex items-center justify-between">
-                    <span>Saved Draft Checkpoints</span>
-                    <Badge variant="primary" className="text-[10px]">
-                      {campusStore.getCheckpoints().length} Checkpoints
-                    </Badge>
-                  </h4>
-
-                  <div className="max-h-48 overflow-y-auto space-y-2 rounded-xl border border-[rgb(var(--border))] bg-[rgb(var(--bg))] p-2.5">
-                    {campusStore.getCheckpoints().length === 0 ? (
-                      <p className="text-[11px] text-[rgb(var(--muted-fg))] italic text-center py-3">
-                        No saved checkpoints yet. Enter a title above and click Save.
-                      </p>
-                    ) : (
-                      campusStore.getCheckpoints().map((cp) => {
-                        const s = cp.snapshot;
-                        const totalCpEntities =
-                          (s.buildings?.length || 0) +
-                          (s.floors?.length || 0) +
-                          (s.nodes?.length || 0) +
-                          (s.edges?.length || 0) +
-                          (s.doors?.length || 0) +
-                          (s.liftGroups?.length || 0) +
-                          (s.destinations?.length || 0);
-
-                        return (
-                          <div
-                            key={cp.id}
-                            className="flex items-center justify-between rounded-lg border border-[rgb(var(--border))] bg-[rgb(var(--card))] p-2.5 text-xs hover:border-[rgb(var(--primary))]/40 transition-all"
-                          >
-                            <div className="space-y-0.5 max-w-[50%]">
-                              <p className="font-bold text-[rgb(var(--fg))] truncate">{cp.name}</p>
-                              <p className="text-[10px] text-[rgb(var(--muted-fg))]">
-                                {new Date(cp.timestamp).toLocaleString([], { dateStyle: "short", timeStyle: "short" })} • {totalCpEntities} items
-                              </p>
-                            </div>
-                            <div className="flex items-center gap-1.5">
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                onClick={() => {
-                                  const ok = campusStore.updateCheckpoint(cp.id);
-                                  if (ok) {
-                                    setShowDraftMenuModal(false);
-                                    toast({ type: "success", title: "Checkpoint Overwritten!", description: `Overwrote "${cp.name}" with current state.` });
-                                  }
-                                }}
-                                className="h-7 text-[10px] px-2 font-semibold border-amber-500/30 text-amber-600 dark:text-amber-400 hover:bg-amber-500/10"
-                                title="Overwrite this checkpoint with current graph state"
-                              >
-                                Overwrite
-                              </Button>
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                onClick={() => handleRestoreCheckpoint(cp.id, cp.name)}
-                                className="h-7 text-[10px] px-2 font-bold border-blue-500/30 text-blue-600 dark:text-blue-400 hover:bg-blue-500/10"
-                              >
-                                <RotateCcw className="mr-1 h-3 w-3" /> Restore
-                              </Button>
-                              <button
-                                onClick={() => {
-                                  campusStore.deleteCheckpoint(cp.id);
-                                  toast({ type: "info", title: "Checkpoint Deleted" });
-                                }}
-                                className="rounded p-1 text-[rgb(var(--muted-fg))] hover:bg-red-500/10 hover:text-red-500 transition-colors"
-                                title="Delete Checkpoint"
-                              >
-                                <Trash2 className="h-3.5 w-3.5" />
-                              </button>
-                            </div>
-                          </div>
-                        );
-                      })
-                    )}
-                  </div>
-                </div>
-
-                {/* Discard Draft Option */}
-                <div className="pt-2 border-t border-[rgb(var(--border))]">
-                  <Button
-                    variant="outline"
-                    onClick={handleDiscardDraft}
-                    className="w-full justify-center h-9 border-red-500/30 text-red-600 dark:text-red-400 hover:bg-red-500/10 font-semibold text-xs"
-                  >
-                    <Trash2 className="mr-2 h-4 w-4" /> Discard Draft Edits (Reset to Published)
-                  </Button>
-                </div>
-              </div>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
 
       {/* Delete All Confirmation Modal (Preserves Fullscreen) */}
       <AnimatePresence>
@@ -6120,19 +5792,7 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
                     className="mt-1.5 h-9 w-full text-xs"
                   />
                 </div>
-                {selectedElement?.type === "building" && (
-                  <div>
-                    <label className="text-xs font-semibold text-[rgb(var(--muted-fg))]">Short Code <span className="font-normal opacity-60">(e.g. MB, AB1)</span></label>
-                    <Input
-                      placeholder="Enter short code..."
-                      value={renameShortCodeValue}
-                      onChange={(e) => setRenameShortCodeValue(e.target.value.toUpperCase())}
-                      onKeyDown={(e) => { if (e.key === "Enter") handleRenameSubmit(); }}
-                      className="mt-1.5 h-9 w-full text-xs font-mono tracking-widest uppercase"
-                      maxLength={8}
-                    />
-                  </div>
-                )}
+
               </div>
 
               <div className="flex items-center justify-end gap-2 pt-2 border-t">
@@ -6153,6 +5813,225 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
                 </Button>
               </div>
             </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Interactive Edge Creation Modal with REQUIRED Path Type selection */}
+      {pendingEdgeModal && (
+        <div className="fixed inset-0 z-[999999] flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 animate-in fade-in duration-150">
+          <div className="w-full max-w-md rounded-2xl border border-[rgb(var(--border))] bg-[rgb(var(--card))] p-6 shadow-2xl space-y-5 animate-in zoom-in-95 duration-150">
+            <div className="flex items-center justify-between border-b pb-3">
+              <div className="flex items-center gap-2">
+                <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-[rgb(var(--primary)/0.12)] text-[rgb(var(--primary))] font-bold">
+                  <Share2 className="h-4 w-4" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-[rgb(var(--fg))]">Create Edge Connection</h3>
+                  <p className="text-[11px] text-[rgb(var(--muted-fg))]">Configure path properties between selected nodes</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setPendingEdgeModal(null)}
+                className="text-[rgb(var(--muted-fg))] hover:text-[rgb(var(--fg))]"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            <div className="space-y-4 text-xs">
+              <div className="rounded-xl border bg-[rgb(var(--bg))] p-3 space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="font-semibold text-[rgb(var(--muted-fg))]">From Node:</span>
+                  <span className="font-bold text-[rgb(var(--fg))]">
+                    {storeData.nodes.find((n) => n.id === pendingEdgeModal.startNodeId)?.name || pendingEdgeModal.startNodeId}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="font-semibold text-[rgb(var(--muted-fg))]">To Node:</span>
+                  <span className="font-bold text-[rgb(var(--fg))]">
+                    {storeData.nodes.find((n) => n.id === pendingEdgeModal.endNodeId)?.name || pendingEdgeModal.endNodeId}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between pt-1.5 border-t">
+                  <span className="font-semibold text-[rgb(var(--muted-fg))]">Calculated Distance:</span>
+                  <span className="font-bold text-[rgb(var(--primary))] font-mono">{pendingEdgeModal.dist} meters</span>
+                </div>
+              </div>
+
+              <div>
+                <label className="font-bold text-[rgb(var(--fg))] block mb-1.5">Edge Type</label>
+                <select
+                  value={edgeModalType}
+                  onChange={(e) => setEdgeModalType(e.target.value as EdgeType)}
+                  className="w-full rounded-lg border border-[rgb(var(--border))] bg-[rgb(var(--bg))] p-2.5 text-xs font-medium"
+                >
+                  <option value="WALK">WALK (Pedestrian Walkway)</option>
+                  <option value="ROAD">ROAD (Outdoor Street / Road)</option>
+                  <option value="STAIRS">STAIRS (Vertical Stairs)</option>
+                  <option value="LIFT">LIFT (Elevator)</option>
+                  <option value="RAMP">RAMP (Accessible Slope)</option>
+                  <option value="ESCALATOR">ESCALATOR</option>
+                </select>
+              </div>
+
+              {/* REQUIRED Path Type Selection */}
+              <div>
+                <label className="font-bold text-[rgb(var(--fg))] block mb-1.5">
+                  Path Type <span className="text-red-500">* (Required)</span>
+                </label>
+                <div className="grid grid-cols-1 gap-2.5">
+                  <label
+                    className={cn(
+                      "flex items-start gap-3 p-3 rounded-xl border cursor-pointer transition-all",
+                      edgeModalPathType === "EV"
+                        ? "border-emerald-500 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 ring-1 ring-emerald-500 shadow-xs"
+                        : "border-[rgb(var(--border))] bg-[rgb(var(--bg))] hover:bg-[rgb(var(--muted)/0.5)]"
+                    )}
+                  >
+                    <input
+                      type="radio"
+                      name="cadModalEdgePathType"
+                      value="EV"
+                      checked={edgeModalPathType === "EV"}
+                      onChange={() => setEdgeModalPathType("EV")}
+                      className="mt-0.5 h-4 w-4 text-emerald-600 focus:ring-emerald-500"
+                    />
+                    <div>
+                      <div className="font-bold text-xs flex items-center gap-1.5 text-[rgb(var(--fg))]">
+                        ⚡ EV Path
+                      </div>
+                      <p className="text-[11px] text-[rgb(var(--muted-fg))] mt-0.5">
+                        Electric vehicle + walking allowed
+                      </p>
+                    </div>
+                  </label>
+
+                  <label
+                    className={cn(
+                      "flex items-start gap-3 p-3 rounded-xl border cursor-pointer transition-all",
+                      edgeModalPathType === "WALK"
+                        ? "border-blue-500 bg-blue-500/10 text-blue-700 dark:text-blue-300 ring-1 ring-blue-500 shadow-xs"
+                        : "border-[rgb(var(--border))] bg-[rgb(var(--bg))] hover:bg-[rgb(var(--muted)/0.5)]"
+                    )}
+                  >
+                    <input
+                      type="radio"
+                      name="cadModalEdgePathType"
+                      value="WALK"
+                      checked={edgeModalPathType === "WALK"}
+                      onChange={() => setEdgeModalPathType("WALK")}
+                      className="mt-0.5 h-4 w-4 text-blue-600 focus:ring-blue-500"
+                    />
+                    <div>
+                      <div className="font-bold text-xs flex items-center gap-1.5 text-[rgb(var(--fg))]">
+                        🚶 Only Walk Path
+                      </div>
+                      <p className="text-[11px] text-[rgb(var(--muted-fg))] mt-0.5">
+                        Walking only — EV prohibited
+                      </p>
+                    </div>
+                  </label>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-2 border-t">
+              <Button variant="outline" size="sm" onClick={() => setPendingEdgeModal(null)}>
+                Cancel
+              </Button>
+              <Button
+                size="sm"
+                onClick={() => {
+                  if (!edgeModalPathType) {
+                    toast({
+                      type: "error",
+                      title: "Path Type Required",
+                      description: "Please select EV Path or Only Walk Path.",
+                    });
+                    return;
+                  }
+                  const result = campusStore.addEdge({
+                    id: `e-${pendingEdgeModal.startNodeId}-${pendingEdgeModal.endNodeId}`,
+                    from: pendingEdgeModal.startNodeId,
+                    to: pendingEdgeModal.endNodeId,
+                    type: edgeModalType,
+                    pathType: edgeModalPathType,
+                    distance: pendingEdgeModal.dist,
+                    bidirectional: true,
+                  });
+
+                  if (result.success) {
+                    toast({
+                      type: "success",
+                      title: "Edge Connected",
+                      description: `Connected ${edgeModalType} (${edgeModalPathType === "EV" ? "EV Path" : "Only Walk Path"}, ${pendingEdgeModal.dist}m).`,
+                    });
+                    setPendingEdgeModal(null);
+                  } else {
+                    toast({
+                      type: "error",
+                      title: "Duplicate Edge",
+                      description: result.error ?? "Connection already exists.",
+                    });
+                  }
+                }}
+              >
+                Create Edge
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Unsaved Changes Confirmation Modal */}
+      <AnimatePresence>
+        {isLeaveModalOpen && (
+          <div className="fixed inset-0 z-[999999] flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 animate-in fade-in duration-150">
+            <div className="w-full max-w-md rounded-2xl border border-[rgb(var(--border))] bg-[rgb(var(--card))] p-6 shadow-2xl space-y-4 animate-in zoom-in-95 duration-150">
+              <div className="flex items-center gap-3">
+                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-amber-500/15 text-amber-600 dark:text-amber-400 font-bold">
+                  <AlertTriangle className="h-5 w-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-[rgb(var(--fg))]">Unsaved Changes</h3>
+                  <p className="text-xs text-[rgb(var(--muted-fg))]">
+                    You have {pendingChanges.length} unpublished {pendingChanges.length === 1 ? "change" : "changes"}.
+                  </p>
+                </div>
+              </div>
+
+              <p className="text-xs text-[rgb(var(--fg))] leading-relaxed bg-[rgb(var(--bg))] p-3 rounded-xl border">
+                You have unpublished changes. Are you sure you want to leave? Your changes may be lost.
+              </p>
+
+              <div className="flex items-center justify-end gap-2 pt-2 border-t">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    setIsLeaveModalOpen(false);
+                    setPendingLeaveUrl(null);
+                  }}
+                >
+                  Stay / Cancel
+                </Button>
+                <Button
+                  variant="danger"
+                  size="sm"
+                  onClick={() => {
+                    setIsLeaveModalOpen(false);
+                    if (pendingLeaveUrl) {
+                      window.location.href = pendingLeaveUrl;
+                    } else {
+                      window.history.back();
+                    }
+                  }}
+                >
+                  Leave Page
+                </Button>
+              </div>
+            </div>
           </div>
         )}
       </AnimatePresence>

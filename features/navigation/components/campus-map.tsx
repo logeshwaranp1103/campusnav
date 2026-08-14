@@ -75,7 +75,7 @@ export function CampusMap({ route, livePosition, progress, gps: passedGps, onNav
     if (activeView === "f-out") return "Outdoor";
     const f = publishedData.floors.find((x) => x.id === activeView);
     const b = f ? publishedData.buildings.find((x) => x.id === f.buildingId) : undefined;
-    return `${b?.shortCode ?? ""} · ${f?.name ?? "Floor"}`;
+    return `${b?.name ? `${b.name} · ` : ""}${f?.name ?? "Floor"}`;
   }, [activeView, publishedData.floors, publishedData.buildings]);
 
   const allBuildings = publishedData.buildings;
@@ -175,11 +175,11 @@ export function CampusMap({ route, livePosition, progress, gps: passedGps, onNav
           </div>
         </div>
 
-        {/* User Layer Toggle: Obstacles (Mobile: Icon only, Desktop/Tablet: Icon + Text) */}
+        {/* User Layer Toggle: Obstacles (Icon only) */}
         <div className="flex flex-col gap-1 rounded-xl border bg-[rgb(var(--card))]/90 p-1 shadow-lg backdrop-blur-md w-fit">
           <button
             onClick={() => setShowObstacles(!showObstacles)}
-            className={`flex h-9 min-w-9 items-center justify-center gap-1.5 px-2 rounded-lg text-[11px] font-semibold active:scale-95 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500 cursor-pointer ${
+            className={`flex h-9 w-9 items-center justify-center rounded-lg text-[11px] font-semibold active:scale-95 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500 cursor-pointer ${
               showObstacles
                 ? "bg-red-500/15 text-red-600 dark:text-red-400 border border-red-500/30 shadow-xs"
                 : "text-[rgb(var(--muted-fg))] hover:bg-[rgb(var(--muted))]"
@@ -188,38 +188,41 @@ export function CampusMap({ route, livePosition, progress, gps: passedGps, onNav
             aria-label="Toggle Obstacles"
           >
             <AlertTriangle className="h-4 w-4 text-red-500 shrink-0" />
-            <span className="hidden md:inline">Obstacles</span>
           </button>
         </div>
 
         {/* Recenter & Compass Directions Buttons (Touch-friendly 44x44 px targets) */}
         <div className="flex flex-col gap-2 rounded-2xl border bg-[rgb(var(--card))]/95 p-1.5 shadow-xl backdrop-blur-md w-fit">
+          {/* 🎯 Crosshair Button: Recenter map viewport on user's live GPS marker */}
           <button
             onClick={() => {
               if (gps && !gps.isTracking) {
                 gps.startTracking();
               }
-              setZoomLevel(1);
+              setZoomLevel(0.85);
               setResetTrigger((t) => t + 1);
             }}
             className="flex h-11 w-11 items-center justify-center rounded-xl bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/20 active:scale-95 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 cursor-pointer shadow-xs"
-            title="Focus & Center Live Location"
-            aria-label="Focus Live Location"
+            title="Recenter Map Viewport on Live GPS Marker"
+            aria-label="Recenter Live GPS Location"
           >
             <Locate className="h-5 w-5 stroke-[2.25]" />
           </button>
 
+          {/* 🧭 Compass Button: Toggle Map Heading Rotation / Reset to North-Up View */}
           <button
-            onClick={() => setAutoRotate(!autoRotate)}
+            onClick={() => {
+              setAutoRotate((prev) => !prev);
+            }}
             className={`flex h-11 w-11 items-center justify-center rounded-xl active:scale-95 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 cursor-pointer shadow-xs ${
               autoRotate
                 ? "bg-indigo-600 text-white shadow-md ring-2 ring-indigo-500/40"
                 : "bg-[rgb(var(--primary))/0.1] text-[rgb(var(--primary))] hover:bg-[rgb(var(--primary))/0.2]"
             }`}
-            title="Directions & Auto Heading Rotation"
-            aria-label="Toggle Heading Directions"
+            title={autoRotate ? "Heading Active (Click to Reset North-Up)" : "North-Up View (Click to Align Heading)"}
+            aria-label="Toggle Compass Orientation"
           >
-            <Compass className="h-5 w-5 stroke-[2.25]" />
+            <Compass className={`h-5 w-5 stroke-[2.25] transition-transform duration-300 ${autoRotate ? "rotate-45" : "rotate-0"}`} />
           </button>
         </div>
       </div>
@@ -318,7 +321,7 @@ function MapCanvas({
       const centerX = bounds.x + bounds.w / 2;
       const centerY = bounds.y + bounds.h / 2;
       setPan({ x: centerX - targetCanvas.x, y: centerY - targetCanvas.y });
-      setInternalZoom(1.3);
+      setInternalZoom(0.85);
     } else {
       setInternalZoom(1);
       setPan({ x: 0, y: 0 });
@@ -847,7 +850,7 @@ function MapCanvas({
           const activeEvent = buildingEvents.find((ev) => isEventActive(ev, nowMs));
 
           const strokeColor = activeEvent?.color || b.color || "#4f46e5";
-          const bName = `${b.name}${b.shortCode ? ` (${b.shortCode})` : ""}`;
+          const bName = b.name;
           const badgeWidth = Math.max(145, bName.length * 9.5 + 32);
 
           return (
@@ -965,9 +968,7 @@ function MapCanvas({
                       className="animate-pulse"
                     />
                   )}
-                  {/* Central Danger Marker */}
-                  <circle r="7" fill="#ef4444" opacity="0.35" className="animate-ping" />
-                  <circle r="5" fill="#ef4444" stroke="#ffffff" strokeWidth="1.5" />
+                  {/* Red pin removed */}
                   {/* Danger Badge Label */}
                   <g transform={`translate(0, ${hasRadius ? -radius - 8 : -14})`}>
                     <rect

@@ -37,6 +37,8 @@ import {
   Copy,
   ClipboardPaste,
   Check,
+  Download,
+  Upload,
 } from "lucide-react";
 import { campusStore } from "@/shared/lib/campus-store";
 import { gpsToCanvas, canvasToGps, getCenterFromCorners } from "@/lib/geo/projection";
@@ -53,7 +55,9 @@ import type {
   Destination,
   NodeType,
   EdgeType,
+  PathType,
 } from "@/shared/data/campus";
+import { getEdgePathType, getPathTypeLabel } from "@/lib/routing/edge-accessibility";
 
 export type EntityCategory =
   | "BUILDING"
@@ -83,11 +87,118 @@ export function EntityManager() {
   const [selectedType, setSelectedType] = useState<EntityCategory>("BUILDING");
   const [searchQuery, setSearchQuery] = useState("");
   const [activeTab, setActiveTab] = useState<EntityCategory | "ALL">("ALL");
-  const [isFullscreen, setIsFullscreen] = useState(false);
+  const [isFullscreen, setIsFullscreen] = useState(() => {
+    if (typeof window !== "undefined") {
+      return sessionStorage.getItem("entity_manager_fullscreen_active") === "true";
+    }
+    return false;
+  });
   const [showMobilePanel, setShowMobilePanel] = useState(false);
 
   // Directory Row Multi-Selection State for Bulk Actions
   const [selectedRowIds, setSelectedRowIds] = useState<Set<string>>(new Set());
+
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const handleDownloadWholeData = () => {
+    const data = campusStore.getWorkingData();
+    const exportPayload = {
+      appName: "CampusNav Digital Twin System",
+      version: "2.0.0",
+      exportedAt: new Date().toISOString(),
+      exportedTimestamp: Date.now(),
+      snapshot: {
+        buildings: data.buildings || [],
+        floors: data.floors || [],
+        nodes: data.nodes || [],
+        edges: data.edges || [],
+        destinations: data.destinations || [],
+        events: data.events || [],
+        obstacles: data.obstacles || [],
+        stairGroups: data.stairGroups || [],
+        liftGroups: data.liftGroups || [],
+        doors: data.doors || [],
+      },
+      meta: {
+        totalBuildings: data.buildings?.length || 0,
+        totalFloors: data.floors?.length || 0,
+        totalNodes: data.nodes?.length || 0,
+        totalEdges: data.edges?.length || 0,
+        totalDestinations: data.destinations?.length || 0,
+        totalObstacles: data.obstacles?.length || 0,
+        totalDoors: data.doors?.length || 0,
+      },
+    };
+
+    const jsonString = JSON.stringify(exportPayload, null, 2);
+    const blob = new Blob([jsonString], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const dateStr = new Date().toISOString().slice(0, 10);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `campusnav_whole_data_${dateStr}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+
+    toast({
+      type: "success",
+      title: "Whole Data Downloaded!",
+      description: `Exported complete dataset (${exportPayload.meta.totalBuildings} blds, ${exportPayload.meta.totalNodes} nodes, ${exportPayload.meta.totalEdges} edges).`,
+    });
+  };
+
+  const handleTriggerWholeDataInput = () => {
+    if (fileInputRef.current) {
+      fileInputRef.current.value = "";
+      fileInputRef.current.click();
+    }
+  };
+
+  const handleWholeDataInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      try {
+        const content = event.target?.result as string;
+        if (!content) return;
+
+        const parsed = JSON.parse(content);
+        const ok = campusStore.importFullData(parsed);
+
+        if (ok) {
+          setStoreData(campusStore.getWorkingData());
+          setSelectedRowIds(new Set());
+          const snapshot = parsed.snapshot || parsed;
+          const bldCount = snapshot.buildings?.length || 0;
+          const nodeCount = snapshot.nodes?.length || 0;
+          const edgeCount = snapshot.edges?.length || 0;
+
+          toast({
+            type: "success",
+            title: "Whole Data Feed Successful!",
+            description: `Imported full campus graph dataset (${bldCount} buildings, ${nodeCount} nodes, ${edgeCount} edges).`,
+          });
+        } else {
+          toast({
+            type: "error",
+            title: "Data Feed Failed",
+            description: "JSON file format is missing required campus snapshot data structure.",
+          });
+        }
+      } catch (err) {
+        toast({
+          type: "error",
+          title: "Invalid JSON File",
+          description: err instanceof Error ? err.message : "Failed to parse JSON file.",
+        });
+      }
+    };
+    reader.readAsText(file);
+  };
 
   // Copied Entity State for Copy / Paste Workflow
   const [copiedEntityPayload, setCopiedEntityPayload] = useState<{ category: EntityCategory; name: string; [key: string]: any } | null>(null);
@@ -122,6 +233,7 @@ export function EntityManager() {
     firstNodeId: "",
     secondNodeId: "",
     edgeType: "WALK" as EdgeType,
+    pathType: "WALK" as PathType,
     distance: 0,
     accessible: true,
     expiresAt: "",
@@ -176,7 +288,13 @@ export function EntityManager() {
   // Handle Fullscreen Toggle using Browser Native Fullscreen API to hide Chrome browser tabs & top address bar
   const toggleFullscreen = () => {
     const target = containerRef.current || document.documentElement;
-    if (!document.fullscreenElement && !isFullscreen) {
+    const nextState = !isFullscreen;
+    setIsFullscreen(nextState);
+    if (typeof window !== "undefined") {
+      sessionStorage.setItem("entity_manager_fullscreen_active", String(nextState));
+    }
+
+    if (nextState) {
       if (target.requestFullscreen) {
         target.requestFullscreen().catch(() => { });
       } else if ((target as any).webkitRequestFullscreen) {
@@ -184,7 +302,6 @@ export function EntityManager() {
       } else if ((target as any).msRequestFullscreen) {
         (target as any).msRequestFullscreen();
       }
-      setIsFullscreen(true);
     } else {
       if (document.exitFullscreen && document.fullscreenElement) {
         document.exitFullscreen().catch(() => { });
@@ -193,7 +310,6 @@ export function EntityManager() {
       } else if ((document as any).msExitFullscreen) {
         (document as any).msExitFullscreen();
       }
-      setIsFullscreen(false);
     }
   };
 
@@ -236,7 +352,10 @@ export function EntityManager() {
   // Sync fullscreen state with native browser fullscreenchange events
   useEffect(() => {
     const handleFSChange = () => {
-      setIsFullscreen(!!document.fullscreenElement);
+      const isNativeFS = !!document.fullscreenElement;
+      if (!isNativeFS && sessionStorage.getItem("entity_manager_fullscreen_active") !== "true") {
+        setIsFullscreen(false);
+      }
     };
     document.addEventListener("fullscreenchange", handleFSChange);
     document.addEventListener("webkitfullscreenchange", handleFSChange);
@@ -321,6 +440,7 @@ export function EntityManager() {
     firstNodeId: "",
     secondNodeId: "",
     edgeType: "WALK" as EdgeType,
+    pathType: "" as PathType | "",
     toleranceMeters: 5,
   });
 
@@ -706,10 +826,20 @@ export function EntityManager() {
       }
 
       case "EDGE": {
+        if (!edgeForm.firstNodeId || !edgeForm.secondNodeId) {
+          toast({ type: "error", title: "Validation Error", description: "Please select both first and second nodes." });
+          return;
+        }
+        if (!edgeForm.pathType) {
+          toast({ type: "error", title: "Path Type Required", description: "Please select a Path Type (EV Path or Only Walk Path)." });
+          return;
+        }
         if (!edgeSplitInfo) {
           toast({ type: "error", title: "Validation Error", description: "Select two distinct valid nodes to connect." });
           return;
         }
+
+        const chosenPathType = edgeForm.pathType as PathType;
 
         if (edgeSplitInfo.hasIntermediates) {
           campusStore.startBatching();
@@ -719,6 +849,7 @@ export function EntityManager() {
               from: edgeItem.fromNode.id,
               to: edgeItem.toNode.id,
               type: edgeItem.type,
+              pathType: chosenPathType,
               distance: edgeItem.distance,
               bidirectional: true,
             });
@@ -737,19 +868,20 @@ export function EntityManager() {
             from: single.fromNode.id,
             to: single.toNode.id,
             type: single.type,
+            pathType: chosenPathType,
             distance: single.distance,
             bidirectional: true,
           });
 
           if (res.success) {
-            toast({ type: "success", title: "Edge Connected", description: `Direct edge connected (${single.distance}m)! Visible in CAD Editor.` });
+            toast({ type: "success", title: "Edge Connected", description: `Direct ${chosenPathType} edge connected (${single.distance}m)! Visible in CAD Editor.` });
           } else {
             toast({ type: "error", title: "Edge Exists", description: res.error || "Edge connection already exists." });
           }
           setStoreData({ ...campusStore.getWorkingData() });
         }
 
-        setEdgeForm((prev) => ({ ...prev, secondNodeId: "" }));
+        setEdgeForm((prev) => ({ ...prev, secondNodeId: "", pathType: "" }));
         break;
       }
     }
@@ -831,6 +963,7 @@ export function EntityManager() {
       firstNodeId: "",
       secondNodeId: "",
       edgeType: "WALK",
+      pathType: "",
       toleranceMeters: 5,
     });
 
@@ -1103,6 +1236,7 @@ export function EntityManager() {
           firstNodeId: payload.firstNodeId || "",
           secondNodeId: payload.secondNodeId || "",
           edgeType: payload.edgeType || "WALK",
+          pathType: payload.pathType || "WALK",
           toleranceMeters: 5,
         });
         break;
@@ -1160,8 +1294,8 @@ export function EntityManager() {
       selectedFloorIds: item.raw.connectedFloorIds || item.raw.servedFloorIds || [],
       severity: item.raw.severity || "MEDIUM",
       radius: item.raw.radius || 10,
-      lat: item.raw.lat !== undefined ? String(item.raw.lat) : item.raw.centerLat !== undefined ? String(item.raw.centerLat) : "11.",
-      lng: item.raw.lng !== undefined ? String(item.raw.lng) : item.raw.centerLng !== undefined ? String(item.raw.centerLng) : "77.",
+      lat: item.raw.lat !== undefined ? String(item.raw.lat) : item.raw.centerLat !== undefined ? String(item.raw.centerLat) : (item.raw.x !== undefined && item.raw.y !== undefined ? String(canvasToGps(item.raw.x, item.raw.y).lat.toFixed(6)) : "11."),
+      lng: item.raw.lng !== undefined ? String(item.raw.lng) : item.raw.centerLng !== undefined ? String(item.raw.centerLng) : (item.raw.x !== undefined && item.raw.y !== undefined ? String(canvasToGps(item.raw.x, item.raw.y).lng.toFixed(6)) : "77."),
       corner1Lat: item.raw.corner1Lat !== undefined ? String(item.raw.corner1Lat) : "",
       corner1Lng: item.raw.corner1Lng !== undefined ? String(item.raw.corner1Lng) : "",
       corner2Lat: item.raw.corner2Lat !== undefined ? String(item.raw.corner2Lat) : "",
@@ -1173,6 +1307,7 @@ export function EntityManager() {
       firstNodeId: item.raw.from || "",
       secondNodeId: item.raw.to || "",
       edgeType: item.raw.type || "WALK",
+      pathType: getEdgePathType(item.raw),
       distance: item.raw.distance !== undefined ? item.raw.distance : 0,
       accessible: item.raw.accessible !== undefined ? item.raw.accessible : true,
       expiresAt: item.raw.expiresAt || "",
@@ -1300,6 +1435,7 @@ export function EntityManager() {
           from: editForm.firstNodeId || editingItem.raw.from,
           to: editForm.secondNodeId || editingItem.raw.to,
           type: editForm.edgeType,
+          pathType: editForm.pathType as PathType,
           distance: editForm.distance || editingItem.raw.distance,
         });
         break;
@@ -1384,7 +1520,7 @@ export function EntityManager() {
 
     if (activeTab === "ALL" || activeTab === "BUILDING") {
       storeData.buildings.forEach((b) => {
-        const matches = !q || b.name.toLowerCase().includes(q) || b.id.toLowerCase().includes(q) || (b.shortCode && b.shortCode.toLowerCase().includes(q));
+        const matches = !q || b.name.toLowerCase().includes(q) || b.id.toLowerCase().includes(q);
         if (matches) {
           items.push({
             id: b.id,
@@ -1455,13 +1591,15 @@ export function EntityManager() {
         const nFrom = storeData.nodes.find((n) => n.id === e.from);
         const nTo = storeData.nodes.find((n) => n.id === e.to);
         const nameStr = `${nFrom?.name || e.from} ↔ ${nTo?.name || e.to}`;
-        const matches = !q || nameStr.toLowerCase().includes(q) || e.id.toLowerCase().includes(q) || e.type.toLowerCase().includes(q);
+        const pType = getEdgePathType(e);
+        const pInfo = getPathTypeLabel(pType, e.type);
+        const matches = !q || nameStr.toLowerCase().includes(q) || e.id.toLowerCase().includes(q) || e.type.toLowerCase().includes(q) || pType.toLowerCase().includes(q);
         if (matches) {
           items.push({
             id: e.id,
             name: nameStr,
             category: "EDGE",
-            details: `Type: ${e.type} · Distance: ${e.distance}m`,
+            details: `${pInfo.label} (${pInfo.shortLabel}) · Type: ${e.type} · Distance: ${e.distance}m`,
             raw: e,
           });
         }
@@ -1612,30 +1750,32 @@ export function EntityManager() {
         }`}
     >
       {/* HEADER BANNER WITH GRADIENT ACCENTS, UNDO/REDO & FULLSCREEN TOGGLE */}
-      <div className="relative overflow-hidden rounded-2xl border border-[rgb(var(--primary)/0.25)] bg-gradient-to-r from-[rgb(var(--primary)/0.12)] via-[rgb(var(--card))] to-[rgb(var(--primary)/0.06)] p-6 shadow-md backdrop-blur-md">
+      <div className="relative overflow-hidden rounded-2xl border border-[rgb(var(--primary)/0.25)] bg-gradient-to-r from-[rgb(var(--primary)/0.12)] via-[rgb(var(--card))] to-[rgb(var(--primary)/0.06)] p-5 shadow-md backdrop-blur-md">
         <div className="absolute right-0 top-0 h-full w-1/3 bg-gradient-to-l from-[rgb(var(--primary)/0.1)] to-transparent pointer-events-none" />
 
-        <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 relative z-10">
-          <div className="flex items-center gap-4">
-            <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl gradient-primary text-white shadow-lg shadow-[rgb(var(--primary)/0.3)]">
-              <Sliders className="h-7 w-7" />
+        <div className="space-y-4 relative z-10">
+          {/* Top Row: Title, Badge & Description */}
+          <div className="flex items-center gap-3.5">
+            <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl gradient-primary text-white shadow-lg shadow-[rgb(var(--primary)/0.3)]">
+              <Sliders className="h-6 w-6" />
             </div>
             <div>
               <div className="flex items-center gap-2.5">
-                <h2 className="text-2xl font-extrabold tracking-tight text-[rgb(var(--fg))]">
+                <h2 className="text-xl font-extrabold tracking-tight text-[rgb(var(--fg))]">
                   Campus Objects Manager
                 </h2>
                 <Badge variant="primary" className="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5">
                   Central Hub
                 </Badge>
               </div>
-              <p className="text-xs text-[rgb(var(--muted-fg))] mt-1 max-w-2xl leading-relaxed">
+              <p className="text-xs text-[rgb(var(--muted-fg))] mt-0.5 leading-relaxed">
                 Dedicated panel for creating, configuring, and managing all digital twin campus entities. Positions and attributes automatically synchronize with CAD Canvas in real-time.
               </p>
             </div>
           </div>
 
-          <div className="flex items-center gap-2 shrink-0">
+          {/* Action Toolbar Row: Aligned in a single clean row */}
+          <div className="flex flex-wrap items-center justify-start gap-2 pt-3 border-t border-[rgb(var(--border))/0.4]">
             {/* UNDO / REDO CONTROLS */}
             <Button
               size="sm"
@@ -1643,10 +1783,10 @@ export function EntityManager() {
               onClick={handleUndo}
               disabled={!campusStore.canUndo()}
               title="Undo (Ctrl+Z)"
-              className="gap-1 shadow-sm"
+              className="gap-1 shadow-xs"
             >
               <Undo2 className="h-4 w-4 text-[rgb(var(--primary))]" />
-              <span className="hidden sm:inline font-semibold">Undo</span>
+              <span className="font-semibold text-xs">Undo</span>
             </Button>
 
             <Button
@@ -1655,32 +1795,32 @@ export function EntityManager() {
               onClick={handleRedo}
               disabled={!campusStore.canRedo()}
               title="Redo (Ctrl+Y)"
-              className="gap-1 shadow-sm"
+              className="gap-1 shadow-xs"
             >
               <Redo2 className="h-4 w-4 text-[rgb(var(--primary))]" />
-              <span className="hidden sm:inline font-semibold">Redo</span>
+              <span className="font-semibold text-xs">Redo</span>
             </Button>
 
             <Button
               size="sm"
               variant="outline"
               onClick={() => setShowMobilePanel((prev) => !prev)}
-              className="gap-1.5 shadow-sm lg:hidden border-[rgb(var(--border))]"
+              className="gap-1.5 shadow-xs lg:hidden border-[rgb(var(--border))]"
               title={showMobilePanel ? "Hide Object Creator Panel" : "Show Object Creator Panel"}
             >
               <Layers className="h-4 w-4 text-[rgb(var(--primary))]" />
-              <span className="font-semibold">{showMobilePanel ? "Hide Panel" : "Show Panel"}</span>
+              <span className="font-semibold text-xs">{showMobilePanel ? "Hide Panel" : "Show Panel"}</span>
             </Button>
 
             <Button
               size="sm"
               variant="outline"
               onClick={toggleFullscreen}
-              className="gap-1.5 shadow-sm"
+              className="gap-1.5 shadow-xs"
               title={isFullscreen ? "Exit Full Screen" : "Full Screen View"}
             >
               {isFullscreen ? <Minimize2 className="h-4 w-4 text-[rgb(var(--primary))]" /> : <Maximize2 className="h-4 w-4 text-[rgb(var(--primary))]" />}
-              <span className="font-semibold">{isFullscreen ? "Exit Fullscreen" : "Full Screen"}</span>
+              <span className="font-semibold text-xs">{isFullscreen ? "Exit Fullscreen" : "Full Screen"}</span>
             </Button>
 
             <Button
@@ -1688,16 +1828,47 @@ export function EntityManager() {
               variant="outline"
               onClick={handleRefresh}
               disabled={isRefreshing}
-              className="gap-1.5 shadow-sm"
+              className="gap-1.5 shadow-xs"
               title="Soft Refresh Campus Data (Preserves Fullscreen)"
             >
               <RefreshCw className={cn("h-4 w-4 text-[rgb(var(--primary))]", isRefreshing && "animate-spin")} />
-              <span className="hidden sm:inline font-semibold">{isRefreshing ? "Refreshing..." : "Refresh"}</span>
+              <span className="font-semibold text-xs">{isRefreshing ? "Refreshing..." : "Refresh"}</span>
+            </Button>
+
+            {/* Whole Data Import/Export Engine */}
+            <input
+              type="file"
+              ref={fileInputRef}
+              accept=".json"
+              onChange={handleWholeDataInputChange}
+              className="hidden"
+            />
+
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={handleDownloadWholeData}
+              className="gap-1.5 shadow-xs border-blue-500/30 text-blue-600 dark:text-blue-400 hover:bg-blue-500/10"
+              title="Download Complete Whole Graph Dataset JSON File"
+            >
+              <Download className="h-4 w-4" />
+              <span className="font-semibold text-xs">Download Whole Data</span>
+            </Button>
+
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={handleTriggerWholeDataInput}
+              className="gap-1.5 shadow-xs border-emerald-500/30 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/10"
+              title="Upload & Feed Whole Data JSON File"
+            >
+              <Upload className="h-4 w-4" />
+              <span className="font-semibold text-xs">Feed Whole Data</span>
             </Button>
 
             <Link href="/admin/editor">
-              <Button size="sm" variant="gradient" className="gap-2 shadow-md">
-                <Compass className="h-4 w-4" /> Open CAD Canvas <ArrowRight className="h-3.5 w-3.5" />
+              <Button size="sm" variant="gradient" className="gap-2 shadow-xs">
+                <Compass className="h-4 w-4" /> <span className="text-xs font-semibold">Open CAD Canvas</span> <ArrowRight className="h-3.5 w-3.5" />
               </Button>
             </Link>
           </div>
@@ -1824,15 +1995,6 @@ export function EntityManager() {
                         const val = parseInt(e.target.value);
                         setBuildingForm({ ...buildingForm, floorsCount: isNaN(val) ? 0 : Math.max(0, val) });
                       }}
-                      className="mt-1.5"
-                    />
-                  </div>
-                  <div>
-                    <label className="text-xs font-bold text-[rgb(var(--fg))]">Description</label>
-                    <Input
-                      placeholder="Optional building description"
-                      value={buildingForm.description}
-                      onChange={(e) => setBuildingForm({ ...buildingForm, description: e.target.value })}
                       className="mt-1.5"
                     />
                   </div>
@@ -2201,6 +2363,7 @@ export function EntityManager() {
                       onChange={(e) => setEdgeForm({ ...edgeForm, edgeType: e.target.value as EdgeType })}
                     >
                       <option value="WALK">Pedestrian Walkway</option>
+                      <option value="ROAD">Outdoor Street / Road</option>
                       <option value="STAIRS">Staircase Connection</option>
                       <option value="LIFT">Elevator / Lift Connection</option>
                       <option value="RAMP">Accessible Ramp</option>
@@ -2217,6 +2380,66 @@ export function EntityManager() {
                       value={edgeSplitInfo ? `${edgeSplitInfo.edgesToCreate[0]?.distance || 10} meters (Calculated)` : "Select nodes"}
                       className="mt-1.5 bg-[rgb(var(--muted))] text-xs font-semibold"
                     />
+                  </div>
+                </div>
+
+                {/* REQUIRED Path Type Selection */}
+                <div>
+                  <label className="text-xs font-bold text-[rgb(var(--fg))] block mb-1.5">
+                    Path Type <span className="text-red-500">* (Required)</span>
+                  </label>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                    <label
+                      className={cn(
+                        "flex items-start gap-2.5 p-3 rounded-xl border cursor-pointer transition-all",
+                        edgeForm.pathType === "EV"
+                          ? "border-emerald-500 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 ring-1 ring-emerald-500 shadow-xs"
+                          : "border-[rgb(var(--border))] bg-[rgb(var(--bg))] hover:bg-[rgb(var(--muted)/0.5)]"
+                      )}
+                    >
+                      <input
+                        type="radio"
+                        name="edgePathTypeRadio"
+                        value="EV"
+                        checked={edgeForm.pathType === "EV"}
+                        onChange={() => setEdgeForm({ ...edgeForm, pathType: "EV" })}
+                        className="mt-0.5 h-4 w-4 text-emerald-600 focus:ring-emerald-500"
+                      />
+                      <div>
+                        <div className="font-bold text-xs flex items-center gap-1.5 text-[rgb(var(--fg))]">
+                          ⚡ EV Path
+                        </div>
+                        <p className="text-[11px] text-[rgb(var(--muted-fg))] mt-0.5">
+                          Electric vehicle + walking
+                        </p>
+                      </div>
+                    </label>
+
+                    <label
+                      className={cn(
+                        "flex items-start gap-2.5 p-3 rounded-xl border cursor-pointer transition-all",
+                        edgeForm.pathType === "WALK"
+                          ? "border-blue-500 bg-blue-500/10 text-blue-700 dark:text-blue-300 ring-1 ring-blue-500 shadow-xs"
+                          : "border-[rgb(var(--border))] bg-[rgb(var(--bg))] hover:bg-[rgb(var(--muted)/0.5)]"
+                      )}
+                    >
+                      <input
+                        type="radio"
+                        name="edgePathTypeRadio"
+                        value="WALK"
+                        checked={edgeForm.pathType === "WALK"}
+                        onChange={() => setEdgeForm({ ...edgeForm, pathType: "WALK" })}
+                        className="mt-0.5 h-4 w-4 text-blue-600 focus:ring-blue-500"
+                      />
+                      <div>
+                        <div className="font-bold text-xs flex items-center gap-1.5 text-[rgb(var(--fg))]">
+                          🚶 Only Walk Path
+                        </div>
+                        <p className="text-[11px] text-[rgb(var(--muted-fg))] mt-0.5">
+                          Walking only — EV prohibited
+                        </p>
+                      </div>
+                    </label>
                   </div>
                 </div>
 
@@ -2445,7 +2668,7 @@ export function EntityManager() {
               <div className="space-y-4">
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div>
-                    <label className="text-xs font-bold text-[rgb(var(--fg))]">Obstacle Reason / Description *</label>
+                    <label className="text-xs font-bold text-[rgb(var(--fg))]">Obstacle Reason / Title *</label>
                     <Input
                       placeholder="e.g. Floor maintenance / Spill zone"
                       value={obstacleForm.name}
@@ -2474,6 +2697,26 @@ export function EntityManager() {
                       onChange={(e) => setObstacleForm({ ...obstacleForm, radius: parseFloat(e.target.value) || 10 })}
                       className="mt-1.5"
                     />
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label className="text-xs font-bold text-[rgb(var(--fg))]">Latitude *</label>
+                      <Input
+                        placeholder="e.g. 11.012345"
+                        value={obstacleForm.lat}
+                        onChange={(e) => setObstacleForm({ ...obstacleForm, lat: e.target.value })}
+                        className="mt-1.5"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-xs font-bold text-[rgb(var(--fg))]">Longitude *</label>
+                      <Input
+                        placeholder="e.g. 77.012345"
+                        value={obstacleForm.lng}
+                        onChange={(e) => setObstacleForm({ ...obstacleForm, lng: e.target.value })}
+                        className="mt-1.5"
+                      />
+                    </div>
                   </div>
                 </div>
               </div>
@@ -2850,16 +3093,6 @@ export function EntityManager() {
                     </div>
                   </div>
 
-                  <div>
-                    <label className="font-bold text-[rgb(var(--fg))]">Description</label>
-                    <Input
-                      placeholder="Building description"
-                      value={editForm.description}
-                      onChange={(e) => setEditForm({ ...editForm, description: e.target.value })}
-                      className="mt-1 text-xs"
-                    />
-                  </div>
-
                   <div className="grid grid-cols-2 gap-3">
                     <div>
                       <label className="font-bold text-[rgb(var(--fg))]">Center Latitude</label>
@@ -3120,20 +3353,33 @@ export function EntityManager() {
                         onChange={(e) => setEditForm({ ...editForm, edgeType: e.target.value as EdgeType })}
                       >
                         <option value="WALK">Pedestrian Walkway</option>
+                        <option value="ROAD">Outdoor Street / Road</option>
                         <option value="STAIRS">Staircase Connection</option>
                         <option value="LIFT">Elevator Connection</option>
                         <option value="RAMP">Accessible Ramp</option>
                       </select>
                     </div>
                     <div>
-                      <label className="font-bold text-[rgb(var(--fg))]">Distance (Meters)</label>
-                      <Input
-                        type="number"
-                        value={editForm.distance}
-                        onChange={(e) => setEditForm({ ...editForm, distance: parseFloat(e.target.value) || 0 })}
-                        className="mt-1 text-xs"
-                      />
+                      <label className="font-bold text-[rgb(var(--fg))]">Path Type (Vehicle / Walk Access)</label>
+                      <select
+                        className="mt-1 w-full rounded-lg border border-[rgb(var(--border))] bg-[rgb(var(--bg))] p-2 text-xs font-medium"
+                        value={editForm.pathType || "WALK"}
+                        onChange={(e) => setEditForm({ ...editForm, pathType: e.target.value as PathType })}
+                      >
+                        <option value="EV">⚡ EV Path (Electric vehicle + walking)</option>
+                        <option value="WALK">🚶 Only Walk Path (Walking only — EV prohibited)</option>
+                      </select>
                     </div>
+                  </div>
+
+                  <div>
+                    <label className="font-bold text-[rgb(var(--fg))]">Distance (Meters)</label>
+                    <Input
+                      type="number"
+                      value={editForm.distance}
+                      onChange={(e) => setEditForm({ ...editForm, distance: parseFloat(e.target.value) || 0 })}
+                      className="mt-1 text-xs"
+                    />
                   </div>
                 </div>
               )}

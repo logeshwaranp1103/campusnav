@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { motion } from "framer-motion";
+import { motion, useReducedMotion } from "framer-motion";
 import { MapPin, Search, Sparkles } from "lucide-react";
 import { Input } from "@/shared/components/ui/input";
 import { Badge } from "@/shared/components/ui/badge";
@@ -12,11 +12,34 @@ import type { Destination } from "@/shared/data/campus";
 
 import { isEventActive } from "@/shared/lib/event-utils";
 
+const containerVariants = {
+  hidden: { opacity: 0 },
+  visible: {
+    opacity: 1,
+    transition: {
+      staggerChildren: 0.035,
+      delayChildren: 0.02,
+    },
+  },
+};
+
+const itemVariants = {
+  hidden: { opacity: 0 },
+  visible: {
+    opacity: 1,
+    transition: {
+      duration: 0.2,
+      ease: "easeOut",
+    },
+  },
+};
+
 export function ExplorePanel() {
   const [mounted, setMounted] = useState(false);
   const [q, setQ] = useState("");
   const [storeData, setStoreData] = useState<ReturnType<typeof campusStore.getPublishedData>>(() => campusStore.getPublishedData());
   const [category, setCategory] = useState<string | null>(null);
+  const shouldReduceMotion = useReducedMotion();
 
   useEffect(() => {
     setMounted(true);
@@ -176,17 +199,16 @@ export function ExplorePanel() {
       </div>
 
       <motion.div
-        layout
+        variants={shouldReduceMotion ? undefined : containerVariants}
+        initial="hidden"
+        animate="visible"
         className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3"
       >
         {filtered.map((d) => (
           <motion.div
-            layout
             key={d.id}
-            initial={{ opacity: 0, y: 6 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.2 }}
-            className="card flex flex-col gap-3 p-5 transition-all hover:shadow-md border bg-[rgb(var(--card))]"
+            variants={shouldReduceMotion ? undefined : itemVariants}
+            className="card card-hover flex flex-col gap-3 p-5 border bg-[rgb(var(--card))] hover:shadow-md hover:border-[rgb(var(--border-strong))] transition-all"
           >
             <div className="flex items-start justify-between gap-2">
               <div className="min-w-0">

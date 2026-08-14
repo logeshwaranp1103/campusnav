@@ -5,7 +5,7 @@ export const metadata = { title: "Home · CampusNav" };
 
 export default function HomePage() {
   return (
-    <div className="flex min-h-screen flex-col">
+    <div className="flex min-h-dvh flex-col">
       <Navbar />
       <main className="mx-auto w-full max-w-6xl flex-1 px-4 py-10 md:px-6">
         <div className="mb-10 text-center md:text-left">

@@ -8,6 +8,7 @@ import { Button } from "@/shared/components/ui/button";
 import { Plus, LayoutGrid, Table, Trash2, Undo2, Redo2 } from "lucide-react";
 import { campusStore } from "@/shared/lib/campus-store";
 import { DigitalTwinEditor } from "@/features/admin/components/digital-twin-editor";
+import { getEdgePathType, getPathTypeLabel } from "@/lib/routing/edge-accessibility";
 
 const variantForType: Record<string, Parameters<typeof Badge>[0]["variant"]> = {
   WALK: "default",
@@ -39,13 +40,19 @@ export default function Page() {
     return true;
   });
 
-  const rows = unique.map((e) => ({
-    id: e.id,
-    from: nodeById(e.from)?.name ?? e.from,
-    to: nodeById(e.to)?.name ?? e.to,
-    type: e.type,
-    distance: e.distance,
-  }));
+  const rows = unique.map((e) => {
+    const pType = getEdgePathType(e);
+    const pInfo = getPathTypeLabel(pType, e.type);
+    return {
+      id: e.id,
+      from: nodeById(e.from)?.name ?? e.from,
+      to: nodeById(e.to)?.name ?? e.to,
+      type: e.type,
+      pathType: pType,
+      pathLabel: pInfo.label,
+      distance: e.distance,
+    };
+  });
 
   return (
     <>
@@ -103,6 +110,15 @@ export default function Page() {
               render: (r) => (
                 <Badge variant={variantForType[String(r.type)] ?? "default"}>
                   {String(r.type)}
+                </Badge>
+              ),
+            },
+            {
+              key: "pathType",
+              label: "Path Type",
+              render: (r) => (
+                <Badge variant={r.pathType === "EV" ? "success" : "default"} className="font-semibold">
+                  {r.pathType === "EV" ? "⚡ EV Path" : "🚶 Only Walk"}
                 </Badge>
               ),
             },

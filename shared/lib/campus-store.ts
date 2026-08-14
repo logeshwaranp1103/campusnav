@@ -1718,6 +1718,7 @@ class CampusStore {
           from: edge.to,
           to: edge.from,
           type: edge.type,
+          pathType: edge.pathType,
           distance: edge.distance,
           bidirectional: true,
           // Propagate group IDs so cleanup/delete operations work correctly
@@ -1734,6 +1735,20 @@ class CampusStore {
     this.saveSnapshotToUndo();
     const prev = { ...this.edges[idx] };
     this.edges[idx] = { ...this.edges[idx], ...patch };
+    const updated = this.edges[idx];
+
+    // Sync reverse edge properties if twin exists
+    const revId = `e-${updated.to}-${updated.from}`;
+    const revIdx = this.edges.findIndex((e) => e.id === revId);
+    if (revIdx !== -1) {
+      this.edges[revIdx] = {
+        ...this.edges[revIdx],
+        ...(patch.pathType !== undefined ? { pathType: patch.pathType } : {}),
+        ...(patch.type !== undefined ? { type: patch.type } : {}),
+        ...(patch.distance !== undefined ? { distance: patch.distance } : {}),
+      };
+    }
+
     this.pendingChanges.unshift({
       id: `change-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
       type: "UPDATE_EDGE",
@@ -1814,6 +1829,7 @@ class CampusStore {
       from: fromNode.id,
       to: newNodeId,
       type: edge.type,
+      pathType: edge.pathType,
       distance: dist1,
       bidirectional: edge.bidirectional,
     };
@@ -1822,6 +1838,7 @@ class CampusStore {
       from: newNodeId,
       to: toNode.id,
       type: edge.type,
+      pathType: edge.pathType,
       distance: dist2,
       bidirectional: edge.bidirectional,
     };
@@ -2844,6 +2861,32 @@ class CampusStore {
     this.saveToLocalStorage();
     this.logAction("UPDATE", "Discarded Draft Edits");
     this.notify();
+  }
+
+  public importFullData(snapshot: any): boolean {
+    try {
+      if (!snapshot) return false;
+      const s = snapshot.snapshot || snapshot;
+      this.saveSnapshotToUndo();
+      if (Array.isArray(s.buildings)) this.buildings = s.buildings;
+      if (Array.isArray(s.floors)) this.floors = s.floors;
+      if (Array.isArray(s.nodes)) this.nodes = s.nodes;
+      if (Array.isArray(s.edges)) this.edges = s.edges;
+      if (Array.isArray(s.destinations)) this.destinations = s.destinations;
+      if (Array.isArray(s.events)) this.events = s.events;
+      if (Array.isArray(s.obstacles)) this.obstacles = s.obstacles;
+      if (Array.isArray(s.stairGroups)) this.stairGroups = s.stairGroups;
+      if (Array.isArray(s.liftGroups)) this.liftGroups = s.liftGroups;
+      if (Array.isArray(s.doors)) this.doors = s.doors;
+      this.pendingChanges = [];
+      this.logAction("UPDATE", "Imported Whole Campus Data");
+      this.saveToLocalStorage();
+      this.notify();
+      return true;
+    } catch (e) {
+      console.warn("Failed to import full data snapshot:", e);
+      return false;
+    }
   }
 }
 
