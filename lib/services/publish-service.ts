@@ -1,7 +1,7 @@
 import { prisma } from "../db";
 import { validateCampusGraph, type GraphValidationReport } from "../validation/graph-validator";
 import { logAuditEvent } from "./audit-service";
-import { getFloorCode, type Building, type Floor, type Node, type Edge, type Destination, type Obstacle } from "../../shared/data/campus";
+import { getFloorCode, type Building, type Floor, type Node, type Edge, type Destination, type Obstacle, type Door } from "../../shared/data/campus";
 
 export interface PublishResult {
   success: boolean;
@@ -349,29 +349,42 @@ export async function publishDraftGraph(
 export async function getRelationalGraphFromDatabase(): Promise<DraftSnapshot | null> {
   if (!prisma) return null;
   try {
-    const [rawBuildings, rawFloors, rawNodes, rawEdges, rawDestinations, rawObstacles] = await Promise.all([
+    const [rawBuildings, rawFloors, rawNodes, rawEdges, rawDestinations, rawObstacles, rawDoors] = await Promise.all([
       prisma.building.findMany(),
       prisma.floor.findMany(),
       prisma.node.findMany(),
       prisma.edge.findMany(),
       prisma.destination.findMany(),
       prisma.obstacle.findMany(),
+      prisma.door.findMany().catch(() => []),
     ]);
 
     if (rawNodes.length === 0 && rawBuildings.length === 0) {
       return null;
     }
 
-    const buildings: Building[] = rawBuildings.map((b) => ({
+    const buildings: Building[] = rawBuildings.map((b: any) => ({
       id: b.id,
       campusId: b.campusId,
       name: b.name,
       shortCode: b.shortCode ?? undefined,
+      category: b.category ?? b.categoryType ?? undefined,
+      description: b.description ?? undefined,
       color: b.color ?? undefined,
       x: b.x ?? undefined,
       y: b.y ?? undefined,
       width: b.width ?? undefined,
       height: b.height ?? undefined,
+      lat: b.latitude !== undefined ? b.latitude : (b.lat !== undefined ? b.lat : undefined),
+      lng: b.longitude !== undefined ? b.longitude : (b.lng !== undefined ? b.lng : undefined),
+      corner1Lat: b.corner1Lat,
+      corner1Lng: b.corner1Lng,
+      corner2Lat: b.corner2Lat,
+      corner2Lng: b.corner2Lng,
+      corner3Lat: b.corner3Lat,
+      corner3Lng: b.corner3Lng,
+      corner4Lat: b.corner4Lat,
+      corner4Lng: b.corner4Lng,
       floorsCount: b.floorsCount ?? 0,
       basementsCount: b.basementsCount ?? 0,
     }));
@@ -384,15 +397,15 @@ export async function getRelationalGraphFromDatabase(): Promise<DraftSnapshot | 
       code: getFloorCode(f.ordinal, f.name),
     }));
 
-    const nodes: Node[] = rawNodes.map((n) => ({
+    const nodes: Node[] = rawNodes.map((n: any) => ({
       id: n.id,
       type: n.type as any,
       name: n.name ?? undefined,
       floorId: n.floorId ?? "",
       x: n.x ?? 0,
       y: n.y ?? 0,
-      lat: n.latitude ?? undefined,
-      lng: n.longitude ?? undefined,
+      lat: n.latitude !== undefined ? n.latitude : (n.lat !== undefined ? n.lat : undefined),
+      lng: n.longitude !== undefined ? n.longitude : (n.lng !== undefined ? n.lng : undefined),
       searchable: n.searchable ?? true,
     }));
 
@@ -408,15 +421,21 @@ export async function getRelationalGraphFromDatabase(): Promise<DraftSnapshot | 
       bidirectional: e.bidirectional ?? true,
     }));
 
-    const destinations: Destination[] = rawDestinations.map((d) => ({
+    const destinations: Destination[] = rawDestinations.map((d: any) => ({
       id: d.id,
       nodeId: d.nodeId,
       name: d.name,
       category: d.category ?? "Custom",
-      aliases: [],
+      description: d.description ?? undefined,
+      floorId: d.floorId ?? undefined,
+      x: d.x ?? undefined,
+      y: d.y ?? undefined,
+      width: d.width ?? undefined,
+      height: d.height ?? undefined,
+      aliases: d.aliases || [],
     }));
 
-    const obstacles: Obstacle[] = rawObstacles.map((obs) => ({
+    const obstacles: Obstacle[] = rawObstacles.map((obs: any) => ({
       id: obs.id,
       campusId: obs.campusId,
       floorId: obs.floorId ?? "f-out",
@@ -425,7 +444,17 @@ export async function getRelationalGraphFromDatabase(): Promise<DraftSnapshot | 
       radius: obs.radius,
       edgeIds: obs.edgeIds || [],
       reason: obs.reason ?? undefined,
-      expiresAt: obs.expiresAt ? obs.expiresAt.toISOString() : undefined,
+      expiresAt: obs.expiresAt ? (typeof obs.expiresAt === "string" ? obs.expiresAt : obs.expiresAt.toISOString()) : undefined,
+    }));
+
+    const doors: Door[] = rawDoors.map((d: any) => ({
+      id: d.id,
+      floorId: d.floorId,
+      type: d.type as any,
+      name: d.name ?? undefined,
+      x: d.x,
+      y: d.y,
+      connectedNodeId: d.connectedNodeId ?? undefined,
     }));
 
     return {
@@ -435,6 +464,7 @@ export async function getRelationalGraphFromDatabase(): Promise<DraftSnapshot | 
       edges,
       destinations,
       obstacles,
+      doors,
     };
   } catch (e) {
     console.warn("Error building graph snapshot from relational database:", e);

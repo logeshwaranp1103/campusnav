@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
-import { getRelationalGraphFromDatabase } from "@/lib/services/publish-service";
+import { getActivePublishedGraph, getRelationalGraphFromDatabase } from "@/lib/services/publish-service";
 
 export async function GET() {
   try {
@@ -10,13 +10,28 @@ export async function GET() {
       });
 
       if (draftRecord && draftRecord.snapshot) {
-        return NextResponse.json({ draft: draftRecord.snapshot });
+        const snap = draftRecord.snapshot as any;
+        const hasEntities = snap && (
+          (Array.isArray(snap.buildings) && snap.buildings.length > 0) ||
+          (Array.isArray(snap.nodes) && snap.nodes.length > 0) ||
+          (Array.isArray(snap.floors) && snap.floors.length > 0) ||
+          (Array.isArray(snap.destinations) && snap.destinations.length > 0)
+        );
+        if (hasEntities) {
+          return NextResponse.json({ draft: draftRecord.snapshot });
+        }
       }
 
-      // Fallback: Check relational DB tables (building, floor, node, edge, destination) if active-draft record does not exist yet
+      // Fallback 1: Check relational DB tables (building, floor, node, edge, destination, door)
       const relational = await getRelationalGraphFromDatabase();
       if (relational) {
         return NextResponse.json({ draft: relational });
+      }
+
+      // Fallback 2: Check published graph in PostgreSQL DB
+      const published = await getActivePublishedGraph();
+      if (published) {
+        return NextResponse.json({ draft: published });
       }
     }
     // No draft in DB — return empty graph structure
