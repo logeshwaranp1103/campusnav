@@ -10,6 +10,7 @@ import { getObstructedEdgeIds } from "@/lib/routing/graph";
 import { Building2, Layers, Compass, Locate, AlertTriangle, ZoomIn, ZoomOut, Maximize2, ChevronDown } from "lucide-react";
 import { useVisitorGps } from "@/shared/hooks/use-visitor-gps";
 import { PIXELS_PER_METER, gpsToCanvas } from "@/lib/geo/projection";
+import { getBuildingCanvasPoints, getBuildingCenter, getPolygonSvgPath } from "@/lib/geo/building-geometry";
 import { DestinationDetailsDrawer } from "./destination-details-drawer";
 import { isEventActive } from "@/shared/lib/event-utils";
 
@@ -835,16 +836,12 @@ function MapCanvas({
         </g>
       )}
 
-      {/* Buildings Footprints & Outlines — Light Theme Architectural Blueprint */}
+      {/* Buildings Footprints & Outlines — Light Theme Architectural Blueprint (True N-Corner Polygon) */}
       <g>
         {buildings.map((b) => {
-          const bCanvas = (b.lat && b.lng) ? gpsToCanvas(b.lat, b.lng) : { x: 0, y: 0 };
-          const centerCanvasX = b.x ?? bCanvas.x;
-          const centerCanvasY = b.y ?? bCanvas.y;
-          const bw = b.width ?? 180;
-          const bh = b.height ?? 120;
-          const bx = centerCanvasX - bw / 2;
-          const by = centerCanvasY - bh / 2;
+          const canvasPts = getBuildingCanvasPoints(b);
+          const svgPath = getPolygonSvgPath(canvasPts);
+          const centerPos = getBuildingCenter(b);
 
           const buildingEvents = showEvents ? allEvents.filter((ev) => ev.buildingId === b.id) : [];
           const activeEvent = buildingEvents.find((ev) => isEventActive(ev, nowMs));
@@ -855,54 +852,46 @@ function MapCanvas({
 
           return (
             <g key={b.id}>
-              {/* Outer Glow Outline */}
-              <rect
-                x={bx - 1}
-                y={by - 1}
-                width={bw + 2}
-                height={bh + 2}
-                rx={12}
+              {/* Outer Glow Polygon Outline */}
+              <path
+                d={svgPath}
                 fill="none"
                 stroke={strokeColor}
-                strokeWidth="3"
+                strokeWidth="5"
                 strokeOpacity="0.2"
+                strokeLinejoin="round"
               />
-              {/* Solid Light-Theme Building Footprint */}
-              <rect
-                x={bx}
-                y={by}
-                width={bw}
-                height={bh}
-                rx={10}
+              {/* Solid Light-Theme Building Polygon Footprint */}
+              <path
+                d={svgPath}
                 fill="url(#bldFillGrad)"
                 stroke={strokeColor}
                 strokeWidth={activeEvent ? "3" : "2.5"}
                 strokeDasharray={floorId !== "f-out" && !isGroundFloor ? "6 4" : undefined}
+                strokeLinejoin="round"
               />
               {/* Inner Architectural Accent Line */}
-              <rect
-                x={bx + 6}
-                y={by + 6}
-                width={bw - 12}
-                height={bh - 12}
-                rx={6}
+              <path
+                d={svgPath}
                 fill="none"
                 stroke={strokeColor}
                 strokeWidth="1"
                 strokeOpacity="0.25"
                 strokeDasharray="4 4"
+                strokeLinejoin="round"
+                transform={`translate(${centerPos.x}, ${centerPos.y}) scale(0.92) translate(${-centerPos.x}, ${-centerPos.y})`}
               />
 
-              {/* Prominent White Building Header Badge */}
-              <g transform={`translate(${bx + bw / 2}, ${by + 26})`}>
+              {/* Prominent White Building Header Badge Centered on Polygon Centroid */}
+              <g transform={`translate(${centerPos.x}, ${centerPos.y})`}>
                 <rect
                   x={-badgeWidth / 2}
                   y="-16"
                   width={badgeWidth}
                   height="32"
-                  rx="8"
+                  rx="16"
                   fill="#ffffff"
-                  stroke="#4f46e5"
+                  stroke={strokeColor}
                   strokeWidth="2"
                   className="shadow-md"
                 />
@@ -911,11 +900,11 @@ function MapCanvas({
                   y="4.5"
                   textAnchor="middle"
                   fill="#1e1b4b"
-                  fontSize="15"
+                  fontSize="14"
                   fontWeight="900"
                   letterSpacing="0.02em"
                 >
-                  <tspan fontSize="17">🏢 </tspan>
+                  <tspan fontSize="16">🏢 </tspan>
                   <tspan>{bName}</tspan>
                 </text>
               </g>

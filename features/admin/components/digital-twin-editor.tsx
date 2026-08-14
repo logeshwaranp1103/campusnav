@@ -48,6 +48,7 @@ import { Button } from "@/shared/components/ui/button";
 import { Input } from "@/shared/components/ui/input";
 import { isPointInCampusBoundary } from "@/lib/geo/boundary";
 import { canvasToGps, gpsToCanvas } from "@/lib/geo/projection";
+import { getBuildingCanvasPoints, getBuildingCenter, getPolygonSvgPath, getPolygonPointsString } from "@/lib/geo/building-geometry";
 import { calculateGeographicDistance } from "@/lib/geo/haversine";
 import { Badge } from "@/shared/components/ui/badge";
 import { useToast } from "@/shared/components/ui/toast";
@@ -2571,31 +2572,12 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
                   );
                 })}
 
-              {/* Render Buildings — Styled 1-to-1 with User Navigation Map */}
+              {/* Render Buildings — Styled 1-to-1 with User Navigation Map (True N-Corner Polygon) */}
               {visibleLayers.buildings &&
                 storeData.buildings.map((b) => {
-                  const bCanvas = (b.lat && b.lng) ? gpsToCanvas(b.lat, b.lng) : { x: 0, y: 0 };
-                  const centerCanvasX = b.x ?? bCanvas.x;
-                  const centerCanvasY = b.y ?? bCanvas.y;
-                  let bw = b.width ?? 180;
-                  let bh = b.height ?? 120;
-
-                  if (
-                    b.corner1Lat && b.corner1Lng &&
-                    b.corner2Lat && b.corner2Lng &&
-                    b.corner3Lat && b.corner3Lng
-                  ) {
-                    const realW = calculateGeographicDistance(b.corner1Lat, b.corner1Lng, b.corner2Lat, b.corner2Lng);
-                    const realH = calculateGeographicDistance(b.corner2Lat, b.corner2Lng, b.corner3Lat, b.corner3Lng);
-                    if (realW > 0 && realH > 0) {
-                      const area = bw * bh;
-                      const realRatio = realW / realH;
-                      bh = Math.sqrt(area / realRatio);
-                      bw = realRatio * bh;
-                    }
-                  }
-                  const bx = centerCanvasX - bw / 2;
-                  const by = centerCanvasY - bh / 2;
+                  const canvasPts = getBuildingCanvasPoints(b);
+                  const svgPath = getPolygonSvgPath(canvasPts);
+                  const centerPos = getBuildingCenter(b);
                   const isSelected = selectedElement?.type === "building" && selectedElement.id === b.id;
                   const isPlacementTool = activeTool === "NODE" || activeTool === "DESTINATION" || activeTool === "OBSTACLE" || activeTool === "EVENT" || activeTool === "EDGE" || activeTool === "DOOR" || activeTool === "ROOM" || activeTool === "PLACE_VERTICAL";
 
@@ -2607,7 +2589,6 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
                   return (
                     <g
                       key={b.id}
-                      transform={`translate(${bx}, ${by})`}
                       onClick={(e) => {
                         if (isPlacementTool) return;
                         e.stopPropagation();
@@ -2617,53 +2598,48 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
                         if (isPlacementTool) return;
                         e.stopPropagation();
                         setDraggingId({ type: "building", id: b.id });
-                        setDragOffset({ x: mouseCanvasPos.x - centerCanvasX, y: mouseCanvasPos.y - centerCanvasY });
+                        setDragOffset({ x: mouseCanvasPos.x - centerPos.x, y: mouseCanvasPos.y - centerPos.y });
                       }}
                       className={isPlacementTool ? "pointer-events-none" : "cursor-grab active:cursor-grabbing"}
                     >
-                      {/* Outer Glow Outline */}
-                      <rect
-                        x={-1}
-                        y={-1}
-                        width={bw + 2}
-                        height={bh + 2}
-                        rx={12}
+                      {/* Outer Glow Polygon Outline */}
+                      <path
+                        d={svgPath}
                         fill="none"
                         stroke={strokeColor}
-                        strokeWidth="3"
+                        strokeWidth="5"
                         strokeOpacity="0.2"
+                        strokeLinejoin="round"
                       />
-                      {/* Solid Light-Theme Building Footprint */}
-                      <rect
-                        width={bw}
-                        height={bh}
-                        rx={10}
+                      {/* Solid Light-Theme Building Polygon Footprint */}
+                      <path
+                        d={svgPath}
                         fill="url(#bldFillGrad)"
                         stroke={strokeColor}
                         strokeWidth={isSelected ? "3.5" : buildingEvent ? "3" : "2.5"}
                         strokeDasharray={activeFloorId !== "f-out" && !isGroundFloorView ? "6 4" : undefined}
+                        strokeLinejoin="round"
                       />
-                      {/* Inner Architectural Accent Line */}
-                      <rect
-                        x={6}
-                        y={6}
-                        width={bw - 12}
-                        height={bh - 12}
-                        rx={6}
+                      {/* Inner Architectural Accent Polygon Line */}
+                      <path
+                        d={svgPath}
                         fill="none"
                         stroke={strokeColor}
                         strokeWidth="1"
-                        strokeOpacity="0.25"
+                        strokeOpacity="0.3"
                         strokeDasharray="4 4"
+                        strokeLinejoin="round"
+                        transform={`translate(${centerPos.x}, ${centerPos.y}) scale(0.92) translate(${-centerPos.x}, ${-centerPos.y})`}
                       />
-                      {/* Prominent White Building Header Badge */}
-                      <g transform={`translate(${bw / 2}, 26)`}>
+
+                      {/* Prominent White Building Header Badge Centered on Polygon Centroid */}
+                      <g transform={`translate(${centerPos.x}, ${centerPos.y})`}>
                         <rect
                           x={-badgeWidth / 2}
                           y="-16"
                           width={badgeWidth}
                           height="32"
-                          rx="8"
+                          rx="16"
                           fill="#ffffff"
                           stroke={strokeColor}
                           strokeWidth="2"
@@ -2674,16 +2650,16 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
                           y="4.5"
                           textAnchor="middle"
                           fill="#1e1b4b"
-                          fontSize="15"
+                          fontSize="14"
                           fontWeight="900"
                           letterSpacing="0.02em"
                         >
-                          <tspan fontSize="17">🏢 </tspan>
+                          <tspan fontSize="16">🏢 </tspan>
                           <tspan>{bName}</tspan>
                         </text>
                       </g>
                       {buildingEvent && (
-                        <g transform={`translate(${bw - 30}, 8)`}>
+                        <g transform={`translate(${centerPos.x + badgeWidth / 2 + 6}, ${centerPos.y - 12})`}>
                           <rect width="22" height="22" rx="11" fill={buildingEvent.color || "#f59e0b"} />
                           <text x="11" y="15" textAnchor="middle" fill="#ffffff" fontSize="11" fontWeight="bold">
                             ✨
@@ -3725,53 +3701,31 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
                   );
                 })}
 
-                {/* Render ALL Buildings in Minimap with Accurate Footprints & Labels */}
+                {/* Render ALL Buildings in Minimap with Accurate Polygon Footprints & Labels */}
                 {storeData.buildings.map((b) => {
-                  const cx = b.x ?? 100;
-                  const cy = b.y ?? 100;
-                  let bw = b.width ?? 180;
-                  let bh = b.height ?? 120;
-
-                  if (
-                    b.corner1Lat && b.corner1Lng &&
-                    b.corner2Lat && b.corner2Lng &&
-                    b.corner3Lat && b.corner3Lng
-                  ) {
-                    const realW = calculateGeographicDistance(b.corner1Lat, b.corner1Lng, b.corner2Lat, b.corner2Lng);
-                    const realH = calculateGeographicDistance(b.corner2Lat, b.corner2Lng, b.corner3Lat, b.corner3Lng);
-                    if (realW > 0 && realH > 0) {
-                      const area = bw * bh;
-                      const realRatio = realW / realH;
-                      bh = Math.sqrt(area / realRatio);
-                      bw = realRatio * bh;
-                    }
-                  }
-
-                  const bx = cx - bw / 2;
-                  const by = cy - bh / 2;
+                  const canvasPts = getBuildingCanvasPoints(b);
+                  const ptsStr = getPolygonPointsString(canvasPts);
+                  const centerPos = getBuildingCenter(b);
                   const bColor = b.color || "#4f46e5";
 
                   return (
                     <g key={`mini-b-${b.id}`}>
-                      <rect
-                        x={bx}
-                        y={by}
-                        width={bw}
-                        height={bh}
-                        rx={6}
+                      <polygon
+                        points={ptsStr}
                         fill={bColor}
                         fillOpacity="0.55"
                         stroke={bColor}
                         strokeWidth={Math.max(2, minimapBounds.width / 350)}
+                        strokeLinejoin="round"
                       />
                       <text
-                        x={cx}
-                        y={cy + 4}
+                        x={centerPos.x}
+                        y={centerPos.y + 4}
                         textAnchor="middle"
                         fill="#ffffff"
                         fontSize={Math.max(14, minimapBounds.width / 55)}
                         fontWeight="bold"
-                        className="pointer-events-none drop-shadow-sm"
+                        className="pointer-events-none drop-shadow-sm select-none"
                       >
                         {b.name}
                       </text>

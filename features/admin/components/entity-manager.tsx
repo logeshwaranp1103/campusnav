@@ -42,6 +42,7 @@ import {
 } from "lucide-react";
 import { campusStore } from "@/shared/lib/campus-store";
 import { gpsToCanvas, canvasToGps, getCenterFromCorners } from "@/lib/geo/projection";
+import { getBuildingCorners, validatePolygonCorners, type BuildingCorner } from "@/lib/geo/building-geometry";
 import { calculateHaversineDistance } from "@/lib/geo/haversine";
 import { calculateEdgePathSplit } from "@/lib/geo/edge-splitting";
 import { Card } from "@/shared/components/ui/card";
@@ -222,6 +223,7 @@ export function EntityManager() {
     radius: 10,
     lat: "11.",
     lng: "77.",
+    corners: [] as Array<{ lat: string; lng: string }>,
     corner1Lat: "11.",
     corner1Lng: "77.",
     corner2Lat: "11.",
@@ -378,15 +380,62 @@ export function EntityManager() {
     category: "",
     description: "",
     floorsCount: 3,
-    corner1Lat: "11.",
-    corner1Lng: "77.",
-    corner2Lat: "11.",
-    corner2Lng: "77.",
-    corner3Lat: "11.",
-    corner3Lng: "77.",
-    corner4Lat: "11.",
-    corner4Lng: "77.",
+    corners: [
+      { lat: "11.4975", lng: "77.2765" },
+      { lat: "11.4975", lng: "77.2780" },
+      { lat: "11.4962", lng: "77.2780" },
+      { lat: "11.4962", lng: "77.2765" },
+    ],
   });
+
+  const handleAddBuildingCorner = () => {
+    setBuildingForm((prev) => ({
+      ...prev,
+      corners: [...prev.corners, { lat: "11.", lng: "77." }],
+    }));
+  };
+
+  const handleRemoveBuildingCorner = (index: number) => {
+    if (buildingForm.corners.length <= 3) return;
+    setBuildingForm((prev) => ({
+      ...prev,
+      corners: prev.corners.filter((_, i) => i !== index),
+    }));
+  };
+
+  const handleUpdateBuildingCorner = (index: number, field: "lat" | "lng", val: string) => {
+    setBuildingForm((prev) => {
+      const nextCorners = [...prev.corners];
+      nextCorners[index] = { ...nextCorners[index], [field]: val };
+      return { ...prev, corners: nextCorners };
+    });
+  };
+
+  const handleAddEditBuildingCorner = () => {
+    setEditForm((prev: any) => ({
+      ...prev,
+      corners: [...(prev.corners || []), { lat: "11.", lng: "77." }],
+    }));
+  };
+
+  const handleRemoveEditBuildingCorner = (index: number) => {
+    setEditForm((prev: any) => {
+      const corners = prev.corners || [];
+      if (corners.length <= 3) return prev;
+      return {
+        ...prev,
+        corners: corners.filter((_: any, i: number) => i !== index),
+      };
+    });
+  };
+
+  const handleUpdateEditBuildingCorner = (index: number, field: "lat" | "lng", val: string) => {
+    setEditForm((prev: any) => {
+      const nextCorners = [...(prev.corners || [])];
+      nextCorners[index] = { ...nextCorners[index], [field]: val };
+      return { ...prev, corners: nextCorners };
+    });
+  };
 
   const [nodeForm, setNodeForm] = useState({
     name: "",
@@ -504,21 +553,10 @@ export function EntityManager() {
   }, [edgeForm.firstNodeId, edgeForm.secondNodeId, edgeForm.edgeType, edgeForm.toleranceMeters, storeData.nodes]);
 
   const buildingFootprintPoints = useMemo(() => {
-    const c1Lat = parseFloat(buildingForm.corner1Lat) || 11.4975;
-    const c1Lng = parseFloat(buildingForm.corner1Lng) || 77.2765;
-    const c2Lat = parseFloat(buildingForm.corner2Lat) || 11.4975;
-    const c2Lng = parseFloat(buildingForm.corner2Lng) || 77.278;
-    const c3Lat = parseFloat(buildingForm.corner3Lat) || 11.4962;
-    const c3Lng = parseFloat(buildingForm.corner3Lng) || 77.278;
-    const c4Lat = parseFloat(buildingForm.corner4Lat) || 11.4962;
-    const c4Lng = parseFloat(buildingForm.corner4Lng) || 77.2765;
-
-    const corners = [
-      { lat: c1Lat, lng: c1Lng },
-      { lat: c2Lat, lng: c2Lng },
-      { lat: c3Lat, lng: c3Lng },
-      { lat: c4Lat, lng: c4Lng },
-    ];
+    const corners = (buildingForm.corners || []).map((c) => ({
+      lat: parseFloat(c.lat) || 11.4975,
+      lng: parseFloat(c.lng) || 77.2765,
+    }));
 
     const lats = corners.map((c) => c.lat);
     const lngs = corners.map((c) => c.lng);
@@ -539,7 +577,7 @@ export function EntityManager() {
       .join(" ");
 
     return { svgPoints, minLat, maxLat, minLng, maxLng };
-  }, [buildingForm]);
+  }, [buildingForm.corners]);
 
   // ---------------------------------------------------------------------------
   // CREATE & EDIT ACTIONS
@@ -568,6 +606,24 @@ export function EntityManager() {
     return { lat, lng };
   };
 
+  const handleResetAllForms = () => {
+    const defaultBld = storeData.buildings[0]?.id || "";
+    const defaultFloors = storeData.floors.filter((f) => f.buildingId === defaultBld);
+
+    setBuildingForm({
+      name: "",
+      category: "",
+      description: "",
+      floorsCount: 3,
+      corners: [
+        { lat: "11.4975", lng: "77.2765" },
+        { lat: "11.4975", lng: "77.2780" },
+        { lat: "11.4962", lng: "77.2780" },
+        { lat: "11.4962", lng: "77.2765" },
+      ],
+    });
+  };
+
   const handleCreateEntity = () => {
     switch (selectedType) {
       case "BUILDING": {
@@ -576,36 +632,30 @@ export function EntityManager() {
           return;
         }
 
-        const bldId = `bld-${Date.now().toString(36)}`;
-        const c1Lat = parseFloat(buildingForm.corner1Lat) || 11.4975;
-        const c1Lng = parseFloat(buildingForm.corner1Lng) || 77.2765;
-        if (c1Lat < -90 || c1Lat > 90 || c1Lng < -180 || c1Lng > 180) {
-          toast({ type: "error", title: "Invalid GPS Coordinates", description: "Corner 1 coordinates outside valid GPS bounds." });
+        const parsedCorners: BuildingCorner[] = (buildingForm.corners || []).map((c) => ({
+          lat: parseFloat(c.lat),
+          lng: parseFloat(c.lng),
+        }));
+
+        const validation = validatePolygonCorners(parsedCorners);
+        if (!validation.valid) {
+          toast({
+            type: "error",
+            title: "Invalid Building Footprint",
+            description: validation.error || "Building footprint requires at least 3 valid corners.",
+          });
           return;
         }
-        const c2Lat = parseFloat(buildingForm.corner2Lat) || 11.4975;
-        const c2Lng = parseFloat(buildingForm.corner2Lng) || 77.278;
-        const c3Lat = parseFloat(buildingForm.corner3Lat) || 11.4962;
-        const c3Lng = parseFloat(buildingForm.corner3Lng) || 77.278;
-        const c4Lat = parseFloat(buildingForm.corner4Lat) || 11.4962;
-        const c4Lng = parseFloat(buildingForm.corner4Lng) || 77.2765;
 
-        const corners = [
-          { lat: c1Lat, lng: c1Lng },
-          { lat: c2Lat, lng: c2Lng },
-          { lat: c3Lat, lng: c3Lng },
-          { lat: c4Lat, lng: c4Lng }
-        ];
-
-        const center = getCenterFromCorners(corners);
+        const bldId = `bld-${Date.now().toString(36)}`;
+        const center = getCenterFromCorners(parsedCorners);
         const centerLat = center.lat;
         const centerLng = center.lng;
         const { x, y } = gpsToCanvas(centerLat, centerLng);
 
-        // Compute visual width and height from the real-world distance between the corners on the canvas
-        const canvasCorners = corners.map(c => gpsToCanvas(c.lat, c.lng));
-        const xs = canvasCorners.map(c => c.x);
-        const ys = canvasCorners.map(c => c.y);
+        const canvasCorners = parsedCorners.map((c) => gpsToCanvas(c.lat, c.lng));
+        const xs = canvasCorners.map((c) => c.x);
+        const ys = canvasCorners.map((c) => c.y);
         const calcWidth = Math.max(10, Math.max(...xs) - Math.min(...xs));
         const calcHeight = Math.max(10, Math.max(...ys) - Math.min(...ys));
 
@@ -613,42 +663,44 @@ export function EntityManager() {
           id: bldId,
           campusId: storeData.campus.id,
           name: buildingForm.name.trim(),
-          shortCode: buildingForm.category.toUpperCase().slice(0, 4),
+          shortCode: buildingForm.category ? buildingForm.category.toUpperCase().slice(0, 4) : "BLD",
           description: buildingForm.description,
           floorsCount: typeof buildingForm.floorsCount === "number" && !isNaN(buildingForm.floorsCount) ? Math.max(0, buildingForm.floorsCount) : 0,
           lat: centerLat,
           lng: centerLng,
+          centerLat,
+          centerLng,
           x,
           y,
           width: calcWidth,
           height: calcHeight,
-          corner1Lat: c1Lat,
-          corner1Lng: c1Lng,
-          corner2Lat: c2Lat,
-          corner2Lng: c2Lng,
-          corner3Lat: c3Lat,
-          corner3Lng: c3Lng,
-          corner4Lat: c4Lat,
-          corner4Lng: c4Lng,
-          centerLat,
-          centerLng,
+          footprint: parsedCorners,
+          ...(parsedCorners.length >= 4 ? {
+            corner1Lat: parsedCorners[0].lat, corner1Lng: parsedCorners[0].lng,
+            corner2Lat: parsedCorners[1].lat, corner2Lng: parsedCorners[1].lng,
+            corner3Lat: parsedCorners[2].lat, corner3Lng: parsedCorners[2].lng,
+            corner4Lat: parsedCorners[3].lat, corner4Lng: parsedCorners[3].lng,
+          } : {}),
         };
 
         campusStore.addBuilding(newBuilding);
-        toast({ type: "success", title: "Building Created & Synced", description: `Building "${newBuilding.name}" added to Store & CAD Editor! (ID: ${bldId})` });
+        toast({
+          type: "success",
+          title: "Building Created & Synced",
+          description: `Building "${newBuilding.name}" (${parsedCorners.length}-corner polygon) added to Store & CAD Editor!`,
+        });
+
         setBuildingForm({
           name: "",
           category: "",
           description: "",
           floorsCount: 3,
-          corner1Lat: "11.",
-          corner1Lng: "77.",
-          corner2Lat: "11.",
-          corner2Lng: "77.",
-          corner3Lat: "11.",
-          corner3Lng: "77.",
-          corner4Lat: "11.",
-          corner4Lng: "77.",
+          corners: [
+            { lat: "11.4975", lng: "77.2765" },
+            { lat: "11.4975", lng: "77.2780" },
+            { lat: "11.4962", lng: "77.2780" },
+            { lat: "11.4962", lng: "77.2765" },
+          ],
         });
         setStoreData({ ...campusStore.getWorkingData() });
         break;
@@ -901,14 +953,12 @@ export function EntityManager() {
       category: "",
       description: "",
       floorsCount: 3,
-      corner1Lat: "11.",
-      corner1Lng: "77.",
-      corner2Lat: "11.",
-      corner2Lng: "77.",
-      corner3Lat: "11.",
-      corner3Lng: "77.",
-      corner4Lat: "11.",
-      corner4Lng: "77.",
+      corners: [
+        { lat: "11.4975", lng: "77.2765" },
+        { lat: "11.4975", lng: "77.2780" },
+        { lat: "11.4962", lng: "77.2780" },
+        { lat: "11.4962", lng: "77.2765" },
+      ],
     });
 
     setNodeForm({
@@ -1183,20 +1233,18 @@ export function EntityManager() {
 
     switch (payload.category) {
       case "BUILDING": {
-        const corners = extractBuildingCorners(payload);
+        const corners = getBuildingCorners(payload).map((c) => ({ lat: String(c.lat), lng: String(c.lng) }));
         setBuildingForm({
           name: payload.name ? `${payload.name} (Copy)` : "",
           category: payload.buildingCategory !== undefined ? payload.buildingCategory : (payload.categoryType ?? ""),
           description: payload.description || "",
           floorsCount: payload.floorsCount !== undefined ? payload.floorsCount : 3,
-          corner1Lat: corners.corner1Lat,
-          corner1Lng: corners.corner1Lng,
-          corner2Lat: corners.corner2Lat,
-          corner2Lng: corners.corner2Lng,
-          corner3Lat: corners.corner3Lat,
-          corner3Lng: corners.corner3Lng,
-          corner4Lat: corners.corner4Lat,
-          corner4Lng: corners.corner4Lng,
+          corners: corners.length >= 3 ? corners : [
+            { lat: "11.4975", lng: "77.2765" },
+            { lat: "11.4975", lng: "77.2780" },
+            { lat: "11.4962", lng: "77.2780" },
+            { lat: "11.4962", lng: "77.2765" },
+          ],
         });
         break;
       }
@@ -1280,6 +1328,7 @@ export function EntityManager() {
 
   const handleOpenEditModal = (item: { id: string; category: EntityCategory; name: string; raw: any }) => {
     setEditingItem(item);
+    const existingCorners = getBuildingCorners(item.raw).map((c) => ({ lat: String(c.lat), lng: String(c.lng) }));
     setEditForm({
       name: item.name,
       category: item.raw.category || item.raw.shortCode || "Classroom",
@@ -1296,6 +1345,7 @@ export function EntityManager() {
       radius: item.raw.radius || 10,
       lat: item.raw.lat !== undefined ? String(item.raw.lat) : item.raw.centerLat !== undefined ? String(item.raw.centerLat) : (item.raw.x !== undefined && item.raw.y !== undefined ? String(canvasToGps(item.raw.x, item.raw.y).lat.toFixed(6)) : "11."),
       lng: item.raw.lng !== undefined ? String(item.raw.lng) : item.raw.centerLng !== undefined ? String(item.raw.centerLng) : (item.raw.x !== undefined && item.raw.y !== undefined ? String(canvasToGps(item.raw.x, item.raw.y).lng.toFixed(6)) : "77."),
+      corners: existingCorners,
       corner1Lat: item.raw.corner1Lat !== undefined ? String(item.raw.corner1Lat) : "",
       corner1Lng: item.raw.corner1Lng !== undefined ? String(item.raw.corner1Lng) : "",
       corner2Lat: item.raw.corner2Lat !== undefined ? String(item.raw.corner2Lat) : "",
@@ -1324,57 +1374,52 @@ export function EntityManager() {
 
     switch (editingItem.category) {
       case "BUILDING": {
-        const c1Lat = parseFloat(editForm.corner1Lat);
-        const c1Lng = parseFloat(editForm.corner1Lng);
-        const c2Lat = parseFloat(editForm.corner2Lat);
-        const c2Lng = parseFloat(editForm.corner2Lng);
-        const c3Lat = parseFloat(editForm.corner3Lat);
-        const c3Lng = parseFloat(editForm.corner3Lng);
-        const c4Lat = parseFloat(editForm.corner4Lat);
-        const c4Lng = parseFloat(editForm.corner4Lng);
+        const parsedCorners: BuildingCorner[] = (editForm.corners || []).map((c: any) => ({
+          lat: parseFloat(c.lat),
+          lng: parseFloat(c.lng),
+        }));
 
-        let centerLat = parseFloat(editForm.lat);
-        let centerLng = parseFloat(editForm.lng);
-
-        const cornersProvided = !isNaN(c1Lat) && !isNaN(c1Lng) && !isNaN(c2Lat) && !isNaN(c2Lng) &&
-          !isNaN(c3Lat) && !isNaN(c3Lng) && !isNaN(c4Lat) && !isNaN(c4Lng);
-
-        if (cornersProvided) {
-          const center = getCenterFromCorners([
-            { lat: c1Lat, lng: c1Lng },
-            { lat: c2Lat, lng: c2Lng },
-            { lat: c3Lat, lng: c3Lng },
-            { lat: c4Lat, lng: c4Lng },
-          ]);
-          centerLat = center.lat;
-          centerLng = center.lng;
+        const validation = validatePolygonCorners(parsedCorners);
+        if (!validation.valid) {
+          toast({
+            type: "error",
+            title: "Invalid Building Footprint",
+            description: validation.error || "Building footprint requires at least 3 valid corners.",
+          });
+          return;
         }
 
-        const { x, y } = (!isNaN(centerLat) && !isNaN(centerLng))
-          ? gpsToCanvas(centerLat, centerLng)
-          : { x: editingItem.raw.x, y: editingItem.raw.y };
+        const center = getCenterFromCorners(parsedCorners);
+        const centerLat = center.lat;
+        const centerLng = center.lng;
+        const { x, y } = gpsToCanvas(centerLat, centerLng);
+
+        const canvasCorners = parsedCorners.map((c) => gpsToCanvas(c.lat, c.lng));
+        const xs = canvasCorners.map((c) => c.x);
+        const ys = canvasCorners.map((c) => c.y);
+        const calcWidth = Math.max(10, Math.max(...xs) - Math.min(...xs));
+        const calcHeight = Math.max(10, Math.max(...ys) - Math.min(...ys));
 
         campusStore.updateBuilding(editingItem.id, {
           name: newName,
           shortCode: editForm.category ? editForm.category.toUpperCase().slice(0, 4) : editingItem.raw.shortCode,
           description: editForm.description,
           floorsCount: editForm.floorsCount,
-          lat: !isNaN(centerLat) ? centerLat : editingItem.raw.lat,
-          lng: !isNaN(centerLng) ? centerLng : editingItem.raw.lng,
+          lat: centerLat,
+          lng: centerLng,
+          centerLat,
+          centerLng,
           x,
           y,
-          ...(cornersProvided ? {
-            corner1Lat: c1Lat,
-            corner1Lng: c1Lng,
-            corner2Lat: c2Lat,
-            corner2Lng: c2Lng,
-            corner3Lat: c3Lat,
-            corner3Lng: c3Lng,
-            corner4Lat: c4Lat,
-            corner4Lng: c4Lng,
-            centerLat,
-            centerLng,
-          } : {})
+          width: calcWidth,
+          height: calcHeight,
+          footprint: parsedCorners,
+          ...(parsedCorners.length >= 4 ? {
+            corner1Lat: parsedCorners[0].lat, corner1Lng: parsedCorners[0].lng,
+            corner2Lat: parsedCorners[1].lat, corner2Lng: parsedCorners[1].lng,
+            corner3Lat: parsedCorners[2].lat, corner3Lng: parsedCorners[2].lng,
+            corner4Lat: parsedCorners[3].lat, corner4Lng: parsedCorners[3].lng,
+          } : {}),
         });
         break;
       }
@@ -1998,85 +2043,81 @@ export function EntityManager() {
                       className="mt-1.5"
                     />
                   </div>
-                </div>
-
-                {/* Building GPS Boundary - 4 Corners */}
-                <div className="rounded-xl border border-[rgb(var(--primary)/0.25)] bg-[rgb(var(--primary)/0.04)] p-4 space-y-3">
-                  <div className="flex items-center gap-2">
-                    <MapPin className="h-4 w-4 text-[rgb(var(--primary))]" />
-                    <h4 className="text-xs font-extrabold uppercase tracking-wider text-[rgb(var(--fg))]">
-                      Building GPS Boundary (Require 4 Latitude/Longitude Coordinate Pairs)
-                    </h4>
+                               {/* Dynamic Building GPS Footprint Corners */}
+                <div className="rounded-xl border border-[rgb(var(--primary)/0.25)] bg-[rgb(var(--primary)/0.04)] p-4 space-y-4">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <MapPin className="h-4 w-4 text-[rgb(var(--primary))]" />
+                      <div>
+                        <h4 className="text-xs font-extrabold uppercase tracking-wider text-[rgb(var(--fg))]">
+                          Building Geographic Footprint Corners (Latitude + Longitude)
+                        </h4>
+                        <p className="text-[11px] text-[rgb(var(--muted-fg))] mt-0.5">
+                          Polygon vertices in sequence: 1 → 2 → ... → N → 1 (automatically closed). Minimum 3 corners required.
+                        </p>
+                      </div>
+                    </div>
+                    <Badge variant="primary" className="text-[10px] font-bold shrink-0">
+                      {buildingForm.corners.length} Corners Footprint
+                    </Badge>
                   </div>
 
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
-                    <div className="space-y-1 bg-[rgb(var(--card))] p-3 rounded-lg border shadow-sm">
-                      <span className="font-bold text-[rgb(var(--primary))] text-[11px]">Corner 1 (Top-Left)</span>
-                      <Input
-                        placeholder="Lat"
-                        value={buildingForm.corner1Lat}
-                        onChange={(e) => setBuildingForm({ ...buildingForm, corner1Lat: e.target.value })}
-                        className="text-xs h-8 mt-1"
-                      />
-                      <Input
-                        placeholder="Lng"
-                        value={buildingForm.corner1Lng}
-                        onChange={(e) => setBuildingForm({ ...buildingForm, corner1Lng: e.target.value })}
-                        className="text-xs h-8 mt-1"
-                      />
-                    </div>
-
-                    <div className="space-y-1 bg-[rgb(var(--card))] p-3 rounded-lg border shadow-sm">
-                      <span className="font-bold text-[rgb(var(--primary))] text-[11px]">Corner 2 (Top-Right)</span>
-                      <Input
-                        placeholder="Lat"
-                        value={buildingForm.corner2Lat}
-                        onChange={(e) => setBuildingForm({ ...buildingForm, corner2Lat: e.target.value })}
-                        className="text-xs h-8 mt-1"
-                      />
-                      <Input
-                        placeholder="Lng"
-                        value={buildingForm.corner2Lng}
-                        onChange={(e) => setBuildingForm({ ...buildingForm, corner2Lng: e.target.value })}
-                        className="text-xs h-8 mt-1"
-                      />
-                    </div>
-
-                    <div className="space-y-1 bg-[rgb(var(--card))] p-3 rounded-lg border shadow-sm">
-                      <span className="font-bold text-[rgb(var(--primary))] text-[11px]">Corner 3 (Bottom-Right)</span>
-                      <Input
-                        placeholder="Lat"
-                        value={buildingForm.corner3Lat}
-                        onChange={(e) => setBuildingForm({ ...buildingForm, corner3Lat: e.target.value })}
-                        className="text-xs h-8 mt-1"
-                      />
-                      <Input
-                        placeholder="Lng"
-                        value={buildingForm.corner3Lng}
-                        onChange={(e) => setBuildingForm({ ...buildingForm, corner3Lng: e.target.value })}
-                        className="text-xs h-8 mt-1"
-                      />
-                    </div>
-
-                    <div className="space-y-1 bg-[rgb(var(--card))] p-3 rounded-lg border shadow-sm">
-                      <span className="font-bold text-[rgb(var(--primary))] text-[11px]">Corner 4 (Bottom-Left)</span>
-                      <Input
-                        placeholder="Lat"
-                        value={buildingForm.corner4Lat}
-                        onChange={(e) => setBuildingForm({ ...buildingForm, corner4Lat: e.target.value })}
-                        className="text-xs h-8 mt-1"
-                      />
-                      <Input
-                        placeholder="Lng"
-                        value={buildingForm.corner4Lng}
-                        onChange={(e) => setBuildingForm({ ...buildingForm, corner4Lng: e.target.value })}
-                        className="text-xs h-8 mt-1"
-                      />
-                    </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3 text-xs">
+                    {buildingForm.corners.map((c, idx) => (
+                      <div key={`corner-${idx}`} className="space-y-1.5 bg-[rgb(var(--card))] p-3 rounded-lg border shadow-xs relative">
+                        <div className="flex items-center justify-between mb-1 border-b pb-1">
+                          <span className="font-bold text-[rgb(var(--primary))] text-[11px]">
+                            Corner {idx + 1}
+                          </span>
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="ghost"
+                            className="h-6 px-1.5 text-[11px] text-red-500 hover:text-red-600 hover:bg-red-500/10 disabled:opacity-30"
+                            disabled={buildingForm.corners.length <= 3}
+                            onClick={() => handleRemoveBuildingCorner(idx)}
+                            title={buildingForm.corners.length <= 3 ? "Minimum 3 corners required for a polygon" : "Remove corner"}
+                          >
+                            <Trash2 className="h-3 w-3 mr-0.5" /> Remove
+                          </Button>
+                        </div>
+                        <div>
+                          <label className="text-[10px] font-semibold text-[rgb(var(--muted-fg))]">Latitude</label>
+                          <Input
+                            placeholder="Latitude (e.g. 11.4965)"
+                            value={c.lat}
+                            onChange={(e) => handleUpdateBuildingCorner(idx, "lat", e.target.value)}
+                            className="text-xs h-8 mt-0.5 font-mono"
+                          />
+                        </div>
+                        <div>
+                          <label className="text-[10px] font-semibold text-[rgb(var(--muted-fg))]">Longitude</label>
+                          <Input
+                            placeholder="Longitude (e.g. 77.2774)"
+                            value={c.lng}
+                            onChange={(e) => handleUpdateBuildingCorner(idx, "lng", e.target.value)}
+                            className="text-xs h-8 mt-0.5 font-mono"
+                          />
+                        </div>
+                      </div>
+                    ))}
                   </div>
 
-
-                </div>
+                  <div className="flex flex-wrap items-center justify-between gap-2 pt-1 border-t border-[rgb(var(--border))/0.4]">
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      onClick={handleAddBuildingCorner}
+                      className="gap-1.5 border-dashed border-[rgb(var(--primary)/0.5)] text-[rgb(var(--primary))] hover:bg-[rgb(var(--primary)/0.08)] font-semibold text-xs"
+                    >
+                      <Plus className="h-4 w-4" /> + Add Corner
+                    </Button>
+                    <span className="text-[11px] text-[rgb(var(--muted-fg))] font-medium">
+                      Vertex Order: {buildingForm.corners.map((_, i) => i + 1).join(" → ")} → 1
+                    </span>
+                  </div>
+                </div>   </div>
 
                 {/* Footprint Live Preview */}
                 <div className="rounded-xl border bg-black/90 p-4 space-y-2 text-white shadow-inner">
@@ -3112,32 +3153,53 @@ export function EntityManager() {
                     </div>
                   </div>
 
-                  <div className="rounded-xl border border-[rgb(var(--primary)/0.25)] bg-[rgb(var(--primary)/0.04)] p-3 space-y-2">
-                    <span className="font-extrabold text-[rgb(var(--fg))] text-[11px] flex items-center gap-1.5">
-                      <MapPin className="h-3.5 w-3.5 text-[rgb(var(--primary))]" /> 4-Corner GPS Boundary Coordinates
-                    </span>
+                  {/* Dynamic Building GPS Footprint Corners */}
+                  <div className="rounded-xl border border-[rgb(var(--primary)/0.25)] bg-[rgb(var(--primary)/0.04)] p-3 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <span className="font-extrabold text-[rgb(var(--fg))] text-[11px] flex items-center gap-1.5">
+                        <MapPin className="h-3.5 w-3.5 text-[rgb(var(--primary))]" /> Geographic Footprint Corners ({editForm.corners?.length || 0} Points)
+                      </span>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        onClick={handleAddEditBuildingCorner}
+                        className="h-6 text-[10px] gap-1 px-2 border-dashed border-[rgb(var(--primary)/0.5)] text-[rgb(var(--primary))]"
+                      >
+                        <Plus className="h-3 w-3" /> + Add Corner
+                      </Button>
+                    </div>
 
                     <div className="grid grid-cols-2 gap-2 text-[11px]">
-                      <div className="bg-[rgb(var(--card))] p-2 rounded border">
-                        <span className="font-bold text-[rgb(var(--primary))]">Corner 1 (Top-Left)</span>
-                        <Input placeholder="Lat" value={editForm.corner1Lat} onChange={(e) => setEditForm({ ...editForm, corner1Lat: e.target.value })} className="text-[11px] h-7 mt-1" />
-                        <Input placeholder="Lng" value={editForm.corner1Lng} onChange={(e) => setEditForm({ ...editForm, corner1Lng: e.target.value })} className="text-[11px] h-7 mt-1" />
-                      </div>
-                      <div className="bg-[rgb(var(--card))] p-2 rounded border">
-                        <span className="font-bold text-[rgb(var(--primary))]">Corner 2 (Top-Right)</span>
-                        <Input placeholder="Lat" value={editForm.corner2Lat} onChange={(e) => setEditForm({ ...editForm, corner2Lat: e.target.value })} className="text-[11px] h-7 mt-1" />
-                        <Input placeholder="Lng" value={editForm.corner2Lng} onChange={(e) => setEditForm({ ...editForm, corner2Lng: e.target.value })} className="text-[11px] h-7 mt-1" />
-                      </div>
-                      <div className="bg-[rgb(var(--card))] p-2 rounded border">
-                        <span className="font-bold text-[rgb(var(--primary))]">Corner 3 (Bottom-Right)</span>
-                        <Input placeholder="Lat" value={editForm.corner3Lat} onChange={(e) => setEditForm({ ...editForm, corner3Lat: e.target.value })} className="text-[11px] h-7 mt-1" />
-                        <Input placeholder="Lng" value={editForm.corner3Lng} onChange={(e) => setEditForm({ ...editForm, corner3Lng: e.target.value })} className="text-[11px] h-7 mt-1" />
-                      </div>
-                      <div className="bg-[rgb(var(--card))] p-2 rounded border">
-                        <span className="font-bold text-[rgb(var(--primary))]">Corner 4 (Bottom-Left)</span>
-                        <Input placeholder="Lat" value={editForm.corner4Lat} onChange={(e) => setEditForm({ ...editForm, corner4Lat: e.target.value })} className="text-[11px] h-7 mt-1" />
-                        <Input placeholder="Lng" value={editForm.corner4Lng} onChange={(e) => setEditForm({ ...editForm, corner4Lng: e.target.value })} className="text-[11px] h-7 mt-1" />
-                      </div>
+                      {(editForm.corners || []).map((c: any, idx: number) => (
+                        <div key={`edit-corner-${idx}`} className="bg-[rgb(var(--card))] p-2 rounded border space-y-1 relative">
+                          <div className="flex items-center justify-between">
+                            <span className="font-bold text-[rgb(var(--primary))] text-[10px]">Corner {idx + 1}</span>
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="ghost"
+                              className="h-5 px-1 text-[10px] text-red-500 hover:bg-red-500/10 disabled:opacity-30"
+                              disabled={(editForm.corners || []).length <= 3}
+                              onClick={() => handleRemoveEditBuildingCorner(idx)}
+                            >
+                              <Trash2 className="h-3 w-3" />
+                            </Button>
+                          </div>
+                          <Input
+                            placeholder="Lat"
+                            value={c.lat}
+                            onChange={(e) => handleUpdateEditBuildingCorner(idx, "lat", e.target.value)}
+                            className="text-[11px] h-7 font-mono"
+                          />
+                          <Input
+                            placeholder="Lng"
+                            value={c.lng}
+                            onChange={(e) => handleUpdateEditBuildingCorner(idx, "lng", e.target.value)}
+                            className="text-[11px] h-7 font-mono"
+                          />
+                        </div>
+                      ))}
                     </div>
                   </div>
                 </div>

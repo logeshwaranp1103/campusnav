@@ -16,6 +16,7 @@ import { NavigationView } from "./components/navigation-view";
 import { getValidNavigationDestinations } from "@/shared/lib/destination-utils";
 import { useVisitorGps } from "@/shared/hooks/use-visitor-gps";
 import { GpsStatusIndicator } from "@/features/location/components/gps-status-indicator";
+import { getBuildingCanvasPoints, getBuildingCenter, getPolygonPointsString } from "@/lib/geo/building-geometry";
 
 // ─── Pan/Zoom types ────────────────────────────────────────────────────────────
 type Transform = { x: number; y: number; scale: number };
@@ -601,24 +602,23 @@ export default function VisitorPage() {
           </defs>
           <rect width="10000" height="10000" x="-5000" y="-5000" fill="url(#visitor-grid)" />
 
-          {/* Buildings Footprint */}
+          {/* Buildings Footprint — True N-Corner Polygon */}
           {publishedData.buildings.map((b) => {
-            const bx = b.x ?? Math.round(((b.lng ?? 0) - 77.594) * 10000);
-            const by = b.y ?? Math.round(((b.lat ?? 0) - 12.971) * 10000);
+            const canvasPts = getBuildingCanvasPoints(b);
+            const ptsStr = getPolygonPointsString(canvasPts);
+            const centerPos = getBuildingCenter(b);
+
             return (
               <g key={b.id}>
-                <rect
-                  x={bx}
-                  y={by}
-                  width={b.width ?? 180}
-                  height={b.height ?? 120}
-                  rx={12}
+                <polygon
+                  points={ptsStr}
                   fill={b.color ?? "#4f46e5"}
                   fillOpacity={0.15}
                   stroke={b.color ?? "#4f46e5"}
                   strokeWidth="1.5"
+                  strokeLinejoin="round"
                 />
-                <text x={bx + (b.width ?? 180) / 2} y={by + (b.height ?? 120) / 2} textAnchor="middle" fill="currentColor" className="text-xs font-semibold">
+                <text x={centerPos.x} y={centerPos.y + 4} textAnchor="middle" fill="currentColor" className="text-xs font-semibold select-none">
                   {b.name}
                 </text>
               </g>
