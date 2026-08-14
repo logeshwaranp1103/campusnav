@@ -249,8 +249,6 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
 
   // Mini-Map Navigation State
   const [isAnimatingPan, setIsAnimatingPan] = useState(false);
-  const [isMinimapDragging, setIsMinimapDragging] = useState(false);
-  const [isMinimapExpanded, setIsMinimapExpanded] = useState(false);
 
   // Live Route Test State (with multi-stop support)
   const [liveRouteStartId, setLiveRouteStartId] = useState<string | null>(null);
@@ -2008,14 +2006,8 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
   const selectedBuilding = selectedElement?.type === "building" ? storeData.buildings.find((b) => b.id === selectedElement.id) : null;
   const selectedDest = selectedElement?.type === "destination" ? storeData.destinations.find((d) => d.id === selectedElement.id) : null;
   const selectedObstacle = selectedElement?.type === "obstacle" ? storeData.obstacles.find((o) => o.id === selectedElement.id) : null;
-
-  // Dynamic Minimap Auto-Fit Bounding Box (Ensures ALL buildings & nodes are ALWAYS visible)
-  const minimapBounds = useMemo(() => {
-    let minX = 0;
-    let minY = 0;
-    let maxX = 2500;
-    let maxY = 1800;
-
+  // Dynamic Campus Centering & Auto-Fit Bounding Box
+  const campusBounds = useMemo(() => {
     const xs: number[] = [];
     const ys: number[] = [];
 
@@ -2032,22 +2024,10 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
       ys.push(n.y);
     });
 
-    storeData.destinations.forEach((d) => {
-      if (typeof d.x === "number" && typeof d.y === "number") {
-        xs.push(d.x);
-        ys.push(d.y);
-      }
-    });
-
-    storeData.doors.forEach((d) => {
-      xs.push(d.x);
-      ys.push(d.y);
-    });
-
-    storeData.obstacles.forEach((o) => {
-      xs.push(o.x);
-      ys.push(o.y);
-    });
+    let minX = 0;
+    let minY = 0;
+    let maxX = 2500;
+    let maxY = 1800;
 
     if (xs.length > 0 && ys.length > 0) {
       minX = Math.min(...xs) - 180;
@@ -2059,49 +2039,10 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
     const width = Math.max(1000, maxX - minX);
     const height = Math.max(700, maxY - minY);
 
-    return { minX, minY, width, height };
-  }, [storeData.buildings, storeData.nodes, storeData.destinations, storeData.doors, storeData.obstacles]);
+    return { minX, minY, width, height, centerX: minX + width / 2, centerY: minY + height / 2 };
+  }, [storeData.buildings, storeData.nodes]);
 
-  const handleMinimapPointerMove = (e: React.MouseEvent<HTMLDivElement>) => {
-    const rect = e.currentTarget.getBoundingClientRect();
-    if (rect.width === 0 || rect.height === 0) return;
 
-    // Account for SVG preserveAspectRatio="xMidYMid meet" scaling & letterboxing
-    const containerAspect = rect.width / rect.height;
-    const contentAspect = minimapBounds.width / minimapBounds.height;
-
-    let scale: number;
-    let offsetX = 0;
-    let offsetY = 0;
-
-    if (containerAspect > contentAspect) {
-      // Pillarboxed (left/right padding)
-      scale = rect.height / minimapBounds.height;
-      offsetX = (rect.width - minimapBounds.width * scale) / 2;
-    } else {
-      // Letterboxed (top/bottom padding)
-      scale = rect.width / minimapBounds.width;
-      offsetY = (rect.height - minimapBounds.height * scale) / 2;
-    }
-
-    const mouseX = e.clientX - rect.left - offsetX;
-    const mouseY = e.clientY - rect.top - offsetY;
-
-    const clampedRatioX = Math.max(0, Math.min(1, mouseX / (minimapBounds.width * scale)));
-    const clampedRatioY = Math.max(0, Math.min(1, mouseY / (minimapBounds.height * scale)));
-
-    const targetWorldX = minimapBounds.minX + clampedRatioX * minimapBounds.width;
-    const targetWorldY = minimapBounds.minY + clampedRatioY * minimapBounds.height;
-
-    const mainCanvas = canvasRef.current;
-    const viewportW = mainCanvas ? mainCanvas.clientWidth : 800;
-    const viewportH = mainCanvas ? mainCanvas.clientHeight : 600;
-
-    setPanOffset({
-      x: viewportW / 2 - targetWorldX * zoom,
-      y: viewportH / 2 - targetWorldY * zoom,
-    });
-  };
 
   return (
     <div
@@ -3599,8 +3540,8 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
                   const mainCanvas = canvasRef.current;
                   const viewportW = mainCanvas ? mainCanvas.clientWidth : 800;
                   const viewportH = mainCanvas ? mainCanvas.clientHeight : 600;
-                  const centerX = minimapBounds.minX + minimapBounds.width / 2;
-                  const centerY = minimapBounds.minY + minimapBounds.height / 2;
+                  const centerX = campusBounds.centerX;
+                  const centerY = campusBounds.centerY;
                   setIsAnimatingPan(true);
                   setTimeout(() => setIsAnimatingPan(false), 400);
                   setZoom(1.0);
@@ -3621,8 +3562,8 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
                   const mainCanvas = canvasRef.current;
                   const viewportW = mainCanvas ? mainCanvas.clientWidth : 800;
                   const viewportH = mainCanvas ? mainCanvas.clientHeight : 600;
-                  const centerX = minimapBounds.minX + minimapBounds.width / 2;
-                  const centerY = minimapBounds.minY + minimapBounds.height / 2;
+                  const centerX = campusBounds.centerX;
+                  const centerY = campusBounds.centerY;
                   const defaultResetZoom = 0.20;
                   setIsAnimatingPan(true);
                   setTimeout(() => setIsAnimatingPan(false), 400);
@@ -3720,271 +3661,7 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
             </div>
           )}
 
-          {/* Enhanced Mini-Map Window with Dynamic Campus Auto-Fit */}
-          <div
-            className={cn(
-              "absolute bottom-16 left-3 rounded-xl border bg-[rgb(var(--card))]/95 shadow-2xl backdrop-blur-md overflow-hidden pointer-events-auto select-none transition-all duration-300 z-20 border-[rgb(var(--border))]",
-              isMinimapExpanded ? "w-72 h-52 sm:w-80 sm:h-60" : "w-48 h-32 sm:w-56 sm:h-36"
-            )}
-          >
-            {/* Header / Title bar with Expand & Fit buttons */}
-            <div className="flex items-center justify-between border-b px-2 py-1 bg-[rgb(var(--card))]/80 text-[10px] font-bold text-[rgb(var(--fg))]">
-              <span className="flex items-center gap-1.5 text-[rgb(var(--primary))] truncate max-w-[150px]">
-                <MapPin className="h-3 w-3 shrink-0" /> Minimap ({storeData.buildings.length} Bldgs)
-              </span>
-              <div className="flex items-center gap-1 shrink-0">
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    const mainCanvas = canvasRef.current;
-                    const viewportW = mainCanvas ? mainCanvas.clientWidth : 800;
-                    const viewportH = mainCanvas ? mainCanvas.clientHeight : 600;
-                    const centerX = minimapBounds.minX + minimapBounds.width / 2;
-                    const centerY = minimapBounds.minY + minimapBounds.height / 2;
-                    const scaleX = viewportW / minimapBounds.width;
-                    const scaleY = viewportH / minimapBounds.height;
-                    const fitZoom = Math.max(0.2, Math.min(1.5, Number((Math.min(scaleX, scaleY) * 0.85).toFixed(2))));
 
-                    setIsAnimatingPan(true);
-                    setTimeout(() => setIsAnimatingPan(false), 400);
-                    setZoom(fitZoom);
-                    setPanOffset({
-                      x: viewportW / 2 - centerX * fitZoom,
-                      y: viewportH / 2 - centerY * fitZoom,
-                    });
-                    toast({ type: "info", title: "Campus Auto-Fitted", description: "Centered and scaled view to fit all buildings." });
-                  }}
-                  className="rounded p-0.5 hover:bg-[rgb(var(--muted))] text-[rgb(var(--muted-fg))] hover:text-[rgb(var(--fg))] transition-colors"
-                  title="Fit All Buildings into View"
-                >
-                  <Compass className="h-3 w-3" />
-                </button>
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setIsMinimapExpanded((prev) => !prev);
-                  }}
-                  className="rounded p-0.5 hover:bg-[rgb(var(--muted))] text-[rgb(var(--muted-fg))] hover:text-[rgb(var(--fg))] transition-colors"
-                  title={isMinimapExpanded ? "Minimize Mini-Map" : "Expand Mini-Map"}
-                >
-                  {isMinimapExpanded ? <Minimize2 className="h-3 w-3" /> : <Maximize2 className="h-3 w-3" />}
-                </button>
-              </div>
-            </div>
-
-            {/* Minimap SVG Canvas */}
-            <div
-              className="relative h-[calc(100%-1.75rem)] w-full bg-[rgb(var(--bg))] cursor-crosshair overflow-hidden"
-              onMouseDown={(e) => {
-                setIsMinimapDragging(true);
-                setIsAnimatingPan(true);
-                setTimeout(() => setIsAnimatingPan(false), 400);
-                handleMinimapPointerMove(e);
-              }}
-              onMouseMove={(e) => {
-                if (isMinimapDragging) handleMinimapPointerMove(e);
-              }}
-              onMouseUp={() => setIsMinimapDragging(false)}
-              onMouseLeave={() => setIsMinimapDragging(false)}
-            >
-              <svg
-                className="h-full w-full"
-                viewBox={`${minimapBounds.minX} ${minimapBounds.minY} ${minimapBounds.width} ${minimapBounds.height}`}
-                preserveAspectRatio="xMidYMid meet"
-              >
-                {/* Background Grid Pattern */}
-                <rect
-                  x={minimapBounds.minX}
-                  y={minimapBounds.minY}
-                  width={minimapBounds.width}
-                  height={minimapBounds.height}
-                  fill="rgb(var(--bg))"
-                />
-
-                {/* Campus Outdoor Boundary Polygon */}
-                {CAMPUS_POLYGON_COORDS && CAMPUS_POLYGON_COORDS.length > 0 && (() => {
-                  const ptsStr = CAMPUS_POLYGON_COORDS.map(([lng, lat]) => {
-                    const { x, y } = gpsToCanvas(lat, lng);
-                    return `${x},${y}`;
-                  }).join(" ");
-                  return (
-                    <polygon
-                      points={ptsStr}
-                      fill="rgba(16, 185, 129, 0.05)"
-                      stroke="#10b981"
-                      strokeWidth={Math.max(2, minimapBounds.width / 400)}
-                      strokeDasharray="8 4"
-                      strokeOpacity="0.6"
-                    />
-                  );
-                })()}
-
-                {/* Render Edges / Walkways / Roads in Minimap */}
-                {storeData.edges.map((e) => {
-                  const fromN = storeData.nodes.find((n) => n.id === e.from);
-                  const toN = storeData.nodes.find((n) => n.id === e.to);
-                  if (!fromN || !toN) return null;
-                  const strokeColor =
-                    e.pathType === "EV"
-                      ? "#10b981"
-                      : e.type === "ROAD"
-                      ? "#475569"
-                      : e.type === "STAIRS" || e.type === "LIFT"
-                      ? "#8b5cf6"
-                      : "#0284c7";
-
-                  return (
-                    <line
-                      key={`mini-edge-${e.id}`}
-                      x1={fromN.x}
-                      y1={fromN.y}
-                      x2={toN.x}
-                      y2={toN.y}
-                      stroke={strokeColor}
-                      strokeWidth={Math.max(2, minimapBounds.width / 380)}
-                      strokeOpacity="0.65"
-                    />
-                  );
-                })}
-
-                {/* Render ALL Buildings with True N-Corner Footprint Polygons & Badges */}
-                {storeData.buildings.map((b) => {
-                  const canvasPts = getBuildingCanvasPoints(b);
-                  const ptsStr = getPolygonPointsString(canvasPts);
-                  const centerPos = getBuildingCenter(b);
-                  const bColor = b.color || "#4f46e5";
-                  const isCurrentBld = selectedElement?.type === "building" && selectedElement.id === b.id;
-
-                  return (
-                    <g key={`mini-b-${b.id}`}>
-                      <polygon
-                        points={ptsStr}
-                        fill={bColor}
-                        fillOpacity={isCurrentBld ? 0.85 : 0.6}
-                        stroke={isCurrentBld ? "#ffffff" : bColor}
-                        strokeWidth={Math.max(2, minimapBounds.width / 350)}
-                        strokeLinejoin="round"
-                      />
-                      <text
-                        x={centerPos.x}
-                        y={centerPos.y + 4}
-                        textAnchor="middle"
-                        fill="#ffffff"
-                        fontSize={Math.max(14, minimapBounds.width / 55)}
-                        fontWeight="extrabold"
-                        className="pointer-events-none drop-shadow-sm select-none"
-                      >
-                        {b.shortCode || b.name}
-                      </text>
-                    </g>
-                  );
-                })}
-
-                {/* Render Destination Rooms in Minimap */}
-                {storeData.destinations.map((d) => {
-                  if (typeof d.x !== "number" || typeof d.y !== "number") return null;
-                  const w = d.width ?? 60;
-                  const h = d.height ?? 40;
-                  return (
-                    <rect
-                      key={`mini-dest-${d.id}`}
-                      x={d.x - w / 2}
-                      y={d.y - h / 2}
-                      width={w}
-                      height={h}
-                      rx="4"
-                      fill="#6366f1"
-                      fillOpacity="0.35"
-                      stroke="#818cf8"
-                      strokeWidth="1.5"
-                    />
-                  );
-                })}
-
-                {/* Render Doors / Entrances in Minimap */}
-                {storeData.doors.map((d) => (
-                  <rect
-                    key={`mini-door-${d.id}`}
-                    x={d.x - 5}
-                    y={d.y - 5}
-                    width="10"
-                    height="10"
-                    rx="2"
-                    fill="#06b6d4"
-                    stroke="#ffffff"
-                    strokeWidth="1"
-                  />
-                ))}
-
-                {/* Render Nodes in Minimap */}
-                {storeData.nodes.map((n) => {
-                  const nodeColor =
-                    n.type === "BUILDING_ENTRANCE" || n.type === "ENTRANCE"
-                      ? "#10b981"
-                      : n.type === "STAIR" || n.type === "LIFT"
-                      ? "#8b5cf6"
-                      : n.type === "ROOM"
-                      ? "#6366f1"
-                      : "#38bdf8";
-
-                  return (
-                    <circle
-                      key={`mini-node-${n.id}`}
-                      cx={n.x}
-                      cy={n.y}
-                      r={Math.max(4, minimapBounds.width / 220)}
-                      fill={nodeColor}
-                      stroke="#ffffff"
-                      strokeWidth="1.5"
-                    />
-                  );
-                })}
-
-                {/* Render Obstacles / Hazards in Minimap */}
-                {storeData.obstacles.map((obs) => (
-                  <circle
-                    key={`mini-obs-${obs.id}`}
-                    cx={obs.x}
-                    cy={obs.y}
-                    r={obs.radius || 15}
-                    fill="rgba(239, 68, 68, 0.35)"
-                    stroke="#ef4444"
-                    strokeWidth="2"
-                  />
-                ))}
-
-                {/* Simulated / Live Test Route Overlay in Minimap */}
-                {(simResult || altSimResult) &&
-                  (simResult || altSimResult)!.edges.map((e, idx) => {
-                    const fromN = storeData.nodes.find((n) => n.id === e.from);
-                    const toN = storeData.nodes.find((n) => n.id === e.to);
-                    if (!fromN || !toN) return null;
-                    return (
-                      <line
-                        key={`mini-route-edge-${idx}`}
-                        x1={fromN.x}
-                        y1={fromN.y}
-                        x2={toN.x}
-                        y2={toN.y}
-                        stroke="#06b6d4"
-                        strokeWidth={Math.max(4, minimapBounds.width / 180)}
-                        strokeDasharray="4 3"
-                        className="animate-pulse"
-                      />
-                    );
-                  })}
-
-                {/* Device Live GPS Position Marker in Minimap */}
-                {gps.isGpsActive && (
-                  <g transform={`translate(${gps.canvasPos.x}, ${gps.canvasPos.y})`}>
-                    <circle r={Math.max(6, minimapBounds.width / 150)} fill="#3b82f6" stroke="#ffffff" strokeWidth="2" />
-                  </g>
-                )}
-              </svg>
-            </div>
-          </div>
         </div>
 
         {/* Right Inspector Panel */}
