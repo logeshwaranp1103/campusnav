@@ -381,24 +381,18 @@ export function EntityManager() {
     description: "",
     floorsCount: 3,
     corners: [
-      { lat: "11.4975", lng: "77.2765" },
-      { lat: "11.4975", lng: "77.2780" },
-      { lat: "11.4962", lng: "77.2780" },
-      { lat: "11.4962", lng: "77.2765" },
+      { lat: "11.", lng: "77." },
+      { lat: "11.", lng: "77." },
+      { lat: "11.", lng: "77." },
+      { lat: "11.", lng: "77." },
     ],
   });
 
   const handleAddBuildingCorner = () => {
-    setBuildingForm((prev) => {
-      const corners = prev.corners || [];
-      const lastCorner = corners[corners.length - 1];
-      const defaultLat = lastCorner && lastCorner.lat && lastCorner.lat.trim() !== "" ? lastCorner.lat : "11.";
-      const defaultLng = lastCorner && lastCorner.lng && lastCorner.lng.trim() !== "" ? lastCorner.lng : "77.";
-      return {
-        ...prev,
-        corners: [...corners, { lat: defaultLat, lng: defaultLng }],
-      };
-    });
+    setBuildingForm((prev) => ({
+      ...prev,
+      corners: [...(prev.corners || []), { lat: "11.", lng: "77." }],
+    }));
   };
 
   const handleRemoveBuildingCorner = (index: number) => {
@@ -418,16 +412,10 @@ export function EntityManager() {
   };
 
   const handleAddEditBuildingCorner = () => {
-    setEditForm((prev: any) => {
-      const corners = prev.corners || [];
-      const lastCorner = corners[corners.length - 1];
-      const defaultLat = lastCorner && lastCorner.lat && lastCorner.lat.trim() !== "" ? lastCorner.lat : "11.";
-      const defaultLng = lastCorner && lastCorner.lng && lastCorner.lng.trim() !== "" ? lastCorner.lng : "77.";
-      return {
-        ...prev,
-        corners: [...corners, { lat: defaultLat, lng: defaultLng }],
-      };
-    });
+    setEditForm((prev: any) => ({
+      ...prev,
+      corners: [...(prev.corners || []), { lat: "11.", lng: "77." }],
+    }));
   };
 
   const handleRemoveEditBuildingCorner = (index: number) => {
