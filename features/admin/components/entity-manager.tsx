@@ -2043,7 +2043,18 @@ export function EntityManager() {
                       className="mt-1.5"
                     />
                   </div>
-                               {/* Dynamic Building GPS Footprint Corners */}
+                  <div>
+                    <label className="text-xs font-bold text-[rgb(var(--fg))]">Building Description</label>
+                    <Input
+                      placeholder="e.g. Main academic building with laboratories"
+                      value={buildingForm.description}
+                      onChange={(e) => setBuildingForm({ ...buildingForm, description: e.target.value })}
+                      className="mt-1.5"
+                    />
+                  </div>
+                </div>
+
+                {/* Dynamic Building GPS Footprint Corners */}
                 <div className="rounded-xl border border-[rgb(var(--primary)/0.25)] bg-[rgb(var(--primary)/0.04)] p-4 space-y-4">
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2">
@@ -2078,25 +2089,25 @@ export function EntityManager() {
                             onClick={() => handleRemoveBuildingCorner(idx)}
                             title={buildingForm.corners.length <= 3 ? "Minimum 3 corners required for a polygon" : "Remove corner"}
                           >
-                            <Trash2 className="h-3 w-3 mr-0.5" /> Remove
+                            <Trash2 className="h-3.5 w-3.5" />
                           </Button>
                         </div>
                         <div>
-                          <label className="text-[10px] font-semibold text-[rgb(var(--muted-fg))]">Latitude</label>
+                          <label className="text-[10px] text-[rgb(var(--muted-fg))] font-semibold">Latitude</label>
                           <Input
-                            placeholder="Latitude (e.g. 11.4965)"
+                            placeholder="Lat"
                             value={c.lat}
                             onChange={(e) => handleUpdateBuildingCorner(idx, "lat", e.target.value)}
-                            className="text-xs h-8 mt-0.5 font-mono"
+                            className="text-xs h-8 font-mono"
                           />
                         </div>
                         <div>
-                          <label className="text-[10px] font-semibold text-[rgb(var(--muted-fg))]">Longitude</label>
+                          <label className="text-[10px] text-[rgb(var(--muted-fg))] font-semibold">Longitude</label>
                           <Input
-                            placeholder="Longitude (e.g. 77.2774)"
+                            placeholder="Lng"
                             value={c.lng}
                             onChange={(e) => handleUpdateBuildingCorner(idx, "lng", e.target.value)}
-                            className="text-xs h-8 mt-0.5 font-mono"
+                            className="text-xs h-8 font-mono"
                           />
                         </div>
                       </div>
@@ -2117,7 +2128,7 @@ export function EntityManager() {
                       Vertex Order: {buildingForm.corners.map((_, i) => i + 1).join(" → ")} → 1
                     </span>
                   </div>
-                </div>   </div>
+                </div>
 
                 {/* Footprint Live Preview */}
                 <div className="rounded-xl border bg-black/90 p-4 space-y-2 text-white shadow-inner">
