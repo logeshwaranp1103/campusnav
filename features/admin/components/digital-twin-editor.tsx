@@ -3982,35 +3982,6 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
                     <circle r={Math.max(6, minimapBounds.width / 150)} fill="#3b82f6" stroke="#ffffff" strokeWidth="2" />
                   </g>
                 )}
-
-                {/* Active Viewport Lens Indicator Frame */}
-                {(() => {
-                  const mainCanvas = canvasRef.current;
-                  const viewportW = mainCanvas ? mainCanvas.clientWidth : 800;
-                  const viewportH = mainCanvas ? mainCanvas.clientHeight : 600;
-                  const viewWorldX = -panOffset.x / zoom;
-                  const viewWorldY = -panOffset.y / zoom;
-                  const viewWorldW = viewportW / zoom;
-                  const viewWorldH = viewportH / zoom;
-                  const strokeW = Math.max(3, minimapBounds.width / 150);
-
-                  return (
-                    <g>
-                      <rect
-                        x={viewWorldX}
-                        y={viewWorldY}
-                        width={viewWorldW}
-                        height={viewWorldH}
-                        fill="rgba(79, 70, 229, 0.16)"
-                        stroke="#4f46e5"
-                        strokeWidth={strokeW}
-                        rx={6}
-                        className="transition-all"
-                      />
-                      <circle cx={viewWorldX + viewWorldW / 2} cy={viewWorldY + viewWorldH / 2} r={strokeW * 1.5} fill="#4f46e5" />
-                    </g>
-                  );
-                })()}
               </svg>
             </div>
           </div>
