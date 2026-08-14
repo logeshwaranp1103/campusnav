@@ -46,7 +46,7 @@ import {
 
 import { Button } from "@/shared/components/ui/button";
 import { Input } from "@/shared/components/ui/input";
-import { isPointInCampusBoundary } from "@/lib/geo/boundary";
+import { isPointInCampusBoundary, CAMPUS_POLYGON_COORDS } from "@/lib/geo/boundary";
 import { canvasToGps, gpsToCanvas } from "@/lib/geo/projection";
 import { getBuildingCanvasPoints, getBuildingCenter, getPolygonSvgPath, getPolygonPointsString } from "@/lib/geo/building-geometry";
 import { calculateGeographicDistance } from "@/lib/geo/haversine";
@@ -2020,12 +2020,11 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
     const ys: number[] = [];
 
     storeData.buildings.forEach((b) => {
-      const cx = b.x ?? 100;
-      const cy = b.y ?? 100;
-      const bw = b.width ?? 180;
-      const bh = b.height ?? 120;
-      xs.push(cx - bw / 2, cx + bw / 2);
-      ys.push(cy - bh / 2, cy + bh / 2);
+      const pts = getBuildingCanvasPoints(b);
+      pts.forEach((p) => {
+        xs.push(p.x);
+        ys.push(p.y);
+      });
     });
 
     storeData.nodes.forEach((n) => {
@@ -2033,27 +2032,66 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
       ys.push(n.y);
     });
 
+    storeData.destinations.forEach((d) => {
+      if (typeof d.x === "number" && typeof d.y === "number") {
+        xs.push(d.x);
+        ys.push(d.y);
+      }
+    });
+
+    storeData.doors.forEach((d) => {
+      xs.push(d.x);
+      ys.push(d.y);
+    });
+
+    storeData.obstacles.forEach((o) => {
+      xs.push(o.x);
+      ys.push(o.y);
+    });
+
     if (xs.length > 0 && ys.length > 0) {
-      minX = Math.min(...xs) - 250;
-      minY = Math.min(...ys) - 250;
-      maxX = Math.max(...xs) + 250;
-      maxY = Math.max(...ys) + 250;
+      minX = Math.min(...xs) - 180;
+      minY = Math.min(...ys) - 180;
+      maxX = Math.max(...xs) + 180;
+      maxY = Math.max(...ys) + 180;
     }
 
-    const width = Math.max(1200, maxX - minX);
-    const height = Math.max(900, maxY - minY);
+    const width = Math.max(1000, maxX - minX);
+    const height = Math.max(700, maxY - minY);
 
     return { minX, minY, width, height };
-  }, [storeData.buildings, storeData.nodes]);
+  }, [storeData.buildings, storeData.nodes, storeData.destinations, storeData.doors, storeData.obstacles]);
 
   const handleMinimapPointerMove = (e: React.MouseEvent<HTMLDivElement>) => {
     const rect = e.currentTarget.getBoundingClientRect();
     if (rect.width === 0 || rect.height === 0) return;
-    const clickX = Math.max(0, Math.min(rect.width, e.clientX - rect.left));
-    const clickY = Math.max(0, Math.min(rect.height, e.clientY - rect.top));
 
-    const targetWorldX = minimapBounds.minX + (clickX / rect.width) * minimapBounds.width;
-    const targetWorldY = minimapBounds.minY + (clickY / rect.height) * minimapBounds.height;
+    // Account for SVG preserveAspectRatio="xMidYMid meet" scaling & letterboxing
+    const containerAspect = rect.width / rect.height;
+    const contentAspect = minimapBounds.width / minimapBounds.height;
+
+    let scale: number;
+    let offsetX = 0;
+    let offsetY = 0;
+
+    if (containerAspect > contentAspect) {
+      // Pillarboxed (left/right padding)
+      scale = rect.height / minimapBounds.height;
+      offsetX = (rect.width - minimapBounds.width * scale) / 2;
+    } else {
+      // Letterboxed (top/bottom padding)
+      scale = rect.width / minimapBounds.width;
+      offsetY = (rect.height - minimapBounds.height * scale) / 2;
+    }
+
+    const mouseX = e.clientX - rect.left - offsetX;
+    const mouseY = e.clientY - rect.top - offsetY;
+
+    const clampedRatioX = Math.max(0, Math.min(1, mouseX / (minimapBounds.width * scale)));
+    const clampedRatioY = Math.max(0, Math.min(1, mouseY / (minimapBounds.height * scale)));
+
+    const targetWorldX = minimapBounds.minX + clampedRatioX * minimapBounds.width;
+    const targetWorldY = minimapBounds.minY + clampedRatioY * minimapBounds.height;
 
     const mainCanvas = canvasRef.current;
     const viewportW = mainCanvas ? mainCanvas.clientWidth : 800;
@@ -3765,11 +3803,38 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
                   fill="rgb(var(--bg))"
                 />
 
-                {/* Render Edges/Roads in Minimap */}
+                {/* Campus Outdoor Boundary Polygon */}
+                {CAMPUS_POLYGON_COORDS && CAMPUS_POLYGON_COORDS.length > 0 && (() => {
+                  const ptsStr = CAMPUS_POLYGON_COORDS.map(([lng, lat]) => {
+                    const { x, y } = gpsToCanvas(lat, lng);
+                    return `${x},${y}`;
+                  }).join(" ");
+                  return (
+                    <polygon
+                      points={ptsStr}
+                      fill="rgba(16, 185, 129, 0.05)"
+                      stroke="#10b981"
+                      strokeWidth={Math.max(2, minimapBounds.width / 400)}
+                      strokeDasharray="8 4"
+                      strokeOpacity="0.6"
+                    />
+                  );
+                })()}
+
+                {/* Render Edges / Walkways / Roads in Minimap */}
                 {storeData.edges.map((e) => {
                   const fromN = storeData.nodes.find((n) => n.id === e.from);
                   const toN = storeData.nodes.find((n) => n.id === e.to);
                   if (!fromN || !toN) return null;
+                  const strokeColor =
+                    e.pathType === "EV"
+                      ? "#10b981"
+                      : e.type === "ROAD"
+                      ? "#475569"
+                      : e.type === "STAIRS" || e.type === "LIFT"
+                      ? "#8b5cf6"
+                      : "#0284c7";
+
                   return (
                     <line
                       key={`mini-edge-${e.id}`}
@@ -3777,27 +3842,28 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
                       y1={fromN.y}
                       x2={toN.x}
                       y2={toN.y}
-                      stroke="#94a3b8"
-                      strokeWidth={Math.max(2, minimapBounds.width / 400)}
-                      strokeOpacity="0.4"
+                      stroke={strokeColor}
+                      strokeWidth={Math.max(2, minimapBounds.width / 380)}
+                      strokeOpacity="0.65"
                     />
                   );
                 })}
 
-                {/* Render ALL Buildings in Minimap with Accurate Polygon Footprints & Labels */}
+                {/* Render ALL Buildings with True N-Corner Footprint Polygons & Badges */}
                 {storeData.buildings.map((b) => {
                   const canvasPts = getBuildingCanvasPoints(b);
                   const ptsStr = getPolygonPointsString(canvasPts);
                   const centerPos = getBuildingCenter(b);
                   const bColor = b.color || "#4f46e5";
+                  const isCurrentBld = selectedElement?.type === "building" && selectedElement.id === b.id;
 
                   return (
                     <g key={`mini-b-${b.id}`}>
                       <polygon
                         points={ptsStr}
                         fill={bColor}
-                        fillOpacity="0.55"
-                        stroke={bColor}
+                        fillOpacity={isCurrentBld ? 0.85 : 0.6}
+                        stroke={isCurrentBld ? "#ffffff" : bColor}
                         strokeWidth={Math.max(2, minimapBounds.width / 350)}
                         strokeLinejoin="round"
                       />
@@ -3807,29 +3873,117 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
                         textAnchor="middle"
                         fill="#ffffff"
                         fontSize={Math.max(14, minimapBounds.width / 55)}
-                        fontWeight="bold"
+                        fontWeight="extrabold"
                         className="pointer-events-none drop-shadow-sm select-none"
                       >
-                        {b.name}
+                        {b.shortCode || b.name}
                       </text>
                     </g>
                   );
                 })}
 
-                {/* Render Nodes in Minimap */}
-                {storeData.nodes.map((n) => (
-                  <circle
-                    key={`mini-node-${n.id}`}
-                    cx={n.x}
-                    cy={n.y}
-                    r={Math.max(4, minimapBounds.width / 250)}
-                    fill={n.type === "BUILDING_ENTRANCE" || n.type === "ENTRANCE" ? "#10b981" : "#64748b"}
+                {/* Render Destination Rooms in Minimap */}
+                {storeData.destinations.map((d) => {
+                  if (typeof d.x !== "number" || typeof d.y !== "number") return null;
+                  const w = d.width ?? 60;
+                  const h = d.height ?? 40;
+                  return (
+                    <rect
+                      key={`mini-dest-${d.id}`}
+                      x={d.x - w / 2}
+                      y={d.y - h / 2}
+                      width={w}
+                      height={h}
+                      rx="4"
+                      fill="#6366f1"
+                      fillOpacity="0.35"
+                      stroke="#818cf8"
+                      strokeWidth="1.5"
+                    />
+                  );
+                })}
+
+                {/* Render Doors / Entrances in Minimap */}
+                {storeData.doors.map((d) => (
+                  <rect
+                    key={`mini-door-${d.id}`}
+                    x={d.x - 5}
+                    y={d.y - 5}
+                    width="10"
+                    height="10"
+                    rx="2"
+                    fill="#06b6d4"
                     stroke="#ffffff"
                     strokeWidth="1"
                   />
                 ))}
 
-                {/* Active Viewport Lens Indicator Box */}
+                {/* Render Nodes in Minimap */}
+                {storeData.nodes.map((n) => {
+                  const nodeColor =
+                    n.type === "BUILDING_ENTRANCE" || n.type === "ENTRANCE"
+                      ? "#10b981"
+                      : n.type === "STAIR" || n.type === "LIFT"
+                      ? "#8b5cf6"
+                      : n.type === "ROOM"
+                      ? "#6366f1"
+                      : "#38bdf8";
+
+                  return (
+                    <circle
+                      key={`mini-node-${n.id}`}
+                      cx={n.x}
+                      cy={n.y}
+                      r={Math.max(4, minimapBounds.width / 220)}
+                      fill={nodeColor}
+                      stroke="#ffffff"
+                      strokeWidth="1.5"
+                    />
+                  );
+                })}
+
+                {/* Render Obstacles / Hazards in Minimap */}
+                {storeData.obstacles.map((obs) => (
+                  <circle
+                    key={`mini-obs-${obs.id}`}
+                    cx={obs.x}
+                    cy={obs.y}
+                    r={obs.radius || 15}
+                    fill="rgba(239, 68, 68, 0.35)"
+                    stroke="#ef4444"
+                    strokeWidth="2"
+                  />
+                ))}
+
+                {/* Simulated / Live Test Route Overlay in Minimap */}
+                {(simResult || altSimResult) &&
+                  (simResult || altSimResult)!.edges.map((e, idx) => {
+                    const fromN = storeData.nodes.find((n) => n.id === e.from);
+                    const toN = storeData.nodes.find((n) => n.id === e.to);
+                    if (!fromN || !toN) return null;
+                    return (
+                      <line
+                        key={`mini-route-edge-${idx}`}
+                        x1={fromN.x}
+                        y1={fromN.y}
+                        x2={toN.x}
+                        y2={toN.y}
+                        stroke="#06b6d4"
+                        strokeWidth={Math.max(4, minimapBounds.width / 180)}
+                        strokeDasharray="4 3"
+                        className="animate-pulse"
+                      />
+                    );
+                  })}
+
+                {/* Device Live GPS Position Marker in Minimap */}
+                {gps.isGpsActive && (
+                  <g transform={`translate(${gps.canvasPos.x}, ${gps.canvasPos.y})`}>
+                    <circle r={Math.max(6, minimapBounds.width / 150)} fill="#3b82f6" stroke="#ffffff" strokeWidth="2" />
+                  </g>
+                )}
+
+                {/* Active Viewport Lens Indicator Frame */}
                 {(() => {
                   const mainCanvas = canvasRef.current;
                   const viewportW = mainCanvas ? mainCanvas.clientWidth : 800;
@@ -3841,17 +3995,20 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
                   const strokeW = Math.max(3, minimapBounds.width / 150);
 
                   return (
-                    <rect
-                      x={viewWorldX}
-                      y={viewWorldY}
-                      width={viewWorldW}
-                      height={viewWorldH}
-                      fill="rgba(79, 70, 229, 0.18)"
-                      stroke="#4f46e5"
-                      strokeWidth={strokeW}
-                      rx={6}
-                      className="transition-all"
-                    />
+                    <g>
+                      <rect
+                        x={viewWorldX}
+                        y={viewWorldY}
+                        width={viewWorldW}
+                        height={viewWorldH}
+                        fill="rgba(79, 70, 229, 0.16)"
+                        stroke="#4f46e5"
+                        strokeWidth={strokeW}
+                        rx={6}
+                        className="transition-all"
+                      />
+                      <circle cx={viewWorldX + viewWorldW / 2} cy={viewWorldY + viewWorldH / 2} r={strokeW * 1.5} fill="#4f46e5" />
+                    </g>
                   );
                 })()}
               </svg>
