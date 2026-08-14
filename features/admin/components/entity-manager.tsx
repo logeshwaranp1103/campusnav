@@ -1964,7 +1964,10 @@ export function EntityManager() {
                 <button
                   key={item.type}
                   type="button"
-                  onClick={() => setSelectedType(item.type)}
+                  onClick={() => {
+                    setSelectedType(item.type);
+                    setActiveTab(item.type);
+                  }}
                   className={`group relative flex items-start gap-3.5 p-3.5 rounded-xl border text-left transition-all duration-200 ${isSelected
                       ? "border-[rgb(var(--primary))] bg-[rgb(var(--primary)/0.08)] shadow-md ring-2 ring-[rgb(var(--primary)/0.3)]"
                       : "border-[rgb(var(--border))] bg-[rgb(var(--card))] hover:bg-[rgb(var(--muted)/0.6)] hover:border-[rgb(var(--border-strong))]"
@@ -2901,7 +2904,10 @@ export function EntityManager() {
               key={t.type}
               size="sm"
               variant={activeTab === t.type ? "primary" : "outline"}
-              onClick={() => setActiveTab(t.type)}
+              onClick={() => {
+                setActiveTab(t.type);
+                setSelectedType(t.type);
+              }}
               className="text-xs h-7 px-3 rounded-full shrink-0 gap-1"
             >
               <span>{t.label}</span>
