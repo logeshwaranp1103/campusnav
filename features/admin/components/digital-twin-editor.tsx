@@ -781,7 +781,51 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
         return;
       }
 
-      // Hotkey Tool Switching (1-9)
+      // Single-Key & Number Hotkey Tool Switching (V, D, N, E, T/R, B, O)
+      const activeEl = document.activeElement;
+      const isInputFocused =
+        activeEl &&
+        ["INPUT", "TEXTAREA", "SELECT"].includes(activeEl.tagName);
+
+      if (!isInputFocused && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        const key = e.key.toLowerCase();
+        if (key === "v") {
+          setActiveTool("SELECT");
+          toast({ type: "info", title: "Select Tool Activated (V)" });
+          return;
+        }
+        if (key === "d") {
+          setActiveTool("DOOR");
+          toast({ type: "info", title: "Door Placement Mode (D)" });
+          return;
+        }
+        if (key === "n") {
+          setActiveTool("NODE");
+          toast({ type: "info", title: "Node Placement Mode (N)" });
+          return;
+        }
+        if (key === "e") {
+          setActiveTool("EDGE");
+          toast({ type: "info", title: "Edge Connection Mode (E)" });
+          return;
+        }
+        if (key === "t" || key === "r") {
+          setActiveTool("TEST_ROUTE");
+          toast({ type: "info", title: "Live Route Test Mode (T)" });
+          return;
+        }
+        if (key === "b") {
+          setActiveTool("BUILDING");
+          toast({ type: "info", title: "Building Placement Mode (B)" });
+          return;
+        }
+        if (key === "o") {
+          setActiveTool("OBSTACLE");
+          toast({ type: "info", title: "Obstacle Hazard Mode (O)" });
+          return;
+        }
+      }
+
       if (["1", "2", "3", "4", "5", "6", "7", "8", "9"].includes(e.key) && !e.ctrlKey && !e.metaKey) {
         const toolMap: Record<string, ToolMode> = {
           "1": "SELECT",
@@ -2035,45 +2079,84 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
         <div className="flex items-center gap-1 shrink-0 overflow-x-auto scrollbar-none py-0.5">
           <ToolButton
             active={activeTool === "SELECT"}
-            onClick={() => setActiveTool("SELECT")}
+            onClick={() => {
+              setActiveTool("SELECT");
+              toast({ type: "info", title: "Select Tool (V)", description: "Click elements to select, drag, edit properties, or delete." });
+            }}
             icon={MousePointer}
             label="Select (V)"
           />
           <ToolButton
             active={activeTool === "DOOR"}
-            onClick={() => setActiveTool("DOOR")}
+            onClick={() => {
+              const next = activeTool === "DOOR" ? "SELECT" : "DOOR";
+              setActiveTool(next);
+              if (next === "DOOR") {
+                toast({ type: "info", title: "Door Tool (D)", description: "Click building wall or corridor boundary to place entrance/door." });
+              }
+            }}
             icon={DoorOpen}
-            label="Door Tool"
+            label="Door Tool (D)"
           />
           <ToolButton
             active={activeTool === "NODE"}
-            onClick={() => setActiveTool("NODE")}
+            onClick={() => {
+              const next = activeTool === "NODE" ? "SELECT" : "NODE";
+              setActiveTool(next);
+              if (next === "NODE") {
+                toast({ type: "info", title: "Node Placement (N)", description: "Click anywhere on CAD Canvas to place a navigation node." });
+              }
+            }}
             icon={Waypoints}
             label="Node (N)"
           />
           <ToolButton
             active={activeTool === "EDGE"}
-            onClick={() => setActiveTool("EDGE")}
+            onClick={() => {
+              const next = activeTool === "EDGE" ? "SELECT" : "EDGE";
+              setActiveTool(next);
+              if (next === "EDGE") {
+                toast({ type: "info", title: "Edge Connection Mode (E)", description: "Click Node 1, then click Node 2 to connect walkway edge." });
+              }
+            }}
             icon={GitFork}
             label="Edge (E)"
           />
           <ToolButton
             active={activeTool === "TEST_ROUTE"}
-            onClick={() => setActiveTool("TEST_ROUTE")}
+            onClick={() => {
+              const next = activeTool === "TEST_ROUTE" ? "SELECT" : "TEST_ROUTE";
+              setActiveTool(next);
+              if (next === "TEST_ROUTE") {
+                toast({ type: "info", title: "Live Route Test Mode (T)", description: "Select Start & Destination nodes to test pathfinding live." });
+              }
+            }}
             icon={Play}
-            label="Live Route Test"
+            label="Live Route Test (T)"
           />
           <ToolButton
             active={activeTool === "BUILDING"}
-            onClick={() => setActiveTool(activeTool === "BUILDING" ? "SELECT" : "BUILDING")}
+            onClick={() => {
+              const next = activeTool === "BUILDING" ? "SELECT" : "BUILDING";
+              setActiveTool(next);
+              if (next === "BUILDING") {
+                toast({ type: "info", title: "Building Placement Mode (B)", description: "Click CAD Canvas to place building footprint at cursor." });
+              }
+            }}
             icon={Building2}
-            label="Building"
+            label="Building (B)"
           />
           <ToolButton
             active={activeTool === "OBSTACLE"}
-            onClick={() => setActiveTool(activeTool === "OBSTACLE" ? "SELECT" : "OBSTACLE")}
+            onClick={() => {
+              const next = activeTool === "OBSTACLE" ? "SELECT" : "OBSTACLE";
+              setActiveTool(next);
+              if (next === "OBSTACLE") {
+                toast({ type: "info", title: "Obstacle Hazard Mode (O)", description: "Click node or walkway to place routing hazard/obstacle." });
+              }
+            }}
             icon={AlertTriangle}
-            label="Obstacle"
+            label="Obstacle (O)"
           />
 
           <ToolButton
@@ -2087,10 +2170,10 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
               setLiveRouteStops([]);
               setLiveRouteDestId(null);
               setEdgeStartNodeId(null);
-              toast({ type: "info", title: "Tools Deselected", description: "Unselected all toolbar tools & elements." });
+              toast({ type: "info", title: "Tools Deselected (Esc)", description: "Unselected all toolbar tools, routes & active elements." });
             }}
             icon={XCircle}
-            label="Deselect"
+            label="Deselect (Esc)"
           />
         </div>
 
@@ -4076,6 +4159,218 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
           )}
 
 
+
+          {/* BUILDING Placement Tool Panel */}
+          {!selectedElement && selectedEntityIds.size === 0 && activeTool === "BUILDING" && (
+            <div className="rounded-lg border p-3.5 bg-[rgb(var(--card))] space-y-3 text-xs shadow-md">
+              <Badge className="bg-indigo-600 text-white flex items-center gap-1">
+                <Building2 className="h-3 w-3" /> Building Placement Mode
+              </Badge>
+              <p className="text-[11px] text-[rgb(var(--muted-fg))] leading-relaxed">
+                Set default building details below, then click anywhere on the CAD Canvas to place a building footprint.
+              </p>
+              <div>
+                <label className="mb-1 block font-semibold text-[rgb(var(--fg))]">Building Name</label>
+                <Input
+                  placeholder="e.g. Science Block A"
+                  value={buildingName}
+                  onChange={(e) => setBuildingName(e.target.value)}
+                  className="h-8 text-xs"
+                />
+              </div>
+              <div>
+                <label className="mb-1 block font-semibold text-[rgb(var(--fg))]">Short Code</label>
+                <Input
+                  placeholder="e.g. SBA"
+                  value={buildingCode}
+                  onChange={(e) => setBuildingCode(e.target.value)}
+                  className="h-8 text-xs"
+                />
+              </div>
+              <div>
+                <label className="mb-1 block font-semibold text-[rgb(var(--fg))]">Accent Color</label>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="color"
+                    value={buildingColor}
+                    onChange={(e) => setBuildingColor(e.target.value)}
+                    className="h-8 w-10 cursor-pointer rounded border bg-transparent p-0.5"
+                  />
+                  <span className="text-[11px] font-mono font-semibold">{buildingColor}</span>
+                </div>
+              </div>
+              <div className="rounded-md border bg-[rgb(var(--primary)/0.05)] border-[rgb(var(--primary)/0.2)] p-2 text-[11px] text-[rgb(var(--primary))] font-medium flex items-center gap-1.5">
+                <MousePointer className="h-3.5 w-3.5 shrink-0" />
+                <span>Click CAD Canvas to place building at cursor</span>
+              </div>
+            </div>
+          )}
+
+          {/* OBSTACLE Hazard Tool Panel */}
+          {!selectedElement && selectedEntityIds.size === 0 && activeTool === "OBSTACLE" && (
+            <div className="rounded-lg border p-3.5 bg-[rgb(var(--card))] space-y-3 text-xs shadow-md">
+              <Badge className="bg-amber-600 text-white flex items-center gap-1">
+                <AlertTriangle className="h-3 w-3" /> Hazard / Obstacle Tool
+              </Badge>
+              <p className="text-[11px] text-[rgb(var(--muted-fg))] leading-relaxed">
+                Set hazard reason and radius, then click near a node or walkway on canvas to block routing in real-time.
+              </p>
+              <div>
+                <label className="mb-1 block font-semibold text-[rgb(var(--fg))]">Hazard Reason / Title</label>
+                <Input
+                  placeholder="e.g. Maintenance / Spill Zone"
+                  value={obstacleReason}
+                  onChange={(e) => setObstacleReason(e.target.value)}
+                  className="h-8 text-xs"
+                />
+              </div>
+              <div>
+                <label className="mb-1 block font-semibold text-[rgb(var(--fg))]">Blocked Radius (Meters)</label>
+                <Input
+                  type="number"
+                  min={1}
+                  max={100}
+                  value={obstacleRadius}
+                  onChange={(e) => setObstacleRadius(Math.max(1, parseFloat(e.target.value) || 10))}
+                  className="h-8 text-xs"
+                />
+              </div>
+              <div className="rounded-md border bg-amber-500/10 border-amber-500/30 p-2 text-[11px] text-amber-700 dark:text-amber-300 font-medium flex items-center gap-1.5">
+                <AlertTriangle className="h-3.5 w-3.5 shrink-0 text-amber-500" />
+                <span>Click node or walkway on canvas to place hazard</span>
+              </div>
+            </div>
+          )}
+
+          {/* EDGE Connection Tool Panel */}
+          {!selectedElement && selectedEntityIds.size === 0 && activeTool === "EDGE" && (
+            <div className="rounded-lg border p-3.5 bg-[rgb(var(--card))] space-y-3 text-xs shadow-md">
+              <Badge className="bg-emerald-600 text-white flex items-center gap-1">
+                <GitFork className="h-3 w-3" /> Edge Connection Tool
+              </Badge>
+              <p className="text-[11px] text-[rgb(var(--muted-fg))] leading-relaxed">
+                {edgeStartNodeId
+                  ? "First node selected! Click second node on canvas to create connection."
+                  : "Click Node 1, then click Node 2 to connect with a walkway edge segment."}
+              </p>
+
+              {edgeStartNodeId && (() => {
+                const startN = storeData.nodes.find((n) => n.id === edgeStartNodeId);
+                return (
+                  <div className="rounded-md border border-emerald-500/40 bg-emerald-500/10 p-2 text-[11px] text-emerald-800 dark:text-emerald-200 flex items-center justify-between">
+                    <span className="font-bold">Start Node: {startN?.name || edgeStartNodeId}</span>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="h-5 px-1.5 text-[10px] text-red-500 hover:bg-red-500/10"
+                      onClick={() => setEdgeStartNodeId(null)}
+                    >
+                      Cancel
+                    </Button>
+                  </div>
+                );
+              })()}
+
+              <div>
+                <label className="mb-1 block font-semibold text-[rgb(var(--fg))]">Default Edge Type</label>
+                <select
+                  value={edgeType}
+                  onChange={(e) => setEdgeType(e.target.value as EdgeType)}
+                  className="w-full rounded-md border bg-[rgb(var(--bg))] p-2 text-xs"
+                >
+                  <option value="WALK">Pedestrian Walkway</option>
+                  <option value="ROAD">Outdoor Street / Road</option>
+                  <option value="STAIRS">Staircase Connection</option>
+                  <option value="LIFT">Elevator / Lift Connection</option>
+                  <option value="RAMP">Accessible Ramp</option>
+                  <option value="ESCALATOR">Escalator</option>
+                </select>
+              </div>
+            </div>
+          )}
+
+          {/* TEST_ROUTE Interactive Navigation Panel */}
+          {!selectedElement && selectedEntityIds.size === 0 && activeTool === "TEST_ROUTE" && (
+            <div className="rounded-lg border p-3.5 bg-[rgb(var(--card))] space-y-3 text-xs shadow-md">
+              <Badge className="bg-blue-600 text-white flex items-center gap-1">
+                <Play className="h-3 w-3" /> Live Navigation Route Test
+              </Badge>
+              <p className="text-[11px] text-[rgb(var(--muted-fg))] leading-relaxed">
+                Select Start & Destination nodes below or click nodes on canvas to test Dijkstra shortest path.
+              </p>
+
+              <div>
+                <label className="mb-1 block font-semibold text-[rgb(var(--fg))]">Start Node</label>
+                <select
+                  value={liveRouteStartId || ""}
+                  onChange={(e) => {
+                    const val = e.target.value || null;
+                    setLiveRouteStartId(val);
+                    setSimResult(null);
+                  }}
+                  className="w-full rounded-md border bg-[rgb(var(--bg))] p-2 text-xs"
+                >
+                  <option value="">-- Click Canvas or Select Node --</option>
+                  {floorNodes.map((n) => (
+                    <option key={n.id} value={n.id}>
+                      📍 {n.name || n.id} ({n.type})
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="mb-1 block font-semibold text-[rgb(var(--fg))]">Destination Node</label>
+                <select
+                  value={liveRouteDestId || ""}
+                  onChange={(e) => {
+                    const val = e.target.value || null;
+                    setLiveRouteDestId(val);
+                  }}
+                  className="w-full rounded-md border bg-[rgb(var(--bg))] p-2 text-xs"
+                >
+                  <option value="">-- Click Canvas or Select Node --</option>
+                  {floorNodes.map((n) => (
+                    <option key={n.id} value={n.id}>
+                      🎯 {n.name || n.id} ({n.type})
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {(liveRouteStartId || liveRouteDestId || simResult) && (
+                <div className="flex gap-2 pt-1">
+                  {liveRouteStartId && liveRouteDestId && (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="flex-1 text-[11px] gap-1 h-7"
+                      onClick={() => {
+                        const tmp = liveRouteStartId;
+                        setLiveRouteStartId(liveRouteDestId);
+                        setLiveRouteDestId(tmp);
+                      }}
+                    >
+                      <RotateCcw className="h-3 w-3" /> Reverse
+                    </Button>
+                  )}
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="flex-1 text-[11px] text-red-500 border-red-500/30 hover:bg-red-500/10 h-7"
+                    onClick={() => {
+                      setLiveRouteStartId(null);
+                      setLiveRouteStops([]);
+                      setLiveRouteDestId(null);
+                      setSimResult(null);
+                    }}
+                  >
+                    Clear Route
+                  </Button>
+                </div>
+              )}
+            </div>
+          )}
 
           {activeTool === "DOOR" && (
             <div className="rounded-lg border p-3 bg-[rgb(var(--card))] space-y-3 text-xs">
