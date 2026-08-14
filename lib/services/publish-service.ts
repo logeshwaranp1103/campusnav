@@ -375,6 +375,27 @@ export async function getActivePublishedGraph() {
         };
         return activePublishedSnapshot;
       }
+
+      // Fallback: Assemble snapshot from PostgreSQL relational tables if active-published record does not exist yet
+      const relational = await getRelationalGraphFromDatabase();
+      if (relational && ((relational.buildings && relational.buildings.length > 0) || (relational.nodes && relational.nodes.length > 0))) {
+        activePublishedSnapshot = {
+          version: 1,
+          snapshot: relational,
+          publishedAt: new Date(),
+          publishedBy: "system-auto",
+          notes: "Auto-assembled from relational database",
+        };
+
+        // Auto-seed active-published row so subsequent calls are fast
+        await prisma.publishedGraph.upsert({
+          where: { id: "active-published" },
+          update: { version: 1, snapshot: relational as any },
+          create: { id: "active-published", version: 1, snapshot: relational as any },
+        }).catch((e) => console.warn("Notice: Auto-seeding published graph failed:", e?.message));
+
+        return activePublishedSnapshot;
+      }
     } catch (e) {
       console.warn("Failed to fetch active published graph from Prisma database:", e);
     }
