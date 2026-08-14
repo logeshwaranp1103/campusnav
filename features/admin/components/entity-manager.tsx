@@ -1880,6 +1880,25 @@ export function EntityManager() {
               <span className="font-semibold text-xs">{isRefreshing ? "Refreshing..." : "Refresh"}</span>
             </Button>
 
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => {
+                campusStore.clearLocalStorageData();
+                toast({
+                  type: "info",
+                  title: "Local Storage Cleared",
+                  description: "Removed local storage cache keys. Working graph reloaded.",
+                });
+                setStoreData({ ...campusStore.getWorkingData() });
+              }}
+              className="gap-1.5 shadow-xs border-amber-500/30 text-amber-600 dark:text-amber-400 hover:bg-amber-500/10"
+              title="Clear Client LocalStorage Cache Keys"
+            >
+              <Trash2 className="h-4 w-4" />
+              <span className="font-semibold text-xs">Clear Local Storage</span>
+            </Button>
+
             {/* Whole Data Import/Export Engine */}
             <input
               type="file"

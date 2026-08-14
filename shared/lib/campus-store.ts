@@ -2326,6 +2326,20 @@ class CampusStore {
     }
   }
 
+  public clearLocalStorageData(): void {
+    if (typeof localStorage !== "undefined") {
+      try {
+        localStorage.removeItem("campusnav_working_store_v4");
+        localStorage.removeItem("cad_editor_fullscreen_active");
+        localStorage.removeItem("campusnav_copied_attributes");
+        localStorage.clear();
+        console.log("[CampusStore] Local storage cleared.");
+      } catch (e) {
+        console.warn("Failed to clear local storage:", e);
+      }
+    }
+  }
+
   // ── Named Checkpoints ────────────────────────────────────
 
   public createCheckpoint(name: string): Checkpoint {
