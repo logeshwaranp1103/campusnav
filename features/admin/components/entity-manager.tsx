@@ -292,7 +292,7 @@ export function EntityManager() {
 
   // Handle Fullscreen Toggle using Browser Native Fullscreen API to hide Chrome browser tabs & top address bar
   const toggleFullscreen = () => {
-    const target = containerRef.current || document.documentElement;
+    const target = document.documentElement;
     const nextState = !isFullscreen;
     setIsFullscreen(nextState);
     if (typeof window !== "undefined") {
@@ -1777,7 +1777,7 @@ export function EntityManager() {
     <div
       ref={containerRef}
       className={`${isFullscreen
-          ? "fixed inset-0 z-[99999] h-screen w-screen overflow-y-auto bg-[rgb(var(--bg))] p-6 space-y-6"
+          ? "fixed inset-0 z-[99999] h-screen w-screen min-h-screen min-w-full overflow-y-auto bg-[rgb(var(--bg))] p-6 space-y-6"
           : "space-y-8 pb-12"
         }`}
     >

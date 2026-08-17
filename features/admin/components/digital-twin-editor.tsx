@@ -97,7 +97,6 @@ type ToolMode =
   | "EVENT"
   | "SIMULATE"
   | "SELECT"
-  | "TEST_ROUTE"
   | "PLACE_VERTICAL";
 
 function DimensionInput({
@@ -250,10 +249,7 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
   // Mini-Map Navigation State
   const [isAnimatingPan, setIsAnimatingPan] = useState(false);
 
-  // Live Route Test State (with multi-stop support)
-  const [liveRouteStartId, setLiveRouteStartId] = useState<string | null>(null);
-  const [liveRouteStops, setLiveRouteStops] = useState<string[]>([]);
-  const [liveRouteDestId, setLiveRouteDestId] = useState<string | null>(null);
+
 
   // Dynamic Clock State for Real-Time Event Expiration
   const [nowMs, setNowMs] = useState(() => Date.now());
@@ -807,11 +803,7 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
           toast({ type: "info", title: "Edge Connection Mode (E)" });
           return;
         }
-        if (key === "t" || key === "r") {
-          setActiveTool("TEST_ROUTE");
-          toast({ type: "info", title: "Live Route Test Mode (T)" });
-          return;
-        }
+
         if (key === "b") {
           setActiveTool("BUILDING");
           toast({ type: "info", title: "Building Placement Mode (B)" });
@@ -952,7 +944,7 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
   });
 
   const toggleFullscreen = () => {
-    const target = containerRef.current || document.documentElement;
+    const target = document.documentElement;
     const nextState = !isFullscreen;
     setIsFullscreen(nextState);
     if (typeof window !== "undefined") {
@@ -1090,9 +1082,7 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
     setSelectedElement(null);
     setSelectedEntityIds(new Set());
     setSimResult(null);
-    setLiveRouteStartId(null);
-    setLiveRouteStops([]);
-    setLiveRouteDestId(null);
+
     setEdgeStartNodeId(null);
     campusStore.clearAll();
     setIsDeleteAllModalOpen(false);
@@ -1103,35 +1093,7 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
     });
   };
 
-  // Auto-calculate route when start and destination are selected (supporting multi-stop waypoints)
-  useEffect(() => {
-    const waypoints = [liveRouteStartId, ...liveRouteStops, liveRouteDestId].filter((id): id is string => Boolean(id));
-    if (activeTool === "TEST_ROUTE" && waypoints.length >= 2 && liveRouteStartId && liveRouteDestId) {
-      // 1. Primary path (allowing obstacle penalties if obstructed -> red line)
-      const { graph, nodeMap } = buildAdjacencyGraph(storeData.nodes, storeData.edges, { obstacles: storeData.obstacles, allowObstaclePenalties: true, travelMode: simTravelMode });
-      const path = findMultiWaypointPath(graph, nodeMap, waypoints);
 
-      // 2. Alternate obstacle-free path (hard-blocks obstacle edges -> green line)
-      const { graph: altGraph, nodeMap: altMap } = buildAdjacencyGraph(storeData.nodes, storeData.edges, { obstacles: storeData.obstacles, allowObstaclePenalties: false, travelMode: simTravelMode });
-      const altPath = findMultiWaypointPath(altGraph, altMap, waypoints);
-
-      setSimResult(path);
-      setAltSimResult(altPath);
-      if (path) {
-        const stopCount = liveRouteStops.filter(Boolean).length;
-        toast({
-          type: "success",
-          title: stopCount > 0 ? `Multi-Stop Route Calculated (${stopCount + 2} waypoints)` : "Route Calculated",
-          description: `Shortest: ${Math.round(path.totalDistance)}m ${altPath ? `| Alt Obstacle-Free: ${Math.round(altPath.totalDistance)}m` : ""}`,
-        });
-      } else {
-        toast({ type: "error", title: "No Route Found", description: simTravelMode === "EV" ? "No EV-accessible path connects these points (blocked by walk-only edges)." : "Path is disconnected between waypoints." });
-      }
-    } else {
-      setSimResult(null);
-      setAltSimResult(null);
-    }
-  }, [activeTool, liveRouteStartId, liveRouteStops, liveRouteDestId, simTravelMode, storeData.nodes, storeData.edges, storeData.obstacles, toast]);
 
   // Compute live Graph Validation Report
   const validationReport: GraphValidationReport = useMemo(() => {
@@ -1701,29 +1663,6 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
       });
       setSelectedElement({ type: "door", id: doorId });
       toast({ type: "success", title: "Door Placed", description: `Placed ${doorType} at (${x}, ${y}).` });
-    } else if (activeTool === "TEST_ROUTE") {
-      const closestN = floorNodes.reduce<Node | null>((acc, n) => {
-        const d = Math.hypot(n.x - x, n.y - y);
-        if (!acc || d < Math.hypot(acc.x - x, acc.y - y)) return n;
-        return acc;
-      }, null);
-
-      if (closestN) {
-        if (!liveRouteStartId) {
-          setLiveRouteStartId(closestN.id);
-          setSimResult(null);
-          toast({ type: "info", title: "Route Start Set", description: `Start: ${closestN.name ?? closestN.id}.` });
-        } else {
-          const emptyStopIdx = liveRouteStops.findIndex((s) => !s);
-          if (emptyStopIdx !== -1) {
-            setLiveRouteStops((prev) => prev.map((s, i) => (i === emptyStopIdx ? closestN.id : s)));
-            toast({ type: "info", title: `Stop ${emptyStopIdx + 1} Set`, description: `Stop: ${closestN.name ?? closestN.id}` });
-          } else {
-            setLiveRouteDestId(closestN.id);
-          }
-        }
-      }
-
     } else if (activeTool === "DESTINATION") {
       const name = destName.trim() || `Room ${storeData.destinations.length + 1}`;
       const closestItem = floorNodes.reduce(
@@ -1875,24 +1814,7 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
 
   const handleNodeClick = (node: Node, e: React.MouseEvent) => {
     e.stopPropagation();
-    if (activeTool === "TEST_ROUTE") {
-      if (!liveRouteStartId) {
-        setLiveRouteStartId(node.id);
-        toast({ type: "info", title: "Route Start Set", description: `Start: ${node.name ?? node.id}` });
-      } else {
-        const emptyStopIdx = liveRouteStops.findIndex((s) => !s);
-        if (emptyStopIdx !== -1) {
-          setLiveRouteStops((prev) => prev.map((s, i) => (i === emptyStopIdx ? node.id : s)));
-          toast({ type: "info", title: `Stop ${emptyStopIdx + 1} Set`, description: `Stop: ${node.name ?? node.id}` });
-        } else if (!liveRouteDestId || liveRouteDestId !== node.id) {
-          setLiveRouteDestId(node.id);
-        } else {
-          setLiveRouteStartId(node.id);
-          setLiveRouteDestId(null);
-        }
-      }
-      return;
-    }
+
 
     if (activeTool === "SIMULATE") {
       if (!simStartNodeId || (simStartNodeId && simEndNodeId)) {
@@ -2049,7 +1971,7 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
       ref={containerRef}
       className={
         isFullscreen
-          ? "fixed inset-0 z-50 flex flex-col bg-[rgb(var(--bg))]"
+          ? "fixed inset-0 z-[9999] flex h-screen w-screen min-h-screen min-w-full flex-col overflow-hidden bg-[rgb(var(--bg))]"
           : "relative flex h-[calc(100vh-1.5rem)] flex-col overflow-hidden rounded-xl border bg-[rgb(var(--bg-elev))] shadow-[var(--shadow-md)]"
       }
     >
@@ -2101,18 +2023,7 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
             icon={GitFork}
             label="Edge (E)"
           />
-          <ToolButton
-            active={activeTool === "TEST_ROUTE"}
-            onClick={() => {
-              const next = activeTool === "TEST_ROUTE" ? "SELECT" : "TEST_ROUTE";
-              setActiveTool(next);
-              if (next === "TEST_ROUTE") {
-                toast({ type: "info", title: "Live Route Test Mode (T)", description: "Select Start & Destination nodes to test pathfinding live." });
-              }
-            }}
-            icon={Play}
-            label="Live Route Test (T)"
-          />
+
           <ToolButton
             active={activeTool === "BUILDING"}
             onClick={() => {
@@ -2145,9 +2056,7 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
               setSelectedElement(null);
               setSelectedEntityIds(new Set());
               setSimResult(null);
-              setLiveRouteStartId(null);
-              setLiveRouteStops([]);
-              setLiveRouteDestId(null);
+
               setEdgeStartNodeId(null);
               toast({ type: "info", title: "Tools Deselected (Esc)", description: "Unselected all toolbar tools, routes & active elements." });
             }}
@@ -2780,7 +2689,7 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
                               toast({ type: "success", title: "Edge Split", description: `Inserted node on edge at (${projX}, ${projY}).` });
                               setNodeName("");
                             }
-                          } else if (activeTool !== "TEST_ROUTE" && activeTool !== "SIMULATE") {
+                          } else if (activeTool !== "SIMULATE") {
                             setSelectedElement({ type: "edge", id: e.id });
                           }
                         }}
@@ -2826,7 +2735,7 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
                               toast({ type: "success", title: "Edge Split", description: `Inserted node on edge at (${projX}, ${projY}).` });
                               setNodeName("");
                             }
-                          } else if (activeTool !== "TEST_ROUTE" && activeTool !== "SIMULATE") {
+                          } else if (activeTool !== "SIMULATE") {
                             setSelectedElement({ type: "edge", id: e.id });
                           }
                         }}
@@ -3240,8 +3149,8 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
                 );
               })}
 
-              {/* Render Simulated & Live Test Route Overlay */}
-              {(activeTool === "SIMULATE" || activeTool === "TEST_ROUTE") && (simResult || altSimResult) && (
+              {/* Render Simulated Route Overlay */}
+              {activeTool === "SIMULATE" && (simResult || altSimResult) && (
                 <g>
                   {/* Helper function to check if node belongs to currently active floor view */}
                   {(() => {
@@ -3366,20 +3275,7 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
                                 </g>
                               )}
 
-                              {/* Intermediate Stop Markers */}
-                              {liveRouteStops.map((stopId, idx) => {
-                                const stopNode = storeData.nodes.find((n) => n.id === stopId);
-                                if (!stopNode || !isNodeVisibleOnActiveFloor(stopNode)) return null;
-                                return (
-                                  <g key={`stop-marker-${idx}`}>
-                                    <circle cx={stopNode.x} cy={stopNode.y} r="12" fill="#f59e0b" fillOpacity="0.25" stroke="#f59e0b" strokeWidth="1.5" />
-                                    <circle cx={stopNode.x} cy={stopNode.y} r="6" fill="#d97706" stroke="white" strokeWidth="2" />
-                                    <text x={stopNode.x} y={stopNode.y - 14} textAnchor="middle" fill="#d97706" className="text-[11px] font-extrabold select-none">
-                                      STOP {idx + 1}
-                                    </text>
-                                  </g>
-                                );
-                              })}
+
 
                               {/* End Node Marker */}
                               {endNode && endNode.id !== startNode.id && isNodeVisibleOnActiveFloor(endNode) && (
@@ -3778,190 +3674,7 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
             </div>
           )}
 
-          {activeTool === "TEST_ROUTE" && (
-            <div className="rounded-lg border p-3 bg-[rgb(var(--card))] space-y-3 text-xs">
-              <div className="flex items-center justify-between">
-                <Badge className="bg-emerald-600 text-white flex items-center gap-1">
-                  <Play className="h-3 w-3" /> Live Route Test
-                </Badge>
-                <Badge variant={simTravelMode === "EV" ? "success" : "default"}>
-                  {simTravelMode === "EV" ? "⚡ EV Mode" : "🚶 Walking"}
-                </Badge>
-              </div>
-              <p className="text-[11px] text-[rgb(var(--muted-fg))]">
-                Click nodes on map or select locations below to test multi-stop campus routes.
-              </p>
 
-              {/* Travel Mode Selector */}
-              <div>
-                <label className="font-semibold text-[rgb(var(--fg))] block mb-1">Travel Mode</label>
-                <div className="grid grid-cols-2 gap-1.5">
-                  <button
-                    type="button"
-                    onClick={() => setSimTravelMode("WALK")}
-                    className={cn(
-                      "flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-lg border text-xs font-bold transition-all",
-                      simTravelMode === "WALK"
-                        ? "border-blue-500 bg-blue-500/15 text-blue-700 dark:text-blue-300 ring-1 ring-blue-500 shadow-xs"
-                        : "border-[rgb(var(--border))] text-[rgb(var(--muted-fg))] hover:bg-[rgb(var(--muted)/0.5)]"
-                    )}
-                  >
-                    🚶 Walking
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setSimTravelMode("EV")}
-                    className={cn(
-                      "flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-lg border text-xs font-bold transition-all",
-                      simTravelMode === "EV"
-                        ? "border-emerald-500 bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 ring-1 ring-emerald-500 shadow-xs"
-                        : "border-[rgb(var(--border))] text-[rgb(var(--muted-fg))] hover:bg-[rgb(var(--muted)/0.5)]"
-                    )}
-                  >
-                    ⚡ EV Vehicle
-                  </button>
-                </div>
-              </div>
-
-              {/* Start Location */}
-              <div>
-                <div className="flex items-center justify-between mb-1">
-                  <label className="font-semibold text-blue-600 dark:text-blue-400 flex items-center gap-1">
-                    <span className="h-2 w-2 rounded-full bg-blue-500" /> Start Location
-                  </label>
-                  {liveRouteStartId && (
-                    <button
-                      onClick={() => setLiveRouteStartId(null)}
-                      className="text-[10px] text-red-400 hover:text-red-500 font-medium"
-                    >
-                      Clear
-                    </button>
-                  )}
-                </div>
-                <select
-                  value={liveRouteStartId ?? ""}
-                  onChange={(e) => setLiveRouteStartId(e.target.value || null)}
-                  className="w-full rounded-md border bg-[rgb(var(--bg))] p-2 text-xs text-[rgb(var(--fg))]"
-                >
-                  <option value="">-- Select Start Node / Room --</option>
-                  {allowedNodes.map((n) => (
-                    <option key={n.id} value={n.id}>
-                      {n.name ? n.name : `Node ${n.id}`}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              {/* Intermediate Stops */}
-              {liveRouteStops.map((stopId, idx) => (
-                <div key={idx} className="relative">
-                  <div className="flex items-center justify-between mb-1">
-                    <label className="font-semibold text-amber-500 flex items-center gap-1">
-                      <span className="h-2 w-2 rounded-full bg-amber-400" /> Stop {idx + 1}
-                    </label>
-                    <button
-                      onClick={() => setLiveRouteStops((prev) => prev.filter((_, i) => i !== idx))}
-                      className="text-red-400 hover:text-red-500 p-0.5"
-                      title="Remove Stop"
-                    >
-                      <Trash2 className="h-3.5 w-3.5" />
-                    </button>
-                  </div>
-                  <select
-                    value={stopId}
-                    onChange={(e) =>
-                      setLiveRouteStops((prev) => prev.map((s, i) => (i === idx ? e.target.value : s)))
-                    }
-                    className="w-full rounded-md border border-amber-500/40 bg-[rgb(var(--bg))] p-2 text-xs text-[rgb(var(--fg))] focus:ring-2 focus:ring-amber-400"
-                  >
-                    <option value="">-- Select Intermediate Stop --</option>
-                    {allowedNodes.map((n) => (
-                      <option key={n.id} value={n.id}>
-                        {n.name ? n.name : `Node ${n.id}`}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              ))}
-
-              {/* Add Stop Button - Matching User Navigation Style */}
-              <button
-                type="button"
-                onClick={() => setLiveRouteStops((prev) => [...prev, ""])}
-                className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-dashed border-amber-400/60 bg-amber-400/5 py-1.5 text-xs font-semibold text-amber-500 hover:bg-amber-400/10 transition-colors cursor-pointer"
-              >
-                <Plus className="h-3.5 w-3.5" /> Add Stop
-              </button>
-
-              {/* End Destination */}
-              <div>
-                <div className="flex items-center justify-between mb-1">
-                  <label className="font-semibold text-emerald-600 dark:text-emerald-400 flex items-center gap-1">
-                    <span className="h-2 w-2 rounded-full bg-emerald-500" /> End Destination
-                  </label>
-                  {liveRouteDestId && (
-                    <button
-                      onClick={() => setLiveRouteDestId(null)}
-                      className="text-[10px] text-red-400 hover:text-red-500 font-medium"
-                    >
-                      Clear
-                    </button>
-                  )}
-                </div>
-                <select
-                  value={liveRouteDestId ?? ""}
-                  onChange={(e) => setLiveRouteDestId(e.target.value || null)}
-                  className="w-full rounded-md border bg-[rgb(var(--bg))] p-2 text-xs text-[rgb(var(--fg))]"
-                >
-                  <option value="">-- Select Destination Node / Room --</option>
-                  {allowedNodes.map((n) => (
-                    <option key={n.id} value={n.id}>
-                      {n.name ? n.name : `Node ${n.id}`}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              {/* Clear Route Test */}
-              {(liveRouteStartId || liveRouteDestId || liveRouteStops.length > 0) && (
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() => {
-                    setLiveRouteStartId(null);
-                    setLiveRouteStops([]);
-                    setLiveRouteDestId(null);
-                    setSimResult(null);
-                    setAltSimResult(null);
-                  }}
-                  className="w-full text-xs text-red-500 border-red-500/30 hover:bg-red-500/10"
-                >
-                  Clear Route Test
-                </Button>
-              )}
-
-              {/* Route Summary Stats */}
-              {simResult && (
-                <div className="rounded-lg border bg-[rgb(var(--muted))]/20 p-2.5 space-y-1.5 text-[11px]">
-                  <div className="font-bold text-indigo-600 dark:text-indigo-400 border-b pb-1">
-                    Route Summary
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-[rgb(var(--muted-fg))]">Total Distance:</span>
-                    <span className="font-semibold">{Math.round(simResult.totalDistance)} meters</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-[rgb(var(--muted-fg))]">Est Walk Time:</span>
-                    <span className="font-semibold">~{Math.round((simResult.totalDistance / 1.3) / 60)} min</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-[rgb(var(--muted-fg))]">Total Nodes:</span>
-                    <span className="font-semibold">{simResult.nodes.length} nodes</span>
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
 
 
 
@@ -4094,88 +3807,7 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
             </div>
           )}
 
-          {/* TEST_ROUTE Interactive Navigation Panel */}
-          {!selectedElement && selectedEntityIds.size === 0 && activeTool === "TEST_ROUTE" && (
-            <div className="rounded-lg border p-3.5 bg-[rgb(var(--card))] space-y-3 text-xs shadow-md">
-              <Badge className="bg-blue-600 text-white flex items-center gap-1">
-                <Play className="h-3 w-3" /> Live Navigation Route Test
-              </Badge>
-              <p className="text-[11px] text-[rgb(var(--muted-fg))] leading-relaxed">
-                Select Start & Destination nodes below or click nodes on canvas to test Dijkstra shortest path.
-              </p>
 
-              <div>
-                <label className="mb-1 block font-semibold text-[rgb(var(--fg))]">Start Node</label>
-                <select
-                  value={liveRouteStartId || ""}
-                  onChange={(e) => {
-                    const val = e.target.value || null;
-                    setLiveRouteStartId(val);
-                    setSimResult(null);
-                  }}
-                  className="w-full rounded-md border bg-[rgb(var(--bg))] p-2 text-xs"
-                >
-                  <option value="">-- Click Canvas or Select Node --</option>
-                  {floorNodes.map((n) => (
-                    <option key={n.id} value={n.id}>
-                      📍 {n.name || n.id} ({n.type})
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div>
-                <label className="mb-1 block font-semibold text-[rgb(var(--fg))]">Destination Node</label>
-                <select
-                  value={liveRouteDestId || ""}
-                  onChange={(e) => {
-                    const val = e.target.value || null;
-                    setLiveRouteDestId(val);
-                  }}
-                  className="w-full rounded-md border bg-[rgb(var(--bg))] p-2 text-xs"
-                >
-                  <option value="">-- Click Canvas or Select Node --</option>
-                  {floorNodes.map((n) => (
-                    <option key={n.id} value={n.id}>
-                      🎯 {n.name || n.id} ({n.type})
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              {(liveRouteStartId || liveRouteDestId || simResult) && (
-                <div className="flex gap-2 pt-1">
-                  {liveRouteStartId && liveRouteDestId && (
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      className="flex-1 text-[11px] gap-1 h-7"
-                      onClick={() => {
-                        const tmp = liveRouteStartId;
-                        setLiveRouteStartId(liveRouteDestId);
-                        setLiveRouteDestId(tmp);
-                      }}
-                    >
-                      <RotateCcw className="h-3 w-3" /> Reverse
-                    </Button>
-                  )}
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    className="flex-1 text-[11px] text-red-500 border-red-500/30 hover:bg-red-500/10 h-7"
-                    onClick={() => {
-                      setLiveRouteStartId(null);
-                      setLiveRouteStops([]);
-                      setLiveRouteDestId(null);
-                      setSimResult(null);
-                    }}
-                  >
-                    Clear Route
-                  </Button>
-                </div>
-              )}
-            </div>
-          )}
 
           {activeTool === "DOOR" && (
             <div className="rounded-lg border p-3 bg-[rgb(var(--card))] space-y-3 text-xs">

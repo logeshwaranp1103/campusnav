@@ -220,3 +220,17 @@ body {
   letter-spacing: -0.03em;
   line-height: 1.05;
 }
+
+/* Fix native browser fullscreen backdrop & overflow black border bleeding */
+:fullscreen,
+::backdrop {
+  background-color: rgb(var(--bg)) !important;
+  width: 100vw !important;
+  height: 100vh !important;
+  max-width: 100vw !important;
+  max-height: 100vh !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  overflow: hidden !important;
+}
+
