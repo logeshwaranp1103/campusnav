@@ -24,11 +24,12 @@ export type DraftSnapshot = {
 let activePublishedSnapshot: { version: number; snapshot: DraftSnapshot; publishedAt: Date; publishedBy: string; notes: string } | null = null;
 
 export async function publishDraftGraph(
-  draftSnapshot: DraftSnapshot,
+  draftSnapshot: DraftSnapshot = {},
   userId = "admin-id-1",
   notes?: string
 ): Promise<PublishResult> {
-  const { buildings, floors, nodes, edges, destinations, obstacles } = draftSnapshot;
+  const safeSnapshot = draftSnapshot || {};
+  const { buildings, floors, nodes, edges, destinations, obstacles } = safeSnapshot;
 
   const validationReport = validateCampusGraph(
     buildings || [],
