@@ -34,12 +34,15 @@ import {
   ExternalLink,
   ChevronLeft,
   ChevronRight,
+  ChevronDown,
   Copy,
   ClipboardPaste,
   Check,
   Download,
   Upload,
   Rocket,
+  Camera,
+  RotateCcw,
 } from "lucide-react";
 import { PublishModal } from "@/shared/components/publish-modal";
 import { campusStore } from "@/shared/lib/campus-store";
@@ -70,17 +73,19 @@ export type EntityCategory =
   | "EDGE"
   | "STAIR"
   | "LIFT"
-  | "OBSTACLE";
+  | "OBSTACLE"
+  | "PHOTO";
 
 const ENTITY_TYPES: { type: EntityCategory; label: string; icon: any; description: string; badgeColor: string }[] = [
   { type: "BUILDING", label: "Building", icon: Building2, description: "Campus building structure & 4-corner GPS boundary", badgeColor: "from-blue-500 to-indigo-600" },
-  { type: "FLOOR", label: "Floor", icon: Layers, description: "Vertical building floor level & ordinal", badgeColor: "from-cyan-500 to-blue-600" },
-  { type: "ROOM", label: "Room (Destination)", icon: DoorOpen, description: "Searchable classroom, lab, or office destination", badgeColor: "from-emerald-500 to-teal-600" },
   { type: "NODE", label: "Navigation Node", icon: Waypoints, description: "Path waypoint, junction, or entrance point", badgeColor: "from-violet-500 to-purple-600" },
   { type: "EDGE", label: "Connection Edge", icon: GitFork, description: "Path segment with auto distance & smart splitting", badgeColor: "from-amber-500 to-orange-600" },
+  { type: "ROOM", label: "Room (Destination)", icon: DoorOpen, description: "Searchable classroom, lab, or office destination", badgeColor: "from-emerald-500 to-teal-600" },
+  { type: "OBSTACLE", label: "Obstacle / Hazard", icon: AlertTriangle, description: "Temporary hazard blocking routing paths", badgeColor: "from-red-500 to-orange-600" },
+  { type: "PHOTO", label: "Add Photo", icon: Camera, description: "Select a node and attach/manage reference photo", badgeColor: "from-emerald-500 to-teal-600" },
   { type: "STAIR", label: "Staircase", icon: Footprints, description: "Multi-floor stair group connecting building floors", badgeColor: "from-pink-500 to-rose-600" },
   { type: "LIFT", label: "Lift / Elevator", icon: RefreshCw, description: "Vertical elevator serving selected building floors", badgeColor: "from-sky-500 to-blue-600" },
-  { type: "OBSTACLE", label: "Obstacle / Hazard", icon: AlertTriangle, description: "Temporary hazard blocking routing paths", badgeColor: "from-red-500 to-orange-600" },
+  { type: "FLOOR", label: "Floor", icon: Layers, description: "Vertical building floor level & ordinal", badgeColor: "from-cyan-500 to-blue-600" },
 ];
 
 export function EntityManager() {
@@ -99,10 +104,14 @@ export function EntityManager() {
   const [showMobilePanel, setShowMobilePanel] = useState(false);
   const [showPublishModal, setShowPublishModal] = useState(false);
 
-  // Directory Row Multi-Selection State for Bulk Actions
   const [selectedRowIds, setSelectedRowIds] = useState<Set<string>>(new Set());
 
+  // Selective Node Reference Photo State & Filters
+  const [nodePhotoFilter, setNodePhotoFilter] = useState<"ALL" | "WITH_PHOTO" | "WITHOUT_PHOTO">("ALL");
+  const [viewingPhotoNode, setViewingPhotoNode] = useState<{ id: string; name: string; photoUrl: string; floorName?: string; lat?: number; lng?: number; physicalVerified?: boolean } | null>(null);
+
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const nodePhotoInputRef = useRef<HTMLInputElement>(null);
 
   const handleDownloadWholeData = () => {
     const data = campusStore.getWorkingData();
@@ -193,15 +202,68 @@ export function EntityManager() {
             description: "JSON file format is missing required campus snapshot data structure.",
           });
         }
-      } catch (err) {
-        toast({
-          type: "error",
-          title: "Invalid JSON File",
-          description: err instanceof Error ? err.message : "Failed to parse JSON file.",
-        });
+      } catch (err: unknown) {
+        toast({ type: "error", title: "Import Failed", description: err instanceof Error ? err.message : String(err) });
       }
     };
     reader.readAsText(file);
+  };
+
+  const handlePhotoFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const validTypes = ["image/jpeg", "image/png", "image/webp", "image/gif", "image/svg+xml"];
+    if (!validTypes.includes(file.type)) {
+      toast({
+        type: "error",
+        title: "Invalid File Type",
+        description: "Please select a valid image file (JPG, PNG, WebP, GIF, or SVG).",
+      });
+      return;
+    }
+
+    if (file.size > 5 * 1024 * 1024) {
+      toast({
+        type: "error",
+        title: "File Too Large",
+        description: "Reference photo size must be less than 5MB.",
+      });
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = (evt) => {
+      const dataUrl = evt.target?.result as string;
+      if (dataUrl) {
+        setEditForm((prev) => ({
+          ...prev,
+          photoUrl: dataUrl,
+          photoUploadedAt: new Date().toISOString(),
+        }));
+        toast({
+          type: "success",
+          title: "Reference Photo Attached",
+          description: "Reference photo attached to node. Save changes to persist.",
+        });
+      }
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleConfirmRemovePhoto = () => {
+    if (window.confirm("Are you sure you want to remove the reference photo from this node? The node and its GPS coordinates will be preserved.")) {
+      setEditForm((prev) => ({
+        ...prev,
+        photoUrl: "",
+        photoUploadedAt: "",
+      }));
+      toast({
+        type: "info",
+        title: "Photo Removed",
+        description: "Reference photo cleared. Save changes to persist.",
+      });
+    }
   };
 
   // Copied Entity State for Copy / Paste Workflow
@@ -242,6 +304,9 @@ export function EntityManager() {
     distance: 0,
     accessible: true,
     expiresAt: "",
+    photoUrl: "",
+    photoUploadedAt: "",
+    physicalVerified: false,
   });
 
   // Subscribe to live campus store updates
@@ -517,6 +582,101 @@ export function EntityManager() {
     setLiftForm((prev) => ({ ...prev, buildingId: bldId, selectedFloorIds: bldFloors }));
   };
 
+  // Dedicated Add Photo Management Form State
+  const [photoManagerNodeId, setPhotoManagerNodeId] = useState("");
+  const [photoManagerFile, setPhotoManagerFile] = useState("");
+  const [photoManagerPhysicalVerified, setPhotoManagerPhysicalVerified] = useState(false);
+  const [photoNodeSearchQuery, setPhotoNodeSearchQuery] = useState("");
+  const [isNodeDropdownOpen, setIsNodeDropdownOpen] = useState(false);
+  const nodeDropdownRef = useRef<HTMLDivElement>(null);
+  const dedicatedPhotoInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (nodeDropdownRef.current && !nodeDropdownRef.current.contains(e.target as HTMLElement)) {
+        setIsNodeDropdownOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  const selectedPhotoNode = useMemo(() => {
+    return storeData.nodes.find((n) => n.id === photoManagerNodeId) || null;
+  }, [storeData.nodes, photoManagerNodeId]);
+
+  const filteredPhotoNodes = useMemo(() => {
+    const q = photoNodeSearchQuery.toLowerCase().trim();
+    if (!q) return storeData.nodes;
+    return storeData.nodes.filter((n) => {
+      const fl = storeData.floors.find((f) => f.id === n.floorId);
+      const floorName = fl?.name || (n.floorId === "f-out" ? "Outdoor" : n.floorId);
+      return (
+        (n.name && n.name.toLowerCase().includes(q)) ||
+        n.id.toLowerCase().includes(q) ||
+        n.type.toLowerCase().includes(q) ||
+        floorName.toLowerCase().includes(q)
+      );
+    });
+  }, [storeData.nodes, storeData.floors, photoNodeSearchQuery]);
+
+  const handleDedicatedPhotoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const validTypes = ["image/jpeg", "image/png", "image/webp", "image/gif", "image/svg+xml"];
+    if (!validTypes.includes(file.type)) {
+      toast({
+        type: "error",
+        title: "Invalid File Type",
+        description: "Please select a valid image file (JPG, PNG, WebP, GIF, or SVG).",
+      });
+      return;
+    }
+
+    if (file.size > 5 * 1024 * 1024) {
+      toast({
+        type: "error",
+        title: "File Too Large",
+        description: "Reference photo size must be less than 5MB.",
+      });
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = (evt) => {
+      const dataUrl = evt.target?.result as string;
+      if (dataUrl) {
+        setPhotoManagerFile(dataUrl);
+        toast({
+          type: "success",
+          title: "Image Selected",
+          description: "Click 'Save Photo to Node' below to link and persist.",
+        });
+      }
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleDedicatedRemovePhoto = () => {
+    if (!selectedPhotoNode) return;
+    if (window.confirm(`Are you sure you want to remove the reference photo from node "${selectedPhotoNode.name || selectedPhotoNode.id}"? The node and GPS coordinates will be preserved.`)) {
+      campusStore.updateNode(selectedPhotoNode.id, {
+        photoUrl: undefined,
+        photoUploadedAt: undefined,
+        physicalVerified: false,
+      });
+      setPhotoManagerFile("");
+      setPhotoManagerPhysicalVerified(false);
+      setStoreData(campusStore.getWorkingData());
+      toast({
+        type: "info",
+        title: "Photo Removed",
+        description: "Reference photo removed from node.",
+      });
+    }
+  };
+
   const entityCounts = useMemo(() => {
     return {
       BUILDING: storeData.buildings.length,
@@ -527,6 +687,7 @@ export function EntityManager() {
       STAIR: (storeData.stairGroups || []).length,
       LIFT: (storeData.liftGroups || []).length,
       OBSTACLE: (storeData.obstacles || []).length,
+      PHOTO: storeData.nodes.filter((n) => Boolean(n.photoUrl)).length,
     };
   }, [storeData]);
 
@@ -731,7 +892,7 @@ export function EntityManager() {
 
         campusStore.addNode(newNode);
         toast({ type: "success", title: "Node Created & Synced", description: `Node "${newNode.name}" added to Store & CAD Editor!` });
-        setNodeForm((prev) => ({ ...prev, name: "" }));
+        setNodeForm((prev) => ({ ...prev, name: "", lat: "11.", lng: "77." }));
         setStoreData({ ...campusStore.getWorkingData() });
         break;
       }
@@ -775,7 +936,7 @@ export function EntityManager() {
         campusStore.addDestination(newDest);
 
         toast({ type: "success", title: "Room Destination Created", description: `Room "${newDest.name}" added to Store & CAD Editor!` });
-        setRoomForm((prev) => ({ ...prev, name: "", roomNumber: "" }));
+        setRoomForm((prev) => ({ ...prev, name: "", roomNumber: "", lat: "11.", lng: "77." }));
         setStoreData({ ...campusStore.getWorkingData() });
         break;
       }
@@ -803,7 +964,7 @@ export function EntityManager() {
           title: "Staircase Created & Synced",
           description: `Stair group "${sg.name}" connected across ${stairForm.selectedFloorIds.length} floors! Visible in CAD Editor.`,
         });
-        setStairForm((prev) => ({ ...prev, name: "", selectedFloorIds: [] }));
+        setStairForm((prev) => ({ ...prev, name: "", selectedFloorIds: [], lat: "11.", lng: "77." }));
         setStoreData({ ...campusStore.getWorkingData() });
         break;
       }
@@ -831,7 +992,7 @@ export function EntityManager() {
           title: "Lift Created & Synced",
           description: `Elevator/Lift "${lg.name}" serving ${liftForm.selectedFloorIds.length} floors created! Visible in CAD Editor.`,
         });
-        setLiftForm((prev) => ({ ...prev, name: "", selectedFloorIds: [] }));
+        setLiftForm((prev) => ({ ...prev, name: "", selectedFloorIds: [], lat: "11.", lng: "77." }));
         setStoreData({ ...campusStore.getWorkingData() });
         break;
       }
@@ -859,7 +1020,38 @@ export function EntityManager() {
         campusStore.addObstacle(newObs);
 
         toast({ type: "success", title: "Obstacle Added & Synced", description: `Obstacle hazard recorded and visible in CAD Editor.` });
-        setObstacleForm((prev) => ({ ...prev, name: "" }));
+        setObstacleForm((prev) => ({ ...prev, name: "", lat: "11.", lng: "77." }));
+        setStoreData({ ...campusStore.getWorkingData() });
+        break;
+      }
+
+      case "PHOTO": {
+        if (!photoManagerNodeId) {
+          toast({ type: "error", title: "Validation Error", description: "Please select a node first." });
+          return;
+        }
+        if (!photoManagerFile) {
+          toast({ type: "error", title: "Validation Error", description: "Please select an image file to attach." });
+          return;
+        }
+        const targetNode = storeData.nodes.find((n) => n.id === photoManagerNodeId);
+        if (!targetNode) {
+          toast({ type: "error", title: "Node Not Found", description: "Selected node was not found in campus graph." });
+          return;
+        }
+
+        campusStore.updateNode(targetNode.id, {
+          photoUrl: photoManagerFile,
+          photoUploadedAt: new Date().toISOString(),
+          physicalVerified: photoManagerPhysicalVerified,
+        });
+
+        toast({
+          type: "success",
+          title: "Photo Linked to Node",
+          description: `Reference photo linked to node "${targetNode.name || targetNode.id}"!`,
+        });
+
         setStoreData({ ...campusStore.getWorkingData() });
         break;
       }
@@ -1348,6 +1540,9 @@ export function EntityManager() {
       distance: item.raw.distance !== undefined ? item.raw.distance : 0,
       accessible: item.raw.accessible !== undefined ? item.raw.accessible : true,
       expiresAt: item.raw.expiresAt || "",
+      photoUrl: item.raw.photoUrl || "",
+      photoUploadedAt: item.raw.photoUploadedAt || "",
+      physicalVerified: Boolean(item.raw.physicalVerified),
     });
   };
 
@@ -1457,6 +1652,9 @@ export function EntityManager() {
           type: editForm.nodeType,
           floorId: editForm.floorId || editingItem.raw.floorId,
           accessible: editForm.accessible,
+          photoUrl: editForm.photoUrl || undefined,
+          photoUploadedAt: editForm.photoUploadedAt || undefined,
+          physicalVerified: editForm.physicalVerified,
           ...(!isNaN(latNum) && !isNaN(lngNum) ? { lat: latNum, lng: lngNum, x, y } : {}),
         });
         break;
@@ -1548,6 +1746,8 @@ export function EntityManager() {
       floorName?: string;
       details: string;
       raw: any;
+      photoUrl?: string;
+      physicalVerified?: boolean;
     }> = [];
 
     if (activeTab === "ALL" || activeTab === "BUILDING") {
@@ -1601,18 +1801,27 @@ export function EntityManager() {
       });
     }
 
-    if (activeTab === "ALL" || activeTab === "NODE") {
+    if (activeTab === "ALL" || activeTab === "NODE" || activeTab === "PHOTO") {
       storeData.nodes.forEach((n) => {
         const fl = storeData.floors.find((f) => f.id === n.floorId);
         const matches = !q || (n.name && n.name.toLowerCase().includes(q)) || n.id.toLowerCase().includes(q) || n.type.toLowerCase().includes(q);
-        if (matches) {
+        const matchesPhotoFilter =
+          activeTab === "PHOTO"
+            ? (nodePhotoFilter === "WITHOUT_PHOTO" ? !n.photoUrl : Boolean(n.photoUrl))
+            : nodePhotoFilter === "ALL" ||
+              (nodePhotoFilter === "WITH_PHOTO" && Boolean(n.photoUrl)) ||
+              (nodePhotoFilter === "WITHOUT_PHOTO" && !n.photoUrl);
+
+        if (matches && matchesPhotoFilter) {
           items.push({
             id: n.id,
             name: n.name || `Node ${n.id.slice(0, 8)}`,
-            category: "NODE",
+            category: activeTab === "PHOTO" ? "PHOTO" : "NODE",
             floorName: fl?.name || (n.floorId === "f-out" ? "Outdoor" : n.floorId),
             details: `Type: ${n.type} · GPS: ${n.lat?.toFixed(9) || "Canvas"}, ${n.lng?.toFixed(9) || ""}`,
             raw: n,
+            photoUrl: n.photoUrl,
+            physicalVerified: n.physicalVerified,
           });
         }
       });
@@ -2814,21 +3023,355 @@ export function EntityManager() {
               </div>
             )}
 
+            {/* DEDICATED ADD PHOTO FORM */}
+            {selectedType === "PHOTO" && (
+              <div className="space-y-6 animate-in fade-in duration-200">
+                {/* STEP 1: SELECT NODE */}
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs font-bold text-[rgb(var(--fg))] flex items-center gap-1.5">
+                      <Waypoints className="h-4 w-4 text-[rgb(var(--primary))]" /> 1. Select Node *
+                    </label>
+                    <span className="text-[11px] text-[rgb(var(--muted-fg))] font-mono">
+                      {storeData.nodes.length} Nodes in Campus
+                    </span>
+                  </div>
+
+                  {/* UNIFIED SEARCHABLE NODE COMBOBOX */}
+                  <div className="relative" ref={nodeDropdownRef}>
+                    <div className="relative flex items-center">
+                      <Search className="absolute left-3.5 h-4 w-4 text-[rgb(var(--muted-fg))] pointer-events-none" />
+                      <input
+                        type="text"
+                        placeholder="Search and select node by name, ID, or floor..."
+                        value={
+                          isNodeDropdownOpen
+                            ? photoNodeSearchQuery
+                            : selectedPhotoNode
+                            ? `${selectedPhotoNode.photoUrl ? "📷 " : ""}${selectedPhotoNode.name || `Node ${selectedPhotoNode.id.slice(0, 8)}`} (${selectedPhotoNode.type}) · ${storeData.floors.find((f) => f.id === selectedPhotoNode.floorId)?.name || (selectedPhotoNode.floorId === "f-out" ? "Outdoor" : selectedPhotoNode.floorId)}`
+                            : ""
+                        }
+                        onFocus={() => {
+                          setIsNodeDropdownOpen(true);
+                          if (selectedPhotoNode && !photoNodeSearchQuery) {
+                            setPhotoNodeSearchQuery(selectedPhotoNode.name || "");
+                          }
+                        }}
+                        onChange={(e) => {
+                          setPhotoNodeSearchQuery(e.target.value);
+                          if (!isNodeDropdownOpen) setIsNodeDropdownOpen(true);
+                        }}
+                        className="w-full rounded-xl border border-[rgb(var(--border))] bg-[rgb(var(--bg))] pl-10 pr-20 py-2.5 text-xs font-medium text-[rgb(var(--fg))] placeholder-[rgb(var(--muted-fg))] focus:outline-none focus:ring-2 focus:ring-[rgb(var(--primary)/0.3)] focus:border-[rgb(var(--primary))] transition-all shadow-xs"
+                      />
+                      <div className="absolute right-2.5 flex items-center gap-1">
+                        {selectedPhotoNode && (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setPhotoManagerNodeId("");
+                              setPhotoManagerFile("");
+                              setPhotoManagerPhysicalVerified(false);
+                              setPhotoNodeSearchQuery("");
+                            }}
+                            className="p-1 rounded-md text-[rgb(var(--muted-fg))] hover:text-[rgb(var(--fg))] hover:bg-[rgb(var(--muted))] transition-colors cursor-pointer"
+                            title="Clear Selection"
+                          >
+                            <X className="h-3.5 w-3.5" />
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => setIsNodeDropdownOpen((prev) => !prev)}
+                          className="p-1 rounded-md text-[rgb(var(--muted-fg))] hover:text-[rgb(var(--fg))] transition-colors cursor-pointer"
+                          title="Toggle Options List"
+                        >
+                          <ChevronDown className={cn("h-4 w-4 transition-transform duration-200", isNodeDropdownOpen && "rotate-180")} />
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* FLOATING DROPDOWN LIST */}
+                    {isNodeDropdownOpen && (
+                      <div className="absolute top-full left-0 right-0 z-50 mt-1.5 max-h-64 overflow-y-auto rounded-xl border border-[rgb(var(--border))] bg-[rgb(var(--card))] p-1.5 shadow-2xl scrollbar-thin animate-in fade-in zoom-in-95 duration-150">
+                        {filteredPhotoNodes.length === 0 ? (
+                          <div className="p-3 text-center text-xs text-[rgb(var(--muted-fg))]">
+                            No campus nodes found matching &quot;{photoNodeSearchQuery}&quot;
+                          </div>
+                        ) : (
+                          <div className="space-y-0.5">
+                            {filteredPhotoNodes.map((n) => {
+                              const fl = storeData.floors.find((f) => f.id === n.floorId);
+                              const floorLabel = fl ? fl.name : n.floorId === "f-out" ? "Outdoor Area" : n.floorId;
+                              const isSelected = n.id === photoManagerNodeId;
+                              const hasPhoto = Boolean(n.photoUrl);
+
+                              return (
+                                <button
+                                  key={n.id}
+                                  type="button"
+                                  onClick={() => {
+                                    setPhotoManagerNodeId(n.id);
+                                    setPhotoManagerFile(n.photoUrl || "");
+                                    setPhotoManagerPhysicalVerified(Boolean(n.physicalVerified));
+                                    setPhotoNodeSearchQuery("");
+                                    setIsNodeDropdownOpen(false);
+                                  }}
+                                  className={cn(
+                                    "w-full flex items-center justify-between gap-2 p-2 rounded-lg text-left text-xs transition-colors cursor-pointer",
+                                    isSelected
+                                      ? "bg-[rgb(var(--primary)/0.12)] text-[rgb(var(--primary))] font-bold"
+                                      : "hover:bg-[rgb(var(--muted)/0.6)] text-[rgb(var(--fg))]"
+                                  )}
+                                >
+                                  <div className="min-w-0 flex-1">
+                                    <div className="flex items-center gap-1.5">
+                                      <span className="font-semibold truncate">
+                                        {n.name || `Node ${n.id.slice(0, 8)}`}
+                                      </span>
+                                      <Badge variant="default" className="text-[9px] px-1.5 py-0 uppercase border border-[rgb(var(--border))]">
+                                        {n.type}
+                                      </Badge>
+                                    </div>
+                                    <div className="text-[10px] text-[rgb(var(--muted-fg))] truncate font-mono">
+                                      ID: {n.id} · {floorLabel}
+                                    </div>
+                                  </div>
+
+                                  <div className="shrink-0 flex items-center gap-1.5">
+                                    {hasPhoto ? (
+                                      <span className="inline-flex items-center gap-0.5 text-[10px] font-bold text-emerald-600 bg-emerald-500/15 px-1.5 py-0.5 rounded-full">
+                                        <Camera className="h-3 w-3" /> Photo
+                                      </span>
+                                    ) : (
+                                      <span className="text-[10px] text-[rgb(var(--muted-fg))]">
+                                        ○ No Photo
+                                      </span>
+                                    )}
+                                    {isSelected && <Check className="h-3.5 w-3.5 text-[rgb(var(--primary))]" />}
+                                  </div>
+                                </button>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Selected Node Details Card */}
+                  {selectedPhotoNode ? (
+                    <div className="rounded-xl border border-[rgb(var(--border))] bg-[rgb(var(--muted)/0.25)] p-4 space-y-3">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-[rgb(var(--primary)/0.15)] text-[rgb(var(--primary))] font-bold text-xs">
+                            📍
+                          </span>
+                          <div>
+                            <h4 className="font-bold text-sm text-[rgb(var(--fg))]">
+                              {selectedPhotoNode.name || `Node ${selectedPhotoNode.id}`}
+                            </h4>
+                            <p className="text-[11px] font-mono text-[rgb(var(--muted-fg))]">Node ID: {selectedPhotoNode.id}</p>
+                          </div>
+                        </div>
+                        {selectedPhotoNode.photoUrl ? (
+                          <Badge className="bg-emerald-600 text-white text-[10px] gap-1">
+                            <Camera className="h-3 w-3" /> Photo Attached
+                          </Badge>
+                        ) : (
+                          <span className="text-[11px] text-[rgb(var(--muted-fg))] bg-[rgb(var(--muted))] px-2.5 py-1 rounded-full">
+                            No Photo Attached
+                          </span>
+                        )}
+                      </div>
+
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs border-t pt-2.5 text-[rgb(var(--muted-fg))]">
+                        <div>
+                          <span className="block text-[10px] uppercase font-bold text-[rgb(var(--muted-fg))]">Type</span>
+                          <span className="font-semibold text-[rgb(var(--fg))]">{selectedPhotoNode.type}</span>
+                        </div>
+                        <div>
+                          <span className="block text-[10px] uppercase font-bold text-[rgb(var(--muted-fg))]">Floor</span>
+                          <span className="font-semibold text-[rgb(var(--fg))]">
+                            {storeData.floors.find((f) => f.id === selectedPhotoNode.floorId)?.name || (selectedPhotoNode.floorId === "f-out" ? "Outdoor Area" : selectedPhotoNode.floorId)}
+                          </span>
+                        </div>
+                        <div>
+                          <span className="block text-[10px] uppercase font-bold text-[rgb(var(--muted-fg))]">Latitude</span>
+                          <span className="font-mono text-[11px] text-[rgb(var(--fg))]">{selectedPhotoNode.lat?.toFixed(8) ?? "Canvas"}</span>
+                        </div>
+                        <div>
+                          <span className="block text-[10px] uppercase font-bold text-[rgb(var(--muted-fg))]">Longitude</span>
+                          <span className="font-mono text-[11px] text-[rgb(var(--fg))]">{selectedPhotoNode.lng?.toFixed(8) ?? "Canvas"}</span>
+                        </div>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="p-4 text-center border border-dashed rounded-xl text-xs text-[rgb(var(--muted-fg))]">
+                      Please select a node above to view its attributes and attach a reference photo.
+                    </div>
+                  )}
+                </div>
+
+                {/* STEP 2: SELECT PICTURE & PREVIEW */}
+                {selectedPhotoNode && (
+                  <div className="space-y-3 border-t pt-4">
+                    <div className="flex items-center justify-between">
+                      <label className="text-xs font-bold text-[rgb(var(--fg))] flex items-center gap-1.5">
+                        <Camera className="h-4 w-4 text-[rgb(var(--primary))]" /> 2. Select Picture & Preview *
+                      </label>
+                      {photoManagerFile && (
+                        <span className="text-[11px] text-emerald-600 font-semibold flex items-center gap-1">
+                          <Check className="h-3 w-3" /> Image Ready
+                        </span>
+                      )}
+                    </div>
+
+                    <input
+                      ref={dedicatedPhotoInputRef}
+                      type="file"
+                      accept="image/jpeg,image/png,image/webp,image/gif,image/svg+xml"
+                      onChange={handleDedicatedPhotoUpload}
+                      className="hidden"
+                    />
+
+                    {photoManagerFile ? (
+                      <div className="rounded-xl border border-[rgb(var(--border))] bg-[rgb(var(--card))] p-4 space-y-3">
+                        <div className="relative aspect-video max-h-64 w-full overflow-hidden rounded-xl border bg-black/90 flex items-center justify-center">
+                          <img
+                            src={photoManagerFile}
+                            alt="Selected Reference Preview"
+                            className="max-h-60 w-full object-contain"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => setViewingPhotoNode({
+                              id: selectedPhotoNode.id,
+                              name: selectedPhotoNode.name || `Node ${selectedPhotoNode.id}`,
+                              photoUrl: photoManagerFile,
+                              lat: selectedPhotoNode.lat,
+                              lng: selectedPhotoNode.lng,
+                              physicalVerified: photoManagerPhysicalVerified,
+                            })}
+                            className="absolute top-2 right-2 rounded-md bg-black/60 p-1.5 text-white hover:bg-black/80 transition-colors cursor-pointer"
+                            title="View Fullscreen Preview"
+                          >
+                            <Eye className="h-4 w-4" />
+                          </button>
+                        </div>
+
+                        <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            onClick={() => dedicatedPhotoInputRef.current?.click()}
+                            className="text-xs gap-1.5 h-8"
+                          >
+                            <RotateCcw className="h-3.5 w-3.5" /> Change Picture / Replace
+                          </Button>
+
+                          {selectedPhotoNode.photoUrl && (
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="outline"
+                              onClick={handleDedicatedRemovePhoto}
+                              className="text-xs text-red-500 border-red-500/30 hover:bg-red-500/10 gap-1.5 h-8"
+                            >
+                              <Trash2 className="h-3.5 w-3.5" /> Remove Photo from Node
+                            </Button>
+                          )}
+                        </div>
+                      </div>
+                    ) : (
+                      <div
+                        onClick={() => dedicatedPhotoInputRef.current?.click()}
+                        className="flex flex-col items-center justify-center p-8 border-2 border-dashed rounded-xl bg-[rgb(var(--muted)/0.15)] hover:bg-[rgb(var(--muted)/0.3)] transition-colors cursor-pointer text-center space-y-2"
+                      >
+                        <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-[rgb(var(--primary)/0.1)] text-[rgb(var(--primary))]">
+                          <Upload className="h-6 w-6" />
+                        </div>
+                        <div>
+                          <p className="text-sm font-bold text-[rgb(var(--fg))]">Choose Image from Device</p>
+                          <p className="text-xs text-[rgb(var(--muted-fg))]">Supports JPG, PNG, WebP, GIF, or SVG (Max 5MB)</p>
+                        </div>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            dedicatedPhotoInputRef.current?.click();
+                          }}
+                          className="text-xs gap-1.5 mt-2"
+                        >
+                          <Upload className="h-3.5 w-3.5" /> Browse Image File
+                        </Button>
+                      </div>
+                    )}
+
+                    {/* Physical Location Verification Toggle */}
+                    <div className="rounded-lg border p-3 bg-[rgb(var(--muted)/0.15)]">
+                      <label className="flex items-center gap-2.5 text-xs font-semibold text-[rgb(var(--fg))] cursor-pointer select-none">
+                        <input
+                          type="checkbox"
+                          checked={photoManagerPhysicalVerified}
+                          onChange={(e) => setPhotoManagerPhysicalVerified(e.target.checked)}
+                          className="h-4 w-4 rounded border-[rgb(var(--border))] text-[rgb(var(--primary))]"
+                        />
+                        <span>Physical Location Verified on Campus</span>
+                      </label>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
             {/* Submit Action */}
             <div className="flex items-center justify-end gap-3 pt-4 border-t">
+              {selectedType !== "PHOTO" && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={handlePasteEntity}
+                  className="gap-1.5 border-indigo-500/40 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-500/10"
+                >
+                  <ClipboardPaste className="h-4 w-4" /> Paste Copied Data
+                </Button>
+              )}
               <Button
                 type="button"
                 variant="outline"
-                onClick={handlePasteEntity}
-                className="gap-1.5 border-indigo-500/40 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-500/10"
+                onClick={() => {
+                  if (selectedType === "PHOTO") {
+                    setPhotoManagerNodeId("");
+                    setPhotoManagerFile("");
+                    setPhotoManagerPhysicalVerified(false);
+                    setPhotoNodeSearchQuery("");
+                  } else {
+                    handleResetForm();
+                  }
+                }}
               >
-                <ClipboardPaste className="h-4 w-4" /> Paste Copied Data
-              </Button>
-              <Button type="button" variant="outline" onClick={handleResetForm}>
                 Reset Form
               </Button>
-              <Button type="button" variant="gradient" onClick={handleCreateEntity} className="gap-2 shadow-md">
-                <Plus className="h-4 w-4" /> Add Entity to Store
+              <Button
+                type="button"
+                variant="gradient"
+                onClick={handleCreateEntity}
+                disabled={selectedType === "PHOTO" && (!photoManagerNodeId || !photoManagerFile)}
+                className="gap-2 shadow-md"
+              >
+                {selectedType === "PHOTO" ? (
+                  <>
+                    <Camera className="h-4 w-4" /> Save Photo to Node
+                  </>
+                ) : (
+                  <>
+                    <Plus className="h-4 w-4" /> Add Entity to Store
+                  </>
+                )}
               </Button>
             </div>
           </Card>
@@ -2893,6 +3436,18 @@ export function EntityManager() {
               <span>{t.label}</span>
             </Button>
           ))}
+
+          {(activeTab === "ALL" || activeTab === "NODE" || activeTab === "PHOTO") && (
+            <select
+              value={nodePhotoFilter}
+              onChange={(e) => setNodePhotoFilter(e.target.value as any)}
+              className="h-7 rounded-full border border-[rgb(var(--border))] bg-[rgb(var(--card))] px-3 text-xs font-semibold focus:outline-none shrink-0 ml-auto cursor-pointer text-[rgb(var(--fg))]"
+            >
+              <option value="ALL">📷 Photo Status: All Nodes</option>
+              <option value="WITH_PHOTO">📷 With Reference Photo</option>
+              <option value="WITHOUT_PHOTO">○ Without Reference Photo</option>
+            </select>
+          )}
         </div>
 
         {/* Directory Table */}
@@ -2969,7 +3524,34 @@ export function EntityManager() {
                             <span className="italic">Campus Ground / Outdoor</span>
                           )}
                         </td>
-                        <td className="p-3.5 text-[rgb(var(--muted-fg))] font-medium">{item.details}</td>
+                        <td className="p-3.5 text-[rgb(var(--muted-fg))] font-medium">
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <span>{item.details}</span>
+                            {(item.category === "NODE" || item.category === "PHOTO") && item.photoUrl && (
+                              <button
+                                type="button"
+                                onClick={() => setViewingPhotoNode({
+                                  id: item.id,
+                                  name: item.name,
+                                  photoUrl: item.photoUrl!,
+                                  floorName: item.floorName,
+                                  lat: item.raw?.lat,
+                                  lng: item.raw?.lng,
+                                  physicalVerified: item.physicalVerified,
+                                })}
+                                className="inline-flex items-center gap-1 rounded-full bg-emerald-500/15 px-2 py-0.5 text-[10px] font-bold text-emerald-600 hover:bg-emerald-500/25 transition-colors cursor-pointer"
+                                title="View Reference Photo"
+                              >
+                                <Camera className="h-3 w-3" /> 📷 Photo
+                              </button>
+                            )}
+                            {(item.category === "NODE" || item.category === "PHOTO") && item.physicalVerified && (
+                              <span className="inline-flex items-center gap-0.5 rounded-full bg-blue-500/15 px-1.5 py-0.5 text-[10px] font-bold text-blue-600">
+                                <CheckCircle2 className="h-3 w-3" /> Verified
+                              </span>
+                            )}
+                          </div>
+                        </td>
                         <td className="p-3.5 text-right">
                           <div className="flex items-center justify-end gap-1">
                             <Link href={`/admin/editor?focus=${item.id}`}>
@@ -3389,6 +3971,102 @@ export function EntityManager() {
                     />
                     <span>Wheelchair Accessible Node</span>
                   </label>
+
+                  {/* Selective Node Reference Photo Section */}
+                  <div className="rounded-xl border border-[rgb(var(--border))] bg-[rgb(var(--card))] p-3.5 space-y-3 shadow-xs">
+                    <div className="flex items-center justify-between">
+                      <label className="font-bold text-[rgb(var(--fg))] flex items-center gap-1.5 text-xs">
+                        <Camera className="h-4 w-4 text-[rgb(var(--primary))]" /> Node Reference Photo (Optional)
+                      </label>
+                      {editForm.photoUrl ? (
+                        <Badge className="bg-emerald-600 text-white text-[10px]">📷 Attached</Badge>
+                      ) : (
+                        <span className="text-[11px] text-[rgb(var(--muted-fg))]">○ None</span>
+                      )}
+                    </div>
+
+                    <input
+                      ref={nodePhotoInputRef}
+                      type="file"
+                      accept="image/jpeg,image/png,image/webp,image/gif,image/svg+xml"
+                      onChange={handlePhotoFileUpload}
+                      className="hidden"
+                    />
+
+                    {editForm.photoUrl ? (
+                      <div className="space-y-2">
+                        <div className="relative aspect-video w-full overflow-hidden rounded-lg border bg-black/90 flex items-center justify-center">
+                          <img
+                            src={editForm.photoUrl}
+                            alt="Node Reference"
+                            className="max-h-48 w-full object-contain"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => setViewingPhotoNode({
+                              id: editingItem.id,
+                              name: editForm.name,
+                              photoUrl: editForm.photoUrl,
+                              lat: parseFloat(editForm.lat),
+                              lng: parseFloat(editForm.lng),
+                              physicalVerified: editForm.physicalVerified,
+                            })}
+                            className="absolute top-2 right-2 rounded-md bg-black/60 p-1.5 text-white hover:bg-black/80 transition-colors"
+                            title="View Fullscreen Photo"
+                          >
+                            <Eye className="h-3.5 w-3.5" />
+                          </button>
+                        </div>
+                        <div className="flex items-center justify-between gap-2">
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            onClick={() => nodePhotoInputRef.current?.click()}
+                            className="text-xs gap-1 h-7"
+                          >
+                            <RotateCcw className="h-3 w-3" /> Replace Photo
+                          </Button>
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            onClick={handleConfirmRemovePhoto}
+                            className="text-xs text-red-500 border-red-500/30 hover:bg-red-500/10 gap-1 h-7"
+                          >
+                            <Trash2 className="h-3 w-3" /> Remove Photo
+                          </Button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="flex flex-col items-center justify-center p-4 border border-dashed rounded-lg bg-[rgb(var(--muted)/0.2)] text-center">
+                        <Camera className="h-6 w-6 text-[rgb(var(--muted-fg))] mb-1.5" />
+                        <p className="text-xs font-semibold text-[rgb(var(--fg))]">No reference photo attached</p>
+                        <p className="text-[11px] text-[rgb(var(--muted-fg))] mb-2">Optional physical documentation for campus node</p>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          onClick={() => nodePhotoInputRef.current?.click()}
+                          className="text-xs gap-1.5 h-7"
+                        >
+                          <Upload className="h-3.5 w-3.5" /> Upload Reference Photo
+                        </Button>
+                      </div>
+                    )}
+
+                    <div className="border-t pt-2.5">
+                      <label className="flex items-center gap-2 text-xs font-semibold text-[rgb(var(--fg))] cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={editForm.physicalVerified}
+                          onChange={(e) => setEditForm((f) => ({ ...f, physicalVerified: e.target.checked }))}
+                          className="h-4 w-4 rounded border-[rgb(var(--border))] text-[rgb(var(--primary))]"
+                        />
+                        <span>Physical Location Verified on Campus</span>
+                      </label>
+                    </div>
+                  </div>
                 </div>
               )}
 
@@ -3591,6 +4269,55 @@ export function EntityManager() {
 
       {/* Publish Modal */}
       <PublishModal open={showPublishModal} onClose={() => setShowPublishModal(false)} />
+      {/* Node Reference Photo Viewer Modal */}
+      {viewingPhotoNode && (
+        <div className="fixed inset-0 w-screen h-screen min-w-full min-h-full z-[100000] flex items-center justify-center bg-black/70 p-4 backdrop-blur-xs animate-in fade-in duration-200 overflow-hidden select-none">
+          <div className="relative w-full max-w-lg rounded-2xl border border-[rgb(var(--border))] bg-[rgb(var(--card))] p-5 shadow-2xl space-y-4">
+            <div className="flex items-center justify-between border-b pb-3">
+              <div className="flex items-center gap-2">
+                <Camera className="h-5 w-5 text-[rgb(var(--primary))]" />
+                <div>
+                  <h3 className="font-bold text-base text-[rgb(var(--fg))]">{viewingPhotoNode.name}</h3>
+                  <p className="text-[11px] text-[rgb(var(--muted-fg))] font-mono">Node ID: {viewingPhotoNode.id}</p>
+                </div>
+              </div>
+              <Button size="sm" variant="ghost" onClick={() => setViewingPhotoNode(null)} className="h-8 w-8 p-0">
+                <X className="h-4 w-4" />
+              </Button>
+            </div>
+
+            <div className="relative aspect-video w-full overflow-hidden rounded-xl border bg-black/90 flex items-center justify-center">
+              <img
+                src={viewingPhotoNode.photoUrl}
+                alt={`Reference for ${viewingPhotoNode.name}`}
+                className="max-h-72 w-full object-contain"
+              />
+            </div>
+
+            <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-[rgb(var(--muted-fg))] border-t pt-3">
+              <div className="space-y-0.5">
+                {viewingPhotoNode.floorName && (
+                  <div>Location: <span className="font-semibold text-[rgb(var(--fg))]">{viewingPhotoNode.floorName}</span></div>
+                )}
+                {viewingPhotoNode.lat !== undefined && viewingPhotoNode.lng !== undefined && (
+                  <div className="font-mono text-[11px]">GPS: {viewingPhotoNode.lat.toFixed(7)}, {viewingPhotoNode.lng.toFixed(7)}</div>
+                )}
+              </div>
+              {viewingPhotoNode.physicalVerified && (
+                <Badge className="bg-emerald-600 text-white flex items-center gap-1">
+                  <CheckCircle2 className="h-3 w-3" /> Physically Verified
+                </Badge>
+              )}
+            </div>
+
+            <div className="flex justify-end pt-1">
+              <Button size="sm" onClick={() => setViewingPhotoNode(null)} className="bg-[rgb(var(--primary))] text-white px-5">
+                Close
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

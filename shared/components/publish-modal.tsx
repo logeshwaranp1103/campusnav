@@ -1,6 +1,6 @@
 "use client";
 
-import React from "react";
+import React, { useEffect } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { Rocket, X } from "lucide-react";
 import { Button } from "@/shared/components/ui/button";
@@ -15,6 +15,17 @@ interface PublishModalProps {
 export function PublishModal({ open, onClose }: PublishModalProps) {
   const { toast } = useToast();
   const [publishing, setPublishing] = React.useState(false);
+
+  useEffect(() => {
+    if (open) {
+      document.body.classList.add("modal-open");
+      document.documentElement.classList.add("modal-open");
+      return () => {
+        document.body.classList.remove("modal-open");
+        document.documentElement.classList.remove("modal-open");
+      };
+    }
+  }, [open]);
 
   const handleConfirmPublish = async () => {
     setPublishing(true);
@@ -49,12 +60,12 @@ export function PublishModal({ open, onClose }: PublishModalProps) {
 
   return (
     <AnimatePresence>
-      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4">
+      <div className="fixed inset-0 w-screen h-screen min-w-full min-h-full z-[999999] flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 overflow-hidden select-none">
         <motion.div
           initial={{ scale: 0.95, opacity: 0 }}
           animate={{ scale: 1, opacity: 1 }}
           exit={{ scale: 0.95, opacity: 0 }}
-          className="w-full max-w-md rounded-xl border bg-[rgb(var(--card))] p-6 shadow-2xl space-y-5"
+          className="w-full max-w-md rounded-xl border bg-[rgb(var(--card))] p-6 shadow-2xl space-y-5 overflow-hidden"
         >
           <div className="flex items-center justify-between border-b pb-3">
             <div className="flex items-center gap-2">
@@ -92,3 +103,4 @@ export function PublishModal({ open, onClose }: PublishModalProps) {
     </AnimatePresence>
   );
 }
+

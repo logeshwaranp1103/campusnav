@@ -41,6 +41,9 @@ export type Node = {
   isEntranceNode?: boolean;
   outdoorNodeId?: string;
   accessible?: boolean;
+  photoUrl?: string;
+  photoUploadedAt?: string;
+  physicalVerified?: boolean;
 };
 
 export type Edge = {

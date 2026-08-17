@@ -196,6 +196,10 @@ export async function publishDraftGraph(
         const validFloorIds = new Set((floors || []).map((f) => f.id));
         for (const n of nodes) {
           const floorId = n.floorId && validFloorIds.has(n.floorId) ? n.floorId : null;
+          const nodeMeta = {
+            ...(n.photoUrl ? { photoUrl: n.photoUrl, photoUploadedAt: n.photoUploadedAt } : {}),
+            ...(n.physicalVerified !== undefined ? { physicalVerified: n.physicalVerified } : {}),
+          };
           await prisma.node.upsert({
             where: { id: n.id },
             update: {
@@ -207,6 +211,7 @@ export async function publishDraftGraph(
               longitude: n.lng ?? null,
               x: n.x ?? null,
               y: n.y ?? null,
+              metadata: Object.keys(nodeMeta).length > 0 ? nodeMeta : undefined,
             },
             create: {
               id: n.id,
@@ -218,6 +223,7 @@ export async function publishDraftGraph(
               longitude: n.lng ?? null,
               x: n.x ?? null,
               y: n.y ?? null,
+              metadata: Object.keys(nodeMeta).length > 0 ? nodeMeta : undefined,
             },
           }).catch((e) => console.warn(`Node ${n.id} upsert deferred:`, e?.message));
         }
@@ -418,17 +424,23 @@ export async function getRelationalGraphFromDatabase(): Promise<DraftSnapshot | 
       code: getFloorCode(f.ordinal, f.name),
     }));
 
-    const nodes: Node[] = rawNodes.map((n: any) => ({
-      id: n.id,
-      type: n.type as any,
-      name: n.name ?? undefined,
-      floorId: n.floorId ?? "",
-      x: n.x ?? 0,
-      y: n.y ?? 0,
-      lat: n.latitude !== undefined ? n.latitude : (n.lat !== undefined ? n.lat : undefined),
-      lng: n.longitude !== undefined ? n.longitude : (n.lng !== undefined ? n.lng : undefined),
-      searchable: n.searchable ?? true,
-    }));
+    const nodes: Node[] = rawNodes.map((n: any) => {
+      const meta = (n.metadata && typeof n.metadata === "object") ? n.metadata : {};
+      return {
+        id: n.id,
+        type: n.type as any,
+        name: n.name ?? undefined,
+        floorId: n.floorId ?? "",
+        x: n.x ?? 0,
+        y: n.y ?? 0,
+        lat: n.latitude !== undefined ? n.latitude : (n.lat !== undefined ? n.lat : undefined),
+        lng: n.longitude !== undefined ? n.longitude : (n.lng !== undefined ? n.lng : undefined),
+        searchable: n.searchable ?? true,
+        photoUrl: n.photoUrl || meta.photoUrl || undefined,
+        photoUploadedAt: n.photoUploadedAt || meta.photoUploadedAt || undefined,
+        physicalVerified: n.physicalVerified !== undefined ? n.physicalVerified : meta.physicalVerified,
+      };
+    });
 
     const edges: Edge[] = rawEdges.map((e: any) => ({
       id: e.id,

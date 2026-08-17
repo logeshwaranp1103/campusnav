@@ -40,8 +40,9 @@ import {
   Pencil,
   RefreshCw,
   Locate,
-  MapPin,
   Share2,
+  Camera,
+  CheckCircle2,
 } from "lucide-react";
 
 import { Button } from "@/shared/components/ui/button";
@@ -182,45 +183,7 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
   const [activeTool, setActiveTool] = useState<ToolMode>(initialTool);
   const [activeFloorId, setActiveFloorId] = useState<string>("f-out");
 
-  // Unsaved Changes Leave Warning Modal State
-  const [isLeaveModalOpen, setIsLeaveModalOpen] = useState(false);
-  const [pendingLeaveUrl, setPendingLeaveUrl] = useState<string | null>(null);
 
-  // Warn on browser unload/refresh if unpublished changes exist
-  useEffect(() => {
-    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
-      if (campusStore.getPendingChanges().length > 0) {
-        e.preventDefault();
-        e.returnValue = "";
-        return "";
-      }
-    };
-    window.addEventListener("beforeunload", handleBeforeUnload);
-    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
-  }, []);
-
-  // Intercept in-app link clicks when unpublished changes exist
-  useEffect(() => {
-    const handleAnchorClick = (e: MouseEvent) => {
-      if (campusStore.getPendingChanges().length === 0) return;
-
-      const target = (e.target as HTMLElement).closest("a");
-      if (!target) return;
-      const href = target.getAttribute("href");
-      if (!href || href.startsWith("#") || href.startsWith("javascript:")) return;
-
-      // If navigating to another page/route
-      if (href !== window.location.pathname && href !== window.location.pathname + window.location.search) {
-        e.preventDefault();
-        e.stopPropagation();
-        setPendingLeaveUrl(href);
-        setIsLeaveModalOpen(true);
-      }
-    };
-
-    document.addEventListener("click", handleAnchorClick, true);
-    return () => document.removeEventListener("click", handleAnchorClick, true);
-  }, []);
 
   // In-Editor Search State
   const [searchQuery, setSearchQuery] = useState("");
@@ -248,6 +211,9 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
 
   // Mini-Map Navigation State
   const [isAnimatingPan, setIsAnimatingPan] = useState(false);
+
+  // Selective Node Reference Photo Modal State
+  const [viewingPhotoNode, setViewingPhotoNode] = useState<{ id: string; name: string; photoUrl: string; lat?: number; lng?: number; physicalVerified?: boolean } | null>(null);
 
 
 
@@ -4708,6 +4674,44 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
                 </div>
               </div>
 
+              {/* Node Reference Photo Inspector Card */}
+              <div className="rounded-lg border border-[rgb(var(--border))] bg-[rgb(var(--card))] p-2.5 space-y-2 text-xs">
+                <div className="flex items-center justify-between">
+                  <span className="font-bold text-[rgb(var(--fg))] flex items-center gap-1.5">
+                    <Camera className="h-3.5 w-3.5 text-[rgb(var(--primary))]" /> Reference Photo
+                  </span>
+                  {selectedNode.photoUrl ? (
+                    <Badge className="bg-emerald-600 text-white text-[10px] px-1.5 py-0.5">📷 Attached</Badge>
+                  ) : (
+                    <span className="text-[10px] text-[rgb(var(--muted-fg))]">○ None</span>
+                  )}
+                </div>
+                {selectedNode.photoUrl ? (
+                  <div className="space-y-1.5">
+                    <div className="relative aspect-video w-full overflow-hidden rounded-md border bg-black/90 flex items-center justify-center">
+                      <img src={selectedNode.photoUrl} alt="Reference" className="max-h-28 w-full object-contain" />
+                    </div>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => setViewingPhotoNode({
+                        id: selectedNode.id,
+                        name: selectedNode.name || `Node ${selectedNode.id}`,
+                        photoUrl: selectedNode.photoUrl!,
+                        lat: selectedNode.lat,
+                        lng: selectedNode.lng,
+                        physicalVerified: selectedNode.physicalVerified,
+                      })}
+                      className="w-full text-xs h-7 gap-1"
+                    >
+                      <Eye className="h-3 w-3" /> View Photo Details
+                    </Button>
+                  </div>
+                ) : (
+                  <p className="text-[11px] text-[rgb(var(--muted-fg))]">No physical reference photo attached for this node.</p>
+                )}
+              </div>
+
               <Button
                 variant="outline"
                 size="sm"
@@ -5670,60 +5674,57 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
         </div>
       )}
 
-      {/* Unsaved Changes Confirmation Modal */}
-      <AnimatePresence>
-        {isLeaveModalOpen && (
-          <div className="fixed inset-0 z-[999999] flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 animate-in fade-in duration-150">
-            <div className="w-full max-w-md rounded-2xl border border-[rgb(var(--border))] bg-[rgb(var(--card))] p-6 shadow-2xl space-y-4 animate-in zoom-in-95 duration-150">
-              <div className="flex items-center gap-3">
-                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-amber-500/15 text-amber-600 dark:text-amber-400 font-bold">
-                  <AlertTriangle className="h-5 w-5" />
-                </div>
-                <div>
-                  <h3 className="text-base font-bold text-[rgb(var(--fg))]">Unsaved Changes</h3>
-                  <p className="text-xs text-[rgb(var(--muted-fg))]">
-                    You have {pendingChanges.length} unpublished {pendingChanges.length === 1 ? "change" : "changes"}.
-                  </p>
-                </div>
-              </div>
 
-              <p className="text-xs text-[rgb(var(--fg))] leading-relaxed bg-[rgb(var(--bg))] p-3 rounded-xl border">
-                You have unpublished changes. Are you sure you want to leave? Your changes may be lost.
-              </p>
-
-              <div className="flex items-center justify-end gap-2 pt-2 border-t">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => {
-                    setIsLeaveModalOpen(false);
-                    setPendingLeaveUrl(null);
-                  }}
-                >
-                  Stay / Cancel
-                </Button>
-                <Button
-                  variant="danger"
-                  size="sm"
-                  onClick={() => {
-                    setIsLeaveModalOpen(false);
-                    if (pendingLeaveUrl) {
-                      window.location.href = pendingLeaveUrl;
-                    } else {
-                      window.history.back();
-                    }
-                  }}
-                >
-                  Leave Page
-                </Button>
-              </div>
-            </div>
-          </div>
-        )}
-      </AnimatePresence>
 
       {/* Publish Review Modal */}
       <PublishModal open={showPublishModal} onClose={() => setShowPublishModal(false)} />
+
+      {/* Selective Node Reference Photo Viewer Modal */}
+      {viewingPhotoNode && (
+        <div className="fixed inset-0 w-screen h-screen min-w-full min-h-full z-[100000] flex items-center justify-center bg-black/70 p-4 backdrop-blur-xs animate-in fade-in duration-200 overflow-hidden select-none">
+          <div className="relative w-full max-w-lg rounded-2xl border border-[rgb(var(--border))] bg-[rgb(var(--card))] p-5 shadow-2xl space-y-4">
+            <div className="flex items-center justify-between border-b pb-3">
+              <div className="flex items-center gap-2">
+                <Camera className="h-5 w-5 text-[rgb(var(--primary))]" />
+                <div>
+                  <h3 className="font-bold text-base text-[rgb(var(--fg))]">{viewingPhotoNode.name}</h3>
+                  <p className="text-[11px] text-[rgb(var(--muted-fg))] font-mono">Node ID: {viewingPhotoNode.id}</p>
+                </div>
+              </div>
+              <Button size="sm" variant="ghost" onClick={() => setViewingPhotoNode(null)} className="h-8 w-8 p-0">
+                <X className="h-4 w-4" />
+              </Button>
+            </div>
+
+            <div className="relative aspect-video w-full overflow-hidden rounded-xl border bg-black/90 flex items-center justify-center">
+              <img
+                src={viewingPhotoNode.photoUrl}
+                alt={`Reference for ${viewingPhotoNode.name}`}
+                className="max-h-72 w-full object-contain"
+              />
+            </div>
+
+            <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-[rgb(var(--muted-fg))] border-t pt-3">
+              <div className="space-y-0.5">
+                {viewingPhotoNode.lat !== undefined && viewingPhotoNode.lng !== undefined && (
+                  <div className="font-mono text-[11px]">GPS: {viewingPhotoNode.lat.toFixed(7)}, {viewingPhotoNode.lng.toFixed(7)}</div>
+                )}
+              </div>
+              {viewingPhotoNode.physicalVerified && (
+                <Badge className="bg-emerald-600 text-white flex items-center gap-1">
+                  <CheckCircle2 className="h-3 w-3" /> Physically Verified
+                </Badge>
+              )}
+            </div>
+
+            <div className="flex justify-end pt-1">
+              <Button size="sm" onClick={() => setViewingPhotoNode(null)} className="bg-[rgb(var(--primary))] text-white px-5">
+                Close
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
