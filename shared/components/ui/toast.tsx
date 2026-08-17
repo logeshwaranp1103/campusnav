@@ -35,11 +35,17 @@ const icons = {
 export function ToastProvider({ children }: { children: ReactNode }) {
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [portalTarget, setPortalTarget] = useState<HTMLElement | null>(null);
+  const queueRef = useState<Omit<Toast, "id">[]>([]);
+  const isProcessingRef = useState<{ current: boolean }>({ current: false });
 
   const toast = useCallback((t: Omit<Toast, "id">) => {
     const id = Math.random().toString(36).slice(2);
-    setToasts((s) => [...s, { ...t, id }]);
-    setTimeout(() => setToasts((s) => s.filter((x) => x.id !== id)), 4500);
+    setToasts((s) => {
+      // Keep max 2 visible toasts at a time so notifications do not flood the screen
+      const currentToasts = s.length >= 2 ? s.slice(1) : s;
+      return [...currentToasts, { ...t, id }];
+    });
+    setTimeout(() => setToasts((s) => s.filter((x) => x.id !== id)), 4000);
   }, []);
 
   useEffect(() => {

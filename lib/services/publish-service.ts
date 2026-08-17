@@ -110,7 +110,27 @@ export async function publishDraftGraph(
         },
       }).catch((e) => console.warn("MapVersion creation notice:", e?.message));
 
-      // 2. Relational Table Synchronization (Best-effort per entity)
+      // 2. Relational Table Synchronization & Deletion Cleanup
+      const validBuildingIds = (buildings || []).map((b) => b.id);
+      const validFloorIds = (floors || []).map((f) => f.id);
+      const validNodeIds = (nodes || []).map((n) => n.id);
+      const validEdgeIds = (edges || []).map((e) => e.id);
+      const validDestinationIds = (destinations || []).map((d) => d.id);
+      const validObstacleIds = (obstacles || []).map((o) => o.id);
+      const validDoorIds = ((draftSnapshot.doors as any[]) || []).map((d) => d.id);
+
+      // Clean up deleted entities from relational database tables (cascading child-to-parent)
+      await prisma.searchAlias.deleteMany({ where: { destinationId: { notIn: validDestinationIds } } }).catch(() => {});
+      await prisma.room.deleteMany({ where: { OR: [{ id: { notIn: validDestinationIds } }, { floorId: { notIn: validFloorIds } }] } }).catch(() => {});
+      await prisma.facility.deleteMany({ where: { floorId: { notIn: validFloorIds } } }).catch(() => {});
+      await prisma.destination.deleteMany({ where: { id: { notIn: validDestinationIds } } }).catch(() => {});
+      await prisma.obstacle.deleteMany({ where: { id: { notIn: validObstacleIds } } }).catch(() => {});
+      await prisma.door.deleteMany({ where: { id: { notIn: validDoorIds } } }).catch(() => {});
+      await prisma.edge.deleteMany({ where: { id: { notIn: validEdgeIds } } }).catch(() => {});
+      await prisma.node.deleteMany({ where: { id: { notIn: validNodeIds } } }).catch(() => {});
+      await prisma.floor.deleteMany({ where: { id: { notIn: validFloorIds } } }).catch(() => {});
+      await prisma.building.deleteMany({ where: { id: { notIn: validBuildingIds } } }).catch(() => {});
+
       if (buildings && Array.isArray(buildings)) {
         for (const b of buildings) {
           const safeCode = b.shortCode ? `${b.shortCode}_${b.id.slice(-6)}` : b.id;

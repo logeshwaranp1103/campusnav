@@ -10,16 +10,7 @@ export async function GET() {
       });
 
       if (draftRecord && draftRecord.snapshot) {
-        const snap = draftRecord.snapshot as any;
-        const hasEntities = snap && (
-          (Array.isArray(snap.buildings) && snap.buildings.length > 0) ||
-          (Array.isArray(snap.nodes) && snap.nodes.length > 0) ||
-          (Array.isArray(snap.floors) && snap.floors.length > 0) ||
-          (Array.isArray(snap.destinations) && snap.destinations.length > 0)
-        );
-        if (hasEntities) {
-          return NextResponse.json({ draft: draftRecord.snapshot });
-        }
+        return NextResponse.json({ draft: draftRecord.snapshot });
       }
 
       // Fallback 1: Check relational DB tables (building, floor, node, edge, destination, door)
@@ -63,31 +54,8 @@ export async function PUT(req: Request) {
   try {
     const body = await req.json();
     const snapshot = body.snapshot || body.draft;
-    const isExplicitReset = Boolean(body.isExplicitReset || snapshot?.isExplicitReset);
 
     if (snapshot && prisma) {
-      const incomingBuildingsCount = Array.isArray(snapshot.buildings) ? snapshot.buildings.length : 0;
-      const incomingNodesCount = Array.isArray(snapshot.nodes) ? snapshot.nodes.length : 0;
-      const incomingFloorsCount = Array.isArray(snapshot.floors) ? snapshot.floors.length : 0;
-      const isIncomingEmpty = incomingBuildingsCount === 0 && incomingNodesCount === 0 && incomingFloorsCount === 0;
-
-      // Protection Guard: If incoming snapshot is empty, do NOT overwrite an existing DB draft containing entities unless explicitly confirmed
-      if (isIncomingEmpty && !isExplicitReset) {
-        const existingDraft = await prisma.draftGraph.findUnique({ where: { id: "active-draft" } });
-        const existingSnapshot = existingDraft?.snapshot as any;
-        const existingBuildingsCount = existingSnapshot && Array.isArray(existingSnapshot.buildings)
-          ? existingSnapshot.buildings.length
-          : 0;
-        const existingNodesCount = existingSnapshot && Array.isArray(existingSnapshot.nodes)
-          ? existingSnapshot.nodes.length
-          : 0;
-
-        if (existingBuildingsCount > 0 || existingNodesCount > 0) {
-          console.warn(`[PUT /api/admin/campus-graph/draft] Prevented accidental empty snapshot overwrite. Existing draft has ${existingBuildingsCount} buildings and ${existingNodesCount} nodes.`);
-          return NextResponse.json({ success: false, protected: true, message: "Prevented accidental empty draft overwrite." });
-        }
-      }
-
       // Save the full working draft snapshot JSON to DraftGraph table (used strictly by CAD Editor / Admin)
       await prisma.draftGraph.upsert({
         where: { id: "active-draft" },

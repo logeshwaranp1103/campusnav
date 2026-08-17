@@ -1079,7 +1079,11 @@ class CampusStore {
     this.saveSnapshotToUndo(`Deleted Node "${deleted.name ?? id}"`);
     this.nodes.splice(idx, 1);
     this.edges = this.edges.filter((e) => e.from !== id && e.to !== id);
-    this.destinations = this.destinations.filter((d) => d.nodeId !== id);
+    this.destinations.forEach((d) => {
+      if (d.nodeId === id) {
+        d.nodeId = undefined;
+      }
+    });
     this.pendingChanges.unshift({
       id: `change-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
       type: "DELETE_NODE",
@@ -2188,37 +2192,22 @@ class CampusStore {
       if (resDraft.ok) {
         const jsonDraft = await resDraft.json();
         const draft = jsonDraft?.draft;
-        const hasDraftEntities = Boolean(
-          draft &&
-          ((Array.isArray(draft.buildings) && draft.buildings.length > 0) ||
-            (Array.isArray(draft.nodes) && draft.nodes.length > 0) ||
-            (Array.isArray(draft.floors) && draft.floors.length > 0) ||
-            (Array.isArray(draft.destinations) && draft.destinations.length > 0) ||
-            (Array.isArray(draft.obstacles) && draft.obstacles.length > 0) ||
-            (Array.isArray(draft.edges) && draft.edges.length > 0))
-        );
-
-        if (hasDraftEntities) {
+        if (draft && typeof draft === "object") {
           // Replace working state with server state
-          this.buildings = draft.buildings || [];
-          this.floors = draft.floors || [];
-          this.nodes = draft.nodes || [];
-          this.edges = draft.edges || [];
-          this.destinations = draft.destinations || [];
-          this.events = draft.events || [];
-          this.obstacles = draft.obstacles || [];
-          this.stairGroups = draft.stairGroups || [];
-          this.liftGroups = draft.liftGroups || [];
-          this.doors = draft.doors || [];
+          this.buildings = Array.isArray(draft.buildings) ? draft.buildings : [];
+          this.floors = Array.isArray(draft.floors) ? draft.floors : [];
+          this.nodes = Array.isArray(draft.nodes) ? draft.nodes : [];
+          this.edges = Array.isArray(draft.edges) ? draft.edges : [];
+          this.destinations = Array.isArray(draft.destinations) ? draft.destinations : [];
+          this.events = Array.isArray(draft.events) ? draft.events : [];
+          this.obstacles = Array.isArray(draft.obstacles) ? draft.obstacles : [];
+          this.stairGroups = Array.isArray(draft.stairGroups) ? draft.stairGroups : [];
+          this.liftGroups = Array.isArray(draft.liftGroups) ? draft.liftGroups : [];
+          this.doors = Array.isArray(draft.doors) ? draft.doors : [];
           this.ensureDefaultGroundFloors();
           this.syncVerticalGroupPositions();
           (this.stairGroups || []).forEach((sg) => this.rebuildStairGroupConnections(sg));
           this.autoConnectMatchingVerticalNodesAcrossFloors();
-          try {
-            if (typeof window !== "undefined") {
-              localStorage.setItem("campusnav_working_store_v4", JSON.stringify(this.getWorkingData()));
-            }
-          } catch (e) {}
         }
       }
 
@@ -2240,29 +2229,6 @@ class CampusStore {
             liftGroups: graph.liftGroups || [],
             doors: graph.doors || [],
           };
-
-          const hasWorkingEntities =
-            this.buildings.length > 0 ||
-            this.nodes.length > 0 ||
-            this.floors.length > 0 ||
-            this.destinations.length > 0;
-
-          const hasPublishedEntities =
-            (graph.buildings && graph.buildings.length > 0) ||
-            (graph.nodes && graph.nodes.length > 0) ||
-            (graph.destinations && graph.destinations.length > 0);
-
-          // Auto-recovery: If working draft is empty, restore from published graph
-          if (!hasWorkingEntities && hasPublishedEntities) {
-            this.buildings = [...(graph.buildings || [])];
-            this.floors = [...(graph.floors || [])];
-            this.nodes = [...(graph.nodes || [])];
-            this.edges = [...(graph.edges || [])];
-            this.destinations = [...(graph.destinations || [])];
-            this.stairGroups = [...(graph.stairGroups || [])];
-            this.liftGroups = [...(graph.liftGroups || [])];
-            this.doors = [...(graph.doors || [])];
-          }
         }
       }
       const hasWorkingEntities =
@@ -2558,7 +2524,7 @@ class CampusStore {
 
     this.nodes = this.nodes.filter((n) => !idSet.has(n.id));
     this.edges = this.edges.filter((e) => !idSet.has(e.id) && !idSet.has(e.from) && !idSet.has(e.to));
-    this.destinations = this.destinations.filter((d) => !idSet.has(d.id) && (!d.nodeId || !idSet.has(d.nodeId)));
+    this.destinations = this.destinations.filter((d) => !idSet.has(d.id));
     this.doors = this.doors.filter((d) => !idSet.has(d.id));
     this.obstacles = this.obstacles.filter((o) => !idSet.has(o.id));
     this.events = this.events.filter((ev) => !idSet.has(ev.id));

@@ -72,6 +72,10 @@ export async function DELETE(req: Request) {
 
     campusStore.deleteBuilding(id);
 
+    if (prisma) {
+      await prisma.building.delete({ where: { id } }).catch((e) => console.warn(`Notice: Prisma building delete ${id}:`, e?.message));
+    }
+
     await logAuditEvent({
       userId: user.id,
       action: "BUILDING_DELETED",

@@ -39,7 +39,9 @@ import {
   Check,
   Download,
   Upload,
+  Rocket,
 } from "lucide-react";
+import { PublishModal } from "@/shared/components/publish-modal";
 import { campusStore } from "@/shared/lib/campus-store";
 import { gpsToCanvas, canvasToGps, getCenterFromCorners } from "@/lib/geo/projection";
 import { getBuildingCorners, validatePolygonCorners, type BuildingCorner } from "@/lib/geo/building-geometry";
@@ -95,6 +97,7 @@ export function EntityManager() {
     return false;
   });
   const [showMobilePanel, setShowMobilePanel] = useState(false);
+  const [showPublishModal, setShowPublishModal] = useState(false);
 
   // Directory Row Multi-Selection State for Bulk Actions
   const [selectedRowIds, setSelectedRowIds] = useState<Set<string>>(new Set());
@@ -320,34 +323,18 @@ export function EntityManager() {
   const handleRefresh = async () => {
     setIsRefreshing(true);
     try {
-      const res = await fetch("/api/admin/campus-graph/draft");
-      if (res.ok) {
-        const data = await res.json();
-        if (data && data.draft && Array.isArray(data.draft.buildings) && data.draft.buildings.length > 0) {
-          if (typeof localStorage !== "undefined") {
-            localStorage.setItem(
-              "campusnav_explicit_draft_v2",
-              JSON.stringify({
-                name: "Refreshed Server Draft",
-                timestamp: Date.now(),
-                snapshot: data.draft,
-              })
-            );
-          }
-        }
-      }
-    } catch (e) {
-      console.warn("Soft refresh fallback to local store:", e);
-    } finally {
-      campusStore.loadSavedDraft();
+      await campusStore.syncWithServer();
       setStoreData(campusStore.getWorkingData());
       setSelectedRowIds(new Set());
       toast({
         type: "success",
         title: "Entities Refreshed",
-        description: "Campus data re-synchronized without exiting Fullscreen view.",
+        description: "Campus data re-synchronized from PostgreSQL server database.",
       });
-      setTimeout(() => setIsRefreshing(false), 400);
+    } catch (e) {
+      console.warn("Notice during database refresh:", e);
+    } finally {
+      setIsRefreshing(false);
     }
   };
 
@@ -1882,22 +1869,15 @@ export function EntityManager() {
 
             <Button
               size="sm"
-              variant="outline"
-              onClick={() => {
-                campusStore.clearLocalStorageData();
-                toast({
-                  type: "info",
-                  title: "Local Storage Cleared",
-                  description: "Removed local storage cache keys. Working graph reloaded.",
-                });
-                setStoreData({ ...campusStore.getWorkingData() });
-              }}
-              className="gap-1.5 shadow-xs border-amber-500/30 text-amber-600 dark:text-amber-400 hover:bg-amber-500/10"
-              title="Clear Client LocalStorage Cache Keys"
+              onClick={() => setShowPublishModal(true)}
+              className="gap-1.5 shadow-xs bg-[rgb(var(--primary))] text-white font-semibold hover:brightness-110"
+              title="Publish Digital Twin Graph to PostgreSQL Database"
             >
-              <Trash2 className="h-4 w-4" />
-              <span className="font-semibold text-xs">Clear Local Storage</span>
+              <Rocket className="h-4 w-4" />
+              <span className="font-semibold text-xs">Publish</span>
             </Button>
+
+
 
             {/* Whole Data Import/Export Engine */}
             <input
@@ -3608,6 +3588,9 @@ export function EntityManager() {
           </div>
         </div>
       )}
+
+      {/* Publish Modal */}
+      <PublishModal open={showPublishModal} onClose={() => setShowPublishModal(false)} />
     </div>
   );
 }
