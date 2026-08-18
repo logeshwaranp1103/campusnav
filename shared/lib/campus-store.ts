@@ -2417,6 +2417,42 @@ class CampusStore {
     return this.getPublishedData();
   }
 
+  public setPublishedGraphFromDatabase(snapshot: any, version?: string) {
+    if (!snapshot) return;
+    this.publishedGraph = {
+      buildings: Array.isArray(snapshot.buildings) ? snapshot.buildings : [],
+      floors: Array.isArray(snapshot.floors) ? snapshot.floors : [],
+      nodes: Array.isArray(snapshot.nodes) ? snapshot.nodes : [],
+      edges: Array.isArray(snapshot.edges) ? snapshot.edges : [],
+      destinations: Array.isArray(snapshot.destinations) ? snapshot.destinations : [],
+      events: Array.isArray(snapshot.events) ? snapshot.events : [],
+      obstacles: Array.isArray(snapshot.obstacles) ? snapshot.obstacles : [],
+      stairGroups: Array.isArray(snapshot.stairGroups) ? snapshot.stairGroups : [],
+      liftGroups: Array.isArray(snapshot.liftGroups) ? snapshot.liftGroups : [],
+      doors: Array.isArray(snapshot.doors) ? snapshot.doors : [],
+    };
+
+    if (version) {
+      this.publishedVersion = String(version).startsWith("v") ? String(version) : `v${version}`;
+    }
+
+    const isVisitor = typeof window !== "undefined" && !window.location.pathname.startsWith("/admin");
+    if (isVisitor) {
+      this.buildings = this.publishedGraph.buildings;
+      this.floors = this.publishedGraph.floors;
+      this.nodes = this.publishedGraph.nodes;
+      this.edges = this.publishedGraph.edges;
+      this.destinations = this.publishedGraph.destinations;
+      this.events = this.publishedGraph.events;
+      this.obstacles = this.publishedGraph.obstacles;
+      this.stairGroups = this.publishedGraph.stairGroups || [];
+      this.liftGroups = this.publishedGraph.liftGroups || [];
+      this.doors = this.publishedGraph.doors || [];
+    }
+
+    this.listeners.forEach((l) => l());
+  }
+
   public async resetEntireDatabase(): Promise<{ success: boolean; message?: string; error?: string }> {
     try {
       const res = await fetch("/api/admin/reset-database", {

@@ -249,7 +249,7 @@ export async function publishDraftGraph(
             y: n.y ?? null,
             accessible: n.accessible ?? true,
             searchable: n.searchable ?? true,
-            navigable: n.navigable ?? true,
+            navigable: (n as any).navigable ?? true,
             metadata: Object.keys(nodeMeta).length > 0 ? nodeMeta : undefined,
           };
           return prisma.node.upsert({
@@ -547,8 +547,8 @@ export function invalidatePublishedCache() {
   activePublishedSnapshot = null;
 }
 
-export async function getActivePublishedGraph() {
-  if (activePublishedSnapshot) {
+export async function getActivePublishedGraph(forceFresh = false) {
+  if (!forceFresh && activePublishedSnapshot) {
     return activePublishedSnapshot;
   }
 
