@@ -35,11 +35,11 @@ export interface GraphValidationReport {
 export const SOFT_CAMPUS_BOUNDS = {
   minX: 0,
   minY: 0,
-  maxX: 2500,
-  maxY: 2000,
-  centerLat: 12.9716,
-  centerLng: 77.5946,
-  maxRadiusMeters: 1500,
+  maxX: 3500,
+  maxY: 3000,
+  centerLat: 11.4965,
+  centerLng: 77.2774,
+  maxRadiusMeters: 3000,
 };
 
 export function validateCampusGraph(

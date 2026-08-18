@@ -49,7 +49,7 @@ import { Button } from "@/shared/components/ui/button";
 import { Input } from "@/shared/components/ui/input";
 import { isPointInCampusBoundary, CAMPUS_POLYGON_COORDS } from "@/lib/geo/boundary";
 import { canvasToGps, gpsToCanvas } from "@/lib/geo/projection";
-import { getBuildingCanvasPoints, getBuildingCenter, getPolygonSvgPath, getPolygonPointsString } from "@/lib/geo/building-geometry";
+import { getBuildingCanvasPoints, getBuildingCenter, getPolygonSvgPath, getPolygonPointsString, isPointInsideBuilding, isPointOutsideAllBuildings } from "@/lib/geo/building-geometry";
 import { calculateGeographicDistance } from "@/lib/geo/haversine";
 import { Badge } from "@/shared/components/ui/badge";
 import { useToast } from "@/shared/components/ui/toast";
@@ -321,11 +321,27 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
   // Refs to prevent accidental element placement during map pan/drag
   const hasDraggedRef = useRef(false);
   const mouseDownScreenPosRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
+  const dragRafRef = useRef<number | null>(null);
+  const dragTargetPosRef = useRef<{ x: number; y: number } | null>(null);
 
 
 
   const [edgeStartNodeId, setEdgeStartNodeId] = useState<string | null>(null);
-  const [mouseCanvasPos, setMouseCanvasPos] = useState<{ x: number; y: number }>({ x: 400, y: 400 });
+  const mouseCanvasPosRef = useRef<{ x: number; y: number }>({ x: 400, y: 400 });
+  const panRafRef = useRef<number | null>(null);
+  const nextPanRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
+
+  const getCanvasCoords = (e: React.MouseEvent | MouseEvent) => {
+    if (!canvasRef.current) return { x: 400, y: 300 };
+    const rect = canvasRef.current.getBoundingClientRect();
+    let x = Math.round((e.clientX - rect.left - panOffset.x) / zoom);
+    let y = Math.round((e.clientY - rect.top - panOffset.y) / zoom);
+    if (snapToGrid) {
+      x = Math.round(x / 20) * 20;
+      y = Math.round(y / 20) * 20;
+    }
+    return { x, y };
+  };
 
   // Drawers & Modals State
   const [showPendingDrawer, setShowPendingDrawer] = useState(false);
@@ -902,20 +918,17 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
   }, [activeTool]);
 
   const containerRef = useRef<HTMLDivElement | null>(null);
-  const [isFullscreen, setIsFullscreen] = useState(() => {
-    if (typeof window !== "undefined") {
-      return sessionStorage.getItem("cad_editor_fullscreen_active") === "true";
-    }
-    return false;
-  });
+  const [isFullscreen, setIsFullscreen] = useState(false);
 
   const toggleFullscreen = () => {
     const target = document.documentElement;
-    const nextState = !isFullscreen;
-    setIsFullscreen(nextState);
-    if (typeof window !== "undefined") {
-      sessionStorage.setItem("cad_editor_fullscreen_active", String(nextState));
-    }
+    const isCurrentlyFS = !!(
+      document.fullscreenElement ||
+      (document as any).webkitFullscreenElement ||
+      (document as any).mozFullScreenElement ||
+      (document as any).msFullscreenElement
+    );
+    const nextState = !isCurrentlyFS;
 
     if (nextState) {
       if (target.requestFullscreen) {
@@ -958,11 +971,20 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
 
   useEffect(() => {
     const handleFSChange = () => {
-      const isNativeFS = !!document.fullscreenElement;
-      if (!isNativeFS && sessionStorage.getItem("cad_editor_fullscreen_active") !== "true") {
-        setIsFullscreen(false);
+      const isNativeFS = !!(
+        document.fullscreenElement ||
+        (document as any).webkitFullscreenElement ||
+        (document as any).mozFullScreenElement ||
+        (document as any).msFullscreenElement
+      );
+      setIsFullscreen(isNativeFS);
+      if (typeof window !== "undefined") {
+        sessionStorage.setItem("cad_editor_fullscreen_active", String(isNativeFS));
       }
     };
+
+    handleFSChange();
+
     document.addEventListener("fullscreenchange", handleFSChange);
     document.addEventListener("webkitfullscreenchange", handleFSChange);
     document.addEventListener("mozfullscreenchange", handleFSChange);
@@ -1122,20 +1144,6 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
     activeFloorId === "f-out" ||
     activeFloorId === "f-all-g" ||
     activeFloorObj?.ordinal === 0;
-
-  // Helper to check if a point (x, y) is inside a building rectangle
-  const isPointInsideBuilding = (x: number, y: number, b: Building, margin = 6) => {
-    const bx = b.x ?? 0;
-    const by = b.y ?? 0;
-    const bw = b.width ?? 180;
-    const bh = b.height ?? 120;
-    return x > bx + margin && x < bx + bw - margin && y > by + margin && y < by + bh - margin;
-  };
-
-  const isPointOutsideAllBuildings = (x: number, y: number, buildings: Building[], margin = 6) => {
-    if (!buildings || buildings.length === 0) return true;
-    return !buildings.some((b) => isPointInsideBuilding(x, y, b, margin));
-  };
 
   // Truly Outdoor nodes (campus walkways, roads, building entrances, outdoor corner nodes)
   const isOutdoorNode = (n: any) => {
@@ -1358,7 +1366,13 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
     }
 
     if (isPanning) {
-      setPanOffset({ x: e.clientX - panStart.x, y: e.clientY - panStart.y });
+      nextPanRef.current = { x: e.clientX - panStart.x, y: e.clientY - panStart.y };
+      if (panRafRef.current === null) {
+        panRafRef.current = requestAnimationFrame(() => {
+          panRafRef.current = null;
+          setPanOffset(nextPanRef.current);
+        });
+      }
       return;
     }
 
@@ -1370,51 +1384,57 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
       x = Math.round(x / 20) * 20;
       y = Math.round(y / 20) * 20;
     }
-    setMouseCanvasPos({ x, y });
+    mouseCanvasPosRef.current = { x, y };
 
-    // Handle Direct Element Dragging
+    // Handle Direct Element Dragging with 60/120fps RAF Throttle
     if (draggingId) {
-      if (draggingId.type === "node") {
-        let nx = x - dragOffset.x;
-        let ny = y - dragOffset.y;
-        if (snapToGrid) {
-          nx = Math.round(nx / 20) * 20;
-          ny = Math.round(ny / 20) * 20;
-        }
-        campusStore.updateNode(draggingId.id, { x: nx, y: ny }, false);
-      } else if (draggingId.type === "building") {
-        let bx = x - dragOffset.x;
-        let by = y - dragOffset.y;
-        if (snapToGrid) {
-          bx = Math.round(bx / 20) * 20;
-          by = Math.round(by / 20) * 20;
-        }
-        campusStore.updateBuilding(draggingId.id, { x: bx, y: by }, false);
-      } else if (draggingId.type === "obstacle") {
-        let ox = x - dragOffset.x;
-        let oy = y - dragOffset.y;
-        if (snapToGrid) {
-          ox = Math.round(ox / 20) * 20;
-          oy = Math.round(oy / 20) * 20;
-        }
-        campusStore.updateObstacle(draggingId.id, { x: ox, y: oy }, false);
-      } else if (draggingId.type === "event") {
-        let ex = x - dragOffset.x;
-        let ey = y - dragOffset.y;
-        if (snapToGrid) {
-          ex = Math.round(ex / 20) * 20;
-          ey = Math.round(ey / 20) * 20;
-        }
-        campusStore.updateEvent(draggingId.id, { x: ex, y: ey });
+      let targetX = x - dragOffset.x;
+      let targetY = y - dragOffset.y;
+      if (snapToGrid) {
+        targetX = Math.round(targetX / 20) * 20;
+        targetY = Math.round(targetY / 20) * 20;
+      }
+      dragTargetPosRef.current = { x: targetX, y: targetY };
+
+      if (dragRafRef.current === null) {
+        dragRafRef.current = requestAnimationFrame(() => {
+          dragRafRef.current = null;
+          const pos = dragTargetPosRef.current;
+          if (!pos || !draggingId) return;
+
+          if (draggingId.type === "node") {
+            campusStore.updateNode(draggingId.id, { x: pos.x, y: pos.y }, false);
+          } else if (draggingId.type === "building") {
+            campusStore.updateBuilding(draggingId.id, { x: pos.x, y: pos.y }, false);
+          } else if (draggingId.type === "obstacle") {
+            campusStore.updateObstacle(draggingId.id, { x: pos.x, y: pos.y }, false);
+          } else if (draggingId.type === "event") {
+            campusStore.updateEvent(draggingId.id, { x: pos.x, y: pos.y });
+          } else if (draggingId.type === "door") {
+            campusStore.updateDoor(draggingId.id, { x: pos.x, y: pos.y }, false);
+          }
+        });
       }
     }
   };
 
   const handleCanvasMouseUp = () => {
-    if (isPanning) setIsPanning(false);
+    if (isPanning) {
+      if (panRafRef.current !== null) {
+        cancelAnimationFrame(panRafRef.current);
+        panRafRef.current = null;
+      }
+      setPanOffset(nextPanRef.current);
+      setIsPanning(false);
+    }
+
+    if (dragRafRef.current !== null) {
+      cancelAnimationFrame(dragRafRef.current);
+      dragRafRef.current = null;
+    }
+
     if (draggingId) {
-      // Read from live store (not stale React state) so GPS update is accurate
-      // and children don't get double-moved due to stale dx calculation
+      // Finalize position and commit to undo history stack
       const liveData = campusStore.getWorkingData();
       if (draggingId.type === "node") {
         const n = liveData.nodes.find((item) => item.id === draggingId.id);
@@ -1425,13 +1445,16 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
       } else if (draggingId.type === "building") {
         const b = liveData.buildings.find((item) => item.id === draggingId.id);
         if (b) {
-          // Only commit history for visual x,y position; preserve authoritative GPS lat/lng
           campusStore.updateBuilding(b.id, { x: b.x, y: b.y }, true);
         }
       } else if (draggingId.type === "obstacle") {
         const obs = liveData.obstacles.find((item) => item.id === draggingId.id);
         if (obs) campusStore.updateObstacle(obs.id, { x: obs.x, y: obs.y }, true);
+      } else if (draggingId.type === "door") {
+        const door = liveData.doors?.find((item) => item.id === draggingId.id);
+        if (door) campusStore.updateDoor(door.id, { x: door.x, y: door.y }, true);
       }
+      dragTargetPosRef.current = null;
       setDraggingId(null);
     }
   };
@@ -1516,7 +1539,7 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
 
     if (isNodeOrEdgeTarget) return;
 
-    const { x, y } = mouseCanvasPos;
+    const { x, y } = getCanvasCoords(e);
     const effectiveFloorId =
       activeFloorId === "f-out"
         ? "f-out"
@@ -2457,7 +2480,13 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
 
             <rect id="cad-grid-rect" width="100%" height="100%" fill="url(#cad-grid)" />
 
-            <g transform={`translate(${panOffset.x}, ${panOffset.y}) scale(${zoom})`} style={isAnimatingPan ? { transition: "transform 0.4s ease-out" } : undefined}>
+            <g
+              transform={`translate(${panOffset.x}, ${panOffset.y}) scale(${zoom})`}
+              style={{
+                willChange: "transform",
+                ...(isAnimatingPan ? { transition: "transform 0.4s ease-out" } : {}),
+              }}
+            >
 
               {/* Requirement #1: RENDER OBSTACLES VISUALLY IN GRAPH */}
               {visibleLayers.obstacles &&
@@ -2475,8 +2504,9 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
                       }}
                       onMouseDown={(e) => {
                         e.stopPropagation();
+                        const cPos = getCanvasCoords(e);
                         setDraggingId({ type: "obstacle", id: obs.id });
-                        setDragOffset({ x: mouseCanvasPos.x - obs.x, y: mouseCanvasPos.y - obs.y });
+                        setDragOffset({ x: cPos.x - obs.x, y: cPos.y - obs.y });
                       }}
                       className="cursor-grab active:cursor-grabbing"
                     >
@@ -2534,8 +2564,9 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
                       onMouseDown={(e) => {
                         if (isPlacementTool) return;
                         e.stopPropagation();
+                        const cPos = getCanvasCoords(e);
                         setDraggingId({ type: "building", id: b.id });
-                        setDragOffset({ x: mouseCanvasPos.x - centerPos.x, y: mouseCanvasPos.y - centerPos.y });
+                        setDragOffset({ x: cPos.x - centerPos.x, y: cPos.y - centerPos.y });
                       }}
                       className={isPlacementTool ? "pointer-events-none" : "cursor-grab active:cursor-grabbing"}
                     >
@@ -2755,8 +2786,9 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
                       onClick={(e) => handleNodeClick(n, e)}
                       onMouseDown={(e) => {
                         e.stopPropagation();
+                        const cPos = getCanvasCoords(e);
                         setDraggingId({ type: "node", id: n.id });
-                        setDragOffset({ x: mouseCanvasPos.x - n.x, y: mouseCanvasPos.y - n.y });
+                        setDragOffset({ x: cPos.x - n.x, y: cPos.y - n.y });
                       }}
                       className="cursor-grab active:cursor-grabbing"
                     >
@@ -2876,8 +2908,9 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
                       }}
                       onMouseDown={(e) => {
                         e.stopPropagation();
+                        const cPos = getCanvasCoords(e);
                         setDraggingId({ type: "node", id: linkedNode.id });
-                        setDragOffset({ x: mouseCanvasPos.x - linkedNode.x, y: mouseCanvasPos.y - linkedNode.y });
+                        setDragOffset({ x: cPos.x - linkedNode.x, y: cPos.y - linkedNode.y });
                       }}
                       className="cursor-pointer select-none"
                     >
@@ -2957,8 +2990,9 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
                       }}
                       onMouseDown={(e) => {
                         e.stopPropagation();
+                        const cPos = getCanvasCoords(e);
                         setDraggingId({ type: "door", id: d.id });
-                        setDragOffset({ x: mouseCanvasPos.x - d.x, y: mouseCanvasPos.y - d.y });
+                        setDragOffset({ x: cPos.x - d.x, y: cPos.y - d.y });
                       }}
                       className="cursor-grab active:cursor-grabbing"
                     >
@@ -3071,8 +3105,9 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
                     }}
                     onMouseDown={(e) => {
                       e.stopPropagation();
+                      const cPos = getCanvasCoords(e);
                       setDraggingId({ type: "event", id: ev.id });
-                      setDragOffset({ x: mouseCanvasPos.x - evX, y: mouseCanvasPos.y - evY });
+                      setDragOffset({ x: cPos.x - evX, y: cPos.y - evY });
                     }}
                     className="cursor-pointer select-none"
                   >
@@ -4615,7 +4650,10 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
                     size="sm"
                     variant="outline"
                     onClick={() => {
-                      const coord = `${selectedNode.lat ?? 12.9716}, ${selectedNode.lng ?? 77.5946}`;
+                      const gps = (selectedNode.lat && selectedNode.lng)
+                        ? { lat: selectedNode.lat, lng: selectedNode.lng }
+                        : canvasToGps(selectedNode.x, selectedNode.y);
+                      const coord = `${gps.lat.toFixed(6)}, ${gps.lng.toFixed(6)}`;
                       navigator.clipboard.writeText(coord);
                       toast({ type: "info", title: "GPS Coordinates Copied", description: coord });
                     }}

@@ -10,7 +10,7 @@ import { getObstructedEdgeIds } from "@/lib/routing/graph";
 import { Building2, Layers, Compass, Locate, AlertTriangle, ZoomIn, ZoomOut, Maximize2, ChevronDown } from "lucide-react";
 import { useVisitorGps } from "@/shared/hooks/use-visitor-gps";
 import { PIXELS_PER_METER, gpsToCanvas } from "@/lib/geo/projection";
-import { getBuildingCanvasPoints, getBuildingCenter, getPolygonSvgPath } from "@/lib/geo/building-geometry";
+import { getBuildingCanvasPoints, getBuildingCenter, getPolygonSvgPath, isPointInsideBuilding, isPointOutsideAllBuildings } from "@/lib/geo/building-geometry";
 import { DestinationDetailsDrawer } from "./destination-details-drawer";
 import { isEventActive } from "@/shared/lib/event-utils";
 
@@ -20,9 +20,11 @@ type Props = {
   progress?: number;
   gps?: ReturnType<typeof useVisitorGps>;
   onNavigateToDest?: (dest: Destination) => void;
+  fromSelected?: Destination | null;
+  toSelected?: Destination | null;
 };
 
-export function CampusMap({ route, livePosition, progress, gps: passedGps, onNavigateToDest }: Props) {
+export function CampusMap({ route, livePosition, progress, gps: passedGps, onNavigateToDest, fromSelected, toSelected }: Props) {
   const [mounted, setMounted] = useState(false);
   const [publishedData, setPublishedData] = useState(() => campusStore.getPublishedData());
   const [view, setView] = useState<string>("f-out");
@@ -75,14 +77,107 @@ export function CampusMap({ route, livePosition, progress, gps: passedGps, onNav
     }
   }, [livePosition?.floorId, gps.isGpsActive, gps.canvasPos?.floorId, route]);
 
-  const validFloorIds = useMemo(() => {
-    const ids = new Set(["f-out", ...(publishedData.floors || []).map((f) => f.id)]);
-    return ids;
-  }, [publishedData.floors]);
-
+  // Contextual Floor Filter:
+  // 1. If start / end destination or active route is set -> show only start & end destination building floors
+  // 2. If no start & end set -> if user is on live location and inside building -> show only that building's floors
+  // 3. Otherwise (outdoor / not on live location) -> return empty array (only "Outdoor" shown)
   const indoorFloors = useMemo(() => {
-    return (publishedData.floors || []).map((f) => f.id);
-  }, [publishedData.floors]);
+    const allFloors = publishedData.floors || [];
+    const allBuildings = publishedData.buildings || [];
+    const allNodes = publishedData.nodes || [];
+
+    const getBuildingIdForNode = (node: Node | null | undefined): string | null => {
+      if (!node) return null;
+      if (node.floorId && node.floorId !== "f-out" && node.floorId !== "outdoor") {
+        const fl = allFloors.find((f) => f.id === node.floorId);
+        if (fl?.buildingId) return fl.buildingId;
+      }
+      const bld = allBuildings.find((b) => isPointInsideBuilding(node.x, node.y, b));
+      return bld?.id || null;
+    };
+
+    const getBuildingIdForDest = (dest: Destination | null | undefined): string | null => {
+      if (!dest) return null;
+      if (dest.id === "dest-live-user-location") {
+        if (gps.isGpsActive && gps.lat && gps.lng) {
+          const bld = allBuildings.find((b) => isPointInsideBuilding(gps.lat, gps.lng, b));
+          if (bld) return bld.id;
+        }
+        if (livePosition) {
+          return getBuildingIdForNode(livePosition);
+        }
+        return null;
+      }
+      if (dest.buildingId) return dest.buildingId;
+      if (dest.floorId && dest.floorId !== "f-out" && dest.floorId !== "outdoor") {
+        const fl = allFloors.find((f) => f.id === dest.floorId);
+        if (fl?.buildingId) return fl.buildingId;
+      }
+      if (dest.nodeId) {
+        const node = allNodes.find((n) => n.id === dest.nodeId);
+        if (node) {
+          return getBuildingIdForNode(node);
+        }
+      }
+      return null;
+    };
+
+    const targetBuildingIds = new Set<string>();
+
+    // Case 1: Start and/or End destination selected, or route exists
+    if (fromSelected || toSelected || (route && route.nodes.length > 0)) {
+      const fromBldId = getBuildingIdForDest(fromSelected);
+      const toBldId = getBuildingIdForDest(toSelected);
+      if (fromBldId) targetBuildingIds.add(fromBldId);
+      if (toBldId) targetBuildingIds.add(toBldId);
+
+      if (route && route.nodes.length > 0) {
+        const startNode = route.nodes[0];
+        const endNode = route.nodes[route.nodes.length - 1];
+        [startNode, endNode].forEach((n) => {
+          const bId = getBuildingIdForNode(n);
+          if (bId) targetBuildingIds.add(bId);
+        });
+      }
+
+      if (targetBuildingIds.size > 0) {
+        return allFloors
+          .filter((f) => targetBuildingIds.has(f.buildingId))
+          .sort((a, b) => a.ordinal - b.ordinal)
+          .map((f) => f.id);
+      }
+      return [];
+    }
+
+    // Case 2: No start/end set -> check if user is on live location inside a building
+    if (gps.isGpsActive && gps.lat && gps.lng) {
+      const bld = allBuildings.find((b) => isPointInsideBuilding(gps.lat, gps.lng, b));
+      if (bld) {
+        return allFloors
+          .filter((f) => f.buildingId === bld.id)
+          .sort((a, b) => a.ordinal - b.ordinal)
+          .map((f) => f.id);
+      }
+    }
+
+    if (livePosition) {
+      const bldId = getBuildingIdForNode(livePosition);
+      if (bldId) {
+        return allFloors
+          .filter((f) => f.buildingId === bldId)
+          .sort((a, b) => a.ordinal - b.ordinal)
+          .map((f) => f.id);
+      }
+    }
+
+    // Case 3: Outside building or not on live location -> only Outdoor
+    return [];
+  }, [publishedData, fromSelected, toSelected, route, livePosition, gps.isGpsActive, gps.lat, gps.lng]);
+
+  const validFloorIds = useMemo(() => {
+    const ids = new Set(["f-out", ...indoorFloors]);
+    return ids;
+  }, [indoorFloors]);
 
   const activeView = validFloorIds.has(view) ? view : "f-out";
 
@@ -194,7 +289,7 @@ export function CampusMap({ route, livePosition, progress, gps: passedGps, onNav
                     setShowFloorMenuMobile(false);
                   }}
                   icon={<Layers className="h-3.5 w-3.5" />}
-                  label={`${b?.shortCode ?? ""} · ${f?.name ?? "Floor"}`}
+                  label={`${b?.shortCode || b?.name || "BLD"} · ${f?.name ?? "Floor"}`}
                 />
               );
             })}
@@ -395,19 +490,7 @@ function MapCanvas({
     return ids;
   }, [allNodes, floorId]);
 
-  // Helper to check if a point (x, y) is inside a building rectangle
-  const isPointInsideBuilding = (x: number, y: number, b: Building, margin = 6) => {
-    const bx = b.x ?? 0;
-    const by = b.y ?? 0;
-    const bw = b.width ?? 180;
-    const bh = b.height ?? 120;
-    return x > bx + margin && x < bx + bw - margin && y > by + margin && y < by + bh - margin;
-  };
 
-  const isPointOutsideAllBuildings = (x: number, y: number, buildings: Building[], margin = 6) => {
-    if (!buildings || buildings.length === 0) return true;
-    return !buildings.some((b) => isPointInsideBuilding(x, y, b, margin));
-  };
 
   // Helper to check if a node belongs to the currently viewed floor view
   const isNodeOnActiveFloor = useCallback(
@@ -443,7 +526,7 @@ function MapCanvas({
   );
 
   const scopeNodes = useMemo(() => {
-    return allNodes.filter((n) => isNodeOnActiveFloor(n) && (n.visibleToUser === undefined || n.visibleToUser === true));
+    return allNodes.filter((n) => isNodeOnActiveFloor(n) && n.visibleToUser === true);
   }, [allNodes, isNodeOnActiveFloor]);
 
   const scopeEdges = useMemo(() => {
@@ -845,7 +928,8 @@ function MapCanvas({
         </linearGradient>
       </defs>
 
-      <rect x={bounds.x} y={bounds.y} width={bounds.w} height={bounds.h} fill="url(#grid)" />
+      {/* Full infinite background grid covering all zoom levels & pan offsets */}
+      <rect x="-100000" y="-100000" width="200000" height="200000" fill="url(#grid)" />
 
       {buildings.length === 0 && (
         <g transform={`translate(${bounds.w / 2}, ${bounds.h / 2})`}>

@@ -44,7 +44,7 @@ export function sanitizeSnapshotForPayload(snapshot: DraftSnapshot): DraftSnapsh
 async function runInPoolChunks<T, R>(
   items: T[],
   fn: (item: T) => Promise<R>,
-  concurrency = 3
+  concurrency = 25
 ): Promise<R[]> {
   const results: R[] = [];
   for (let i = 0; i < items.length; i += concurrency) {
@@ -365,7 +365,7 @@ export async function publishDraftGraph(
 
       if (validBuildingIds.length > 0) {
         await prisma.searchAlias.deleteMany({ where: { destinationId: { notIn: validDestinationIds } } }).catch(() => {});
-        await prisma.room.deleteMany({ where: { OR: [{ id: { notIn: validDestinationIds } }, { floorId: { notIn: validFloorIds } }] } }).catch(() => {});
+        await prisma.room.deleteMany({ where: { floorId: { notIn: validFloorIds } } }).catch(() => {});
         await prisma.facility.deleteMany({ where: { floorId: { notIn: validFloorIds } } }).catch(() => {});
         await prisma.destination.deleteMany({ where: { campusId: defaultCampusId, id: { notIn: validDestinationIds } } }).catch(() => {});
         await prisma.obstacle.deleteMany({ where: { campusId: defaultCampusId, id: { notIn: validObstacleIds } } }).catch(() => {});
@@ -473,7 +473,7 @@ export async function getRelationalGraphFromDatabase(): Promise<DraftSnapshot | 
         lat: n.latitude !== undefined ? n.latitude : (n.lat !== undefined ? n.lat : undefined),
         lng: n.longitude !== undefined ? n.longitude : (n.lng !== undefined ? n.lng : undefined),
         searchable: n.searchable ?? true,
-        visibleToUser: n.visibleToUser !== undefined ? n.visibleToUser : (meta.visibleToUser !== undefined ? meta.visibleToUser : true),
+        visibleToUser: n.visibleToUser !== undefined ? n.visibleToUser : (meta.visibleToUser !== undefined ? meta.visibleToUser : false),
         photoUrl: n.photoUrl || meta.photoUrl || undefined,
         photoUploadedAt: n.photoUploadedAt || meta.photoUploadedAt || undefined,
         physicalVerified: n.physicalVerified !== undefined ? n.physicalVerified : meta.physicalVerified,

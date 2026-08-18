@@ -95,12 +95,7 @@ export function EntityManager() {
   const [selectedType, setSelectedType] = useState<EntityCategory>("BUILDING");
   const [searchQuery, setSearchQuery] = useState("");
   const [activeTab, setActiveTab] = useState<EntityCategory | "ALL">("ALL");
-  const [isFullscreen, setIsFullscreen] = useState(() => {
-    if (typeof window !== "undefined") {
-      return sessionStorage.getItem("entity_manager_fullscreen_active") === "true";
-    }
-    return false;
-  });
+  const [isFullscreen, setIsFullscreen] = useState(false);
   const [showMobilePanel, setShowMobilePanel] = useState(false);
   const [showPublishModal, setShowPublishModal] = useState(false);
 
@@ -273,7 +268,7 @@ export function EntityManager() {
   // Existing Node Visibility Management State
   const [existingNodeSearchText, setExistingNodeSearchText] = useState("");
   const [existingSelectedNodeId, setExistingSelectedNodeId] = useState("");
-  const [existingNodeVisibleToUser, setExistingNodeVisibleToUser] = useState(true);
+  const [existingNodeVisibleToUser, setExistingNodeVisibleToUser] = useState(false);
   const [isNodeSearchOpen, setIsNodeSearchOpen] = useState(false);
   const nodeSearchContainerRef = useRef<HTMLDivElement>(null);
 
@@ -307,7 +302,7 @@ export function EntityManager() {
   const handleSelectNodeItem = (node: Node) => {
     setExistingSelectedNodeId(node.id);
     setExistingNodeSearchText(node.name || node.id);
-    setExistingNodeVisibleToUser(node.visibleToUser !== undefined ? node.visibleToUser : true);
+    setExistingNodeVisibleToUser(node.visibleToUser !== undefined ? node.visibleToUser : false);
     setIsNodeSearchOpen(false);
   };
 
@@ -368,7 +363,7 @@ export function EntityManager() {
     pathType: "WALK" as PathType,
     distance: 0,
     accessible: true,
-    visibleToUser: true,
+    visibleToUser: false,
     expiresAt: "",
     photoUrl: "",
     photoUploadedAt: "",
@@ -424,11 +419,13 @@ export function EntityManager() {
   // Handle Fullscreen Toggle using Browser Native Fullscreen API to hide Chrome browser tabs & top address bar
   const toggleFullscreen = () => {
     const target = document.documentElement;
-    const nextState = !isFullscreen;
-    setIsFullscreen(nextState);
-    if (typeof window !== "undefined") {
-      sessionStorage.setItem("entity_manager_fullscreen_active", String(nextState));
-    }
+    const isCurrentlyFS = !!(
+      document.fullscreenElement ||
+      (document as any).webkitFullscreenElement ||
+      (document as any).mozFullScreenElement ||
+      (document as any).msFullscreenElement
+    );
+    const nextState = !isCurrentlyFS;
 
     if (nextState) {
       if (target.requestFullscreen) {
@@ -472,11 +469,20 @@ export function EntityManager() {
   // Sync fullscreen state with native browser fullscreenchange events
   useEffect(() => {
     const handleFSChange = () => {
-      const isNativeFS = !!document.fullscreenElement;
-      if (!isNativeFS && sessionStorage.getItem("entity_manager_fullscreen_active") !== "true") {
-        setIsFullscreen(false);
+      const isNativeFS = !!(
+        document.fullscreenElement ||
+        (document as any).webkitFullscreenElement ||
+        (document as any).mozFullScreenElement ||
+        (document as any).msFullscreenElement
+      );
+      setIsFullscreen(isNativeFS);
+      if (typeof window !== "undefined") {
+        sessionStorage.setItem("entity_manager_fullscreen_active", String(isNativeFS));
       }
     };
+
+    handleFSChange();
+
     document.addEventListener("fullscreenchange", handleFSChange);
     document.addEventListener("webkitfullscreenchange", handleFSChange);
     document.addEventListener("mozfullscreenchange", handleFSChange);
@@ -563,7 +569,7 @@ export function EntityManager() {
     floorId: "",
     type: "CORRIDOR" as NodeType,
     accessible: true,
-    visibleToUser: true,
+    visibleToUser: false,
     description: "",
   });
 
@@ -955,12 +961,12 @@ export function EntityManager() {
           lat,
           lng,
           searchable: true,
-          visibleToUser: nodeForm.visibleToUser ?? true,
+          visibleToUser: nodeForm.visibleToUser ?? false,
         };
 
         campusStore.addNode(newNode);
         toast({ type: "success", title: "Node Created & Synced", description: `Node "${newNode.name}" added to Store & CAD Editor!` });
-        setNodeForm((prev) => ({ ...prev, name: "", lat: "11.", lng: "77.", visibleToUser: true }));
+        setNodeForm((prev) => ({ ...prev, name: "", lat: "11.", lng: "77.", visibleToUser: false }));
         setStoreData({ ...campusStore.getWorkingData() });
         break;
       }
@@ -1216,7 +1222,7 @@ export function EntityManager() {
       floorId: defaultFloors[0]?.id || "f-out",
       type: "CORRIDOR",
       accessible: true,
-      visibleToUser: true,
+      visibleToUser: false,
       description: "",
     });
 
@@ -1524,7 +1530,7 @@ export function EntityManager() {
           floorId: payload.floorId || nodeForm.floorId,
           type: payload.nodeType || "CORRIDOR",
           accessible: payload.accessible !== undefined ? payload.accessible : true,
-          visibleToUser: payload.visibleToUser !== undefined ? payload.visibleToUser : true,
+          visibleToUser: payload.visibleToUser !== undefined ? payload.visibleToUser : false,
           description: payload.description || "",
         });
         break;
@@ -1609,7 +1615,7 @@ export function EntityManager() {
       pathType: getEdgePathType(item.raw),
       distance: item.raw.distance !== undefined ? item.raw.distance : 0,
       accessible: item.raw.accessible !== undefined ? item.raw.accessible : true,
-      visibleToUser: item.raw.visibleToUser !== undefined ? item.raw.visibleToUser : true,
+      visibleToUser: item.raw.visibleToUser !== undefined ? item.raw.visibleToUser : false,
       expiresAt: item.raw.expiresAt || "",
       photoUrl: item.raw.photoUrl || "",
       photoUploadedAt: item.raw.photoUploadedAt || "",
@@ -1723,7 +1729,7 @@ export function EntityManager() {
           type: editForm.nodeType,
           floorId: editForm.floorId || editingItem.raw.floorId,
           accessible: editForm.accessible,
-          visibleToUser: editForm.visibleToUser !== undefined ? editForm.visibleToUser : true,
+          visibleToUser: editForm.visibleToUser !== undefined ? editForm.visibleToUser : false,
           photoUrl: editForm.photoUrl || undefined,
           photoUploadedAt: editForm.photoUploadedAt || undefined,
           physicalVerified: editForm.physicalVerified,
@@ -2272,7 +2278,7 @@ export function EntityManager() {
             </div>
             <p className="text-[11px] leading-relaxed text-[rgb(var(--muted-fg))]">
               {selectedType === "BUILDING" && "Configure 4-corner polygon footprints, GPS center coordinates, and floor counts for campus buildings."}
-              {selectedType === "NODE" && "Manage walkable junction nodes, GPS coordinates, wheelchair accessibility, and user visibility toggle."}
+              {selectedType === "NODE" && "Manage walkable junction nodes, GPS coordinates, and user visibility toggle."}
               {selectedType === "ROOM" && "Create room destinations, link them to specific floors and entry nodes for search and navigation."}
               {selectedType === "EDGE" && "Connect walkable corridors and EV transit routes between existing navigation nodes."}
               {selectedType === "STAIR" && "Link multiple floors together with multi-level stairway connector nodes."}
@@ -2928,8 +2934,8 @@ export function EntityManager() {
                       value={nodeForm.visibleToUser ? "YES" : "NO"}
                       onChange={(e) => setNodeForm({ ...nodeForm, visibleToUser: e.target.value === "YES" })}
                     >
-                      <option value="YES">YES</option>
                       <option value="NO">NO</option>
+                      <option value="YES">YES</option>
                     </select>
                   </div>
                 </div>
@@ -2997,7 +3003,7 @@ export function EntityManager() {
                             </div>
                           ) : (
                             filteredExistingNodesForVisibility.map((n) => {
-                              const isVis = n.visibleToUser !== undefined ? n.visibleToUser : true;
+                              const isVis = n.visibleToUser !== undefined ? n.visibleToUser : false;
                               const isSelected = n.id === existingSelectedNodeId;
                               return (
                                 <button
@@ -3041,8 +3047,8 @@ export function EntityManager() {
                         value={existingNodeVisibleToUser ? "YES" : "NO"}
                         onChange={(e) => setExistingNodeVisibleToUser(e.target.value === "YES")}
                       >
-                        <option value="YES">YES (Visible)</option>
                         <option value="NO">NO (Hidden)</option>
+                        <option value="YES">YES (Visible)</option>
                       </select>
                     </div>
 
@@ -3671,18 +3677,6 @@ export function EntityManager() {
               <span>{t.label}</span>
             </Button>
           ))}
-
-          {(activeTab === "ALL" || activeTab === "NODE" || activeTab === "PHOTO") && (
-            <select
-              value={nodePhotoFilter}
-              onChange={(e) => setNodePhotoFilter(e.target.value as any)}
-              className="h-7 rounded-full border border-[rgb(var(--border))] bg-[rgb(var(--card))] px-3 text-xs font-semibold focus:outline-none shrink-0 ml-auto cursor-pointer text-[rgb(var(--fg))]"
-            >
-              <option value="ALL">📷 Photo Status: All Nodes</option>
-              <option value="WITH_PHOTO">📷 With Reference Photo</option>
-              <option value="WITHOUT_PHOTO">○ Without Reference Photo</option>
-            </select>
-          )}
         </div>
 
         {/* Directory Table */}
@@ -3789,7 +3783,7 @@ export function EntityManager() {
                               <button
                                 type="button"
                                 onClick={() => {
-                                  const currentVis = item.raw?.visibleToUser !== undefined ? item.raw.visibleToUser : true;
+                                  const currentVis = item.raw?.visibleToUser !== undefined ? item.raw.visibleToUser : false;
                                   campusStore.updateNode(item.id, { visibleToUser: !currentVis });
                                   toast({
                                     type: "success",
@@ -3800,13 +3794,13 @@ export function EntityManager() {
                                 }}
                                 className={cn(
                                   "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-bold transition-all cursor-pointer",
-                                  (item.raw?.visibleToUser !== undefined ? item.raw.visibleToUser : true)
+                                  (item.raw?.visibleToUser !== undefined ? item.raw.visibleToUser : false)
                                     ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-500/25"
                                     : "bg-rose-500/15 text-rose-700 dark:text-rose-300 hover:bg-rose-500/25"
                                 )}
                                 title="Click to toggle Visible to user (YES / NO)"
                               >
-                                {(item.raw?.visibleToUser !== undefined ? item.raw.visibleToUser : true) ? "👁 Visible: YES" : "✕ Visible: NO"}
+                                {(item.raw?.visibleToUser !== undefined ? item.raw.visibleToUser : false) ? "👁 Visible: YES" : "✕ Visible: NO"}
                               </button>
                             )}
                           </div>
@@ -4221,28 +4215,16 @@ export function EntityManager() {
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    <label className="flex items-center gap-2 font-bold text-[rgb(var(--fg))] cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={editForm.accessible}
-                        onChange={(e) => setEditForm({ ...editForm, accessible: e.target.checked })}
-                        className="h-4 w-4 rounded border-[rgb(var(--border))] text-[rgb(var(--primary))]"
-                      />
-                      <span>Wheelchair Accessible Node</span>
-                    </label>
-
-                    <div>
-                      <label className="font-bold text-[rgb(var(--fg))] block mb-1">Visible to user</label>
-                      <select
-                        className="w-full rounded-lg border border-[rgb(var(--border))] bg-[rgb(var(--bg))] p-2 text-xs font-medium"
-                        value={editForm.visibleToUser ? "YES" : "NO"}
-                        onChange={(e) => setEditForm({ ...editForm, visibleToUser: e.target.value === "YES" })}
-                      >
-                        <option value="YES">YES</option>
-                        <option value="NO">NO</option>
-                      </select>
-                    </div>
+                  <div>
+                    <label className="font-bold text-[rgb(var(--fg))] block mb-1">Visible to user</label>
+                    <select
+                      className="w-full rounded-lg border border-[rgb(var(--border))] bg-[rgb(var(--bg))] p-2 text-xs font-medium"
+                      value={editForm.visibleToUser ? "YES" : "NO"}
+                      onChange={(e) => setEditForm({ ...editForm, visibleToUser: e.target.value === "YES" })}
+                    >
+                      <option value="NO">NO</option>
+                      <option value="YES">YES</option>
+                    </select>
                   </div>
 
                   {/* Selective Node Reference Photo Section */}

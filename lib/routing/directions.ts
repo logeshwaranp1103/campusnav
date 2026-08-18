@@ -132,7 +132,20 @@ export function generateDirections(
     }
 
     if (edge.type === "STAIRS") {
-      const isUp = i < edges.length - 1; // Default stair direction
+      const getFloorRank = (fId?: string, fName?: string, nName?: string): number => {
+        const combined = `${fId || ""} ${fName || ""} ${nName || ""}`.toLowerCase();
+        if (combined.includes("ground") || combined.includes("gnd") || combined.endsWith("-g") || combined.endsWith("-gnd") || combined.endsWith("-0")) return 0;
+        if (combined.includes("base") || combined.includes("b-") || combined.includes("-1")) return -1;
+        const match = combined.match(/(?:floor|fl|level|lvl|f)\s*(\d+)/i);
+        if (match) return parseInt(match[1], 10);
+        return 0;
+      };
+
+      const fromRank = getFloorRank(fromFloor, fromFloorName, fromNode.name);
+      const toRank = getFloorRank(toFloor, toFloorName, toNode.name);
+      const isUp = toRank >= fromRank;
+      const dirWord = toRank > fromRank ? "up " : toRank < fromRank ? "down " : "";
+
       steps.push({
         text: `Take the stairs to ${toFloorName}`,
         distanceMeters: edge.distance,

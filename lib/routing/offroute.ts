@@ -39,6 +39,28 @@ export function checkOffRoute(
     }
   });
 
+  // Check orthogonal distance to corridor line segments on the same floor
+  for (let i = 0; i < currentRoute.nodes.length - 1; i++) {
+    const n1 = currentRoute.nodes[i];
+    const n2 = currentRoute.nodes[i + 1];
+    if (n1.floorId === userPos.floorId && n2.floorId === userPos.floorId) {
+      const dx = n2.x - n1.x;
+      const dy = n2.y - n1.y;
+      const lenSq = dx * dx + dy * dy;
+      if (lenSq > 0) {
+        let t = ((userPos.x - n1.x) * dx + (userPos.y - n1.y) * dy) / lenSq;
+        t = Math.max(0, Math.min(1, t));
+        const projX = n1.x + t * dx;
+        const projY = n1.y + t * dy;
+        const projGps = canvasToGps(projX, projY);
+        const segDist = calculateGeographicDistance(userGps.lat, userGps.lng, projGps.lat, projGps.lng);
+        if (segDist < minDistance) {
+          minDistance = segDist;
+        }
+      }
+    }
+  }
+
   return {
     isOffRoute: minDistance > thresholdMeters,
     distanceFromRoute: Math.round(minDistance),

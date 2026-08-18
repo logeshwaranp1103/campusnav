@@ -217,3 +217,103 @@ export function validatePolygonCorners(corners: BuildingCorner[]): { valid: bool
 
   return { valid: true };
 }
+
+/**
+ * Distance from point p to 2D line segment v-w
+ */
+function pointToSegmentDistance(
+  p: { x: number; y: number },
+  v: { x: number; y: number },
+  w: { x: number; y: number }
+): number {
+  const l2 = (v.x - w.x) * (v.x - w.x) + (v.y - w.y) * (v.y - w.y);
+  if (l2 === 0) return Math.hypot(p.x - v.x, p.y - v.y);
+  let t = ((p.x - v.x) * (w.x - v.x) + (p.y - v.y) * (w.y - v.y)) / l2;
+  t = Math.max(0, Math.min(1, t));
+  return Math.hypot(p.x - (v.x + t * (w.x - v.x)), p.y - (v.y + t * (w.y - v.y)));
+}
+
+/**
+ * High-performance Ray-Casting algorithm to test if 2D canvas point is inside a polygon
+ */
+export function isPointInPolygon(
+  point: { x: number; y: number },
+  polygon: { x: number; y: number }[]
+): boolean {
+  if (!polygon || polygon.length < 3) return false;
+  const { x, y } = point;
+  let inside = false;
+  for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+    const xi = polygon[i].x;
+    const yi = polygon[i].y;
+    const xj = polygon[j].x;
+    const yj = polygon[j].y;
+    const intersect = yi > y !== yj > y && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi;
+    if (intersect) inside = !inside;
+  }
+  return inside;
+}
+
+/**
+ * Accurately tests if a 2D canvas point (x, y) is inside a building footprint (polygon or rectangle)
+ */
+export function isPointInsideBuilding(
+  x: number,
+  y: number,
+  building: Partial<Building>,
+  margin = 6
+): boolean {
+  if (!building) return false;
+  const pts = getBuildingCanvasPoints(building);
+  if (!pts || pts.length < 3) {
+    const bx = building.x ?? 0;
+    const by = building.y ?? 0;
+    const bw = building.width ?? 180;
+    const bh = building.height ?? 120;
+    return (
+      x >= bx - margin &&
+      x <= bx + bw + margin &&
+      y >= by - margin &&
+      y <= by + bh + margin
+    );
+  }
+
+  const bounds = getBuildingCanvasBounds(pts);
+  if (
+    x < bounds.minX - margin ||
+    x > bounds.maxX + margin ||
+    y < bounds.minY - margin ||
+    y > bounds.maxY + margin
+  ) {
+    return false;
+  }
+
+  // Exact polygon check
+  if (isPointInPolygon({ x, y }, pts)) return true;
+
+  // Margin buffer check for points on or very close to the building perimeter/walls
+  if (margin > 0) {
+    for (let i = 0; i < pts.length; i++) {
+      const p1 = pts[i];
+      const p2 = pts[(i + 1) % pts.length];
+      const dist = pointToSegmentDistance({ x, y }, p1, p2);
+      if (dist <= margin) return true;
+    }
+  }
+
+  return false;
+}
+
+/**
+ * Checks if a point is outside all buildings on canvas
+ */
+export function isPointOutsideAllBuildings(
+  x: number,
+  y: number,
+  buildings: Partial<Building>[],
+  margin = 6
+): boolean {
+  if (!buildings || buildings.length === 0) return true;
+  return !buildings.some((b) => isPointInsideBuilding(x, y, b, margin));
+}
+

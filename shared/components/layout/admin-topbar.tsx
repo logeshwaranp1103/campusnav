@@ -91,7 +91,7 @@ export function AdminTopbar() {
           </div>
 
           <div className="flex shrink-0 items-center gap-2">
-            <Link href="/navigate" className="hidden md:block">
+            <Link href="/navigate" target="_blank" className="hidden md:block">
               <Button size="sm" variant="ghost">
                 <ExternalLink className="h-3.5 w-3.5" />
                 View site

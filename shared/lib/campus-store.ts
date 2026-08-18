@@ -97,8 +97,8 @@ const defaultCampus: Campus = {
   id: "c1",
   name: "Main Campus",
   slug: "main",
-  lat: 12.9716,
-  lng: 77.5946,
+  lat: 11.4965,
+  lng: 77.2774,
 };
 
 export type Checkpoint = {
@@ -159,6 +159,7 @@ class CampusStore {
   private broadcastChannel: BroadcastChannel | null = null;
 
   constructor() {
+    this.hydrateFromLocalCache();
     this.initializeStore();
     if (typeof window !== "undefined" && "BroadcastChannel" in window) {
       try {
@@ -188,6 +189,30 @@ class CampusStore {
     }
   }
 
+  private hydrateFromLocalCache() {
+    if (typeof window === "undefined") return;
+    try {
+      const cached = localStorage.getItem("campusnav_working_draft_cache");
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        if (parsed && typeof parsed === "object") {
+          if (Array.isArray(parsed.buildings) && parsed.buildings.length > 0) this.buildings = parsed.buildings;
+          if (Array.isArray(parsed.floors) && parsed.floors.length > 0) this.floors = parsed.floors;
+          if (Array.isArray(parsed.nodes) && parsed.nodes.length > 0) this.nodes = parsed.nodes;
+          if (Array.isArray(parsed.edges) && parsed.edges.length > 0) this.edges = parsed.edges;
+          if (Array.isArray(parsed.destinations) && parsed.destinations.length > 0) this.destinations = parsed.destinations;
+          if (Array.isArray(parsed.events)) this.events = parsed.events;
+          if (Array.isArray(parsed.obstacles)) this.obstacles = parsed.obstacles;
+          if (Array.isArray(parsed.stairGroups)) this.stairGroups = parsed.stairGroups;
+          if (Array.isArray(parsed.liftGroups)) this.liftGroups = parsed.liftGroups;
+          if (Array.isArray(parsed.doors)) this.doors = parsed.doors;
+        }
+      }
+    } catch (e) {
+      console.warn("Notice: Local draft cache hydration notice:", e);
+    }
+  }
+
   public loadSnapshotFromBroadcast(snapshot: any) {
     if (!snapshot) return;
     if (Array.isArray(snapshot.buildings)) this.buildings = snapshot.buildings;
@@ -207,6 +232,25 @@ class CampusStore {
   private saveWorkingDraftToDatabase(isExplicitReset = false) {
     if (typeof window === "undefined") return;
 
+    // Immediately cache to localStorage so hot reloads / fast refresh never lose state
+    try {
+      if (isExplicitReset) {
+        localStorage.removeItem("campusnav_working_draft_cache");
+      } else {
+        const currentData = this.getWorkingData();
+        const hasEntities =
+          currentData.buildings.length > 0 ||
+          currentData.nodes.length > 0 ||
+          currentData.floors.length > 0 ||
+          currentData.destinations.length > 0;
+        if (hasEntities) {
+          localStorage.setItem("campusnav_working_draft_cache", JSON.stringify(currentData));
+        }
+      }
+    } catch (e) {
+      // Ignore storage quota or disabled storage
+    }
+
     if (this.syncTimeout) {
       clearTimeout(this.syncTimeout);
       this.syncTimeout = null;
@@ -219,8 +263,8 @@ class CampusStore {
         this.floors.length > 0 ||
         this.destinations.length > 0;
 
-      if (!hasEntities && !isExplicitReset && this.isInitialized) {
-        console.warn("[CampusStore] Protected suspicious empty snapshot save attempt.");
+      if (!hasEntities && !isExplicitReset) {
+        console.warn("[CampusStore] Protected database from accidental empty snapshot overwrite.");
         return;
       }
       if (!this.isInitialized && !isExplicitReset) {
@@ -256,7 +300,7 @@ class CampusStore {
       console.warn("Notice during store initialization from database:", e);
     } finally {
       this.isInitialized = true;
-      this.notify();
+      this.listeners.forEach((l) => l());
     }
   }
 
@@ -469,7 +513,7 @@ class CampusStore {
 
   public addBuilding(b: Building) {
     this.saveSnapshotToUndo(`Added Building "${b.name}"`);
-    if (!b.lat || !b.lng || b.lat === 12.9716) {
+    if (!b.lat || !b.lng || b.lat === 12.9716 || b.lat === 0) {
       const { lat, lng } = canvasToGps(b.x ?? 0, b.y ?? 0);
       b.lat = Number(lat.toFixed(9));
       b.lng = Number(lng.toFixed(9));
@@ -561,6 +605,34 @@ class CampusStore {
 
     // Move all child elements belonging to this building's floors, buildingId, stair/lift groups, or spatial bounds
     if (dx !== 0 || dy !== 0) {
+      if (
+        this.buildings[idx].corner1Lat !== undefined &&
+        this.buildings[idx].corner1Lng !== undefined &&
+        this.buildings[idx].corner2Lat !== undefined &&
+        this.buildings[idx].corner2Lng !== undefined &&
+        this.buildings[idx].corner3Lat !== undefined &&
+        this.buildings[idx].corner3Lng !== undefined &&
+        this.buildings[idx].corner4Lat !== undefined &&
+        this.buildings[idx].corner4Lng !== undefined
+      ) {
+        const c1 = gpsToCanvas(this.buildings[idx].corner1Lat!, this.buildings[idx].corner1Lng!);
+        const c2 = gpsToCanvas(this.buildings[idx].corner2Lat!, this.buildings[idx].corner2Lng!);
+        const c3 = gpsToCanvas(this.buildings[idx].corner3Lat!, this.buildings[idx].corner3Lng!);
+        const c4 = gpsToCanvas(this.buildings[idx].corner4Lat!, this.buildings[idx].corner4Lng!);
+        const g1 = canvasToGps(c1.x + dx, c1.y + dy);
+        const g2 = canvasToGps(c2.x + dx, c2.y + dy);
+        const g3 = canvasToGps(c3.x + dx, c3.y + dy);
+        const g4 = canvasToGps(c4.x + dx, c4.y + dy);
+        this.buildings[idx].corner1Lat = g1.lat;
+        this.buildings[idx].corner1Lng = g1.lng;
+        this.buildings[idx].corner2Lat = g2.lat;
+        this.buildings[idx].corner2Lng = g2.lng;
+        this.buildings[idx].corner3Lat = g3.lat;
+        this.buildings[idx].corner3Lng = g3.lng;
+        this.buildings[idx].corner4Lat = g4.lat;
+        this.buildings[idx].corner4Lng = g4.lng;
+      }
+
       const buildingFloors = this.floors.filter((f) => f.buildingId === id);
       const buildingFloorIds = new Set(buildingFloors.map((f) => f.id));
 
@@ -846,9 +918,10 @@ class CampusStore {
         const newFrom = nodeIdMap.get(e.from);
         const newTo = nodeIdMap.get(e.to);
         if (newFrom && newTo) {
+          const uniqueEdgeId = `edge-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
           this.edges.push({
             ...JSON.parse(JSON.stringify(e)),
-            id: `e-${newFrom}-${newTo}`,
+            id: uniqueEdgeId,
             from: newFrom,
             to: newTo,
           });
@@ -963,7 +1036,7 @@ class CampusStore {
 
   public addNode(node: Node, autoSuggestConnections = false) {
     this.saveSnapshotToUndo(`Added ${node.type} Node "${node.name ?? node.id}"`);
-    if (!node.lat || !node.lng || node.lat === 12.9716) {
+    if (!node.lat || !node.lng || node.lat === 12.9716 || node.lat === 0) {
       const { lat, lng } = canvasToGps(node.x, node.y);
       node.lat = Number(lat.toFixed(9));
       node.lng = Number(lng.toFixed(9));
@@ -1388,44 +1461,13 @@ class CampusStore {
 
     let createdAny = false;
 
-    // Auto-connect stair landings to nearest same-floor node
-    stairNodes.forEach((stairNode) => {
-      const sameFloorNodes = this.nodes.filter(
-        (n) => n.floorId === stairNode.floorId && n.id !== stairNode.id
-      );
+    // Purge any previously auto-generated unwanted horizontal same-floor stair links
+    const prevEdgeCount = this.edges.length;
+    this.edges = this.edges.filter((e) => !e.id.startsWith("e-stair-hlink-") && !e.id.startsWith("e-stair-floorlink-"));
+    if (this.edges.length !== prevEdgeCount) {
+      createdAny = true;
+    }
 
-      if (sameFloorNodes.length > 0) {
-        let closest: Node | null = null;
-        let minDist = Infinity;
-        sameFloorNodes.forEach((n) => {
-          const d = Math.hypot(n.x - stairNode.x, n.y - stairNode.y);
-          if (d < minDist) {
-            minDist = d;
-            closest = n;
-          }
-        });
-
-        if (closest && minDist <= 500) {
-          const targetNode = closest as Node;
-          const edgeId = `e-stair-hlink-${stairNode.id}-${targetNode.id}`;
-          const dist = Math.max(1, Math.round(minDist / 4));
-          const exists = this.edges.some(
-            (e) => (e.from === stairNode.id && e.to === targetNode.id) || (e.from === targetNode.id && e.to === stairNode.id)
-          );
-          if (!exists) {
-            this.addEdgeInternal({
-              id: edgeId,
-              from: stairNode.id,
-              to: targetNode.id,
-              type: "WALK",
-              distance: dist,
-              bidirectional: true,
-            });
-            createdAny = true;
-          }
-        }
-      }
-    });
 
     groupMap.forEach((nodesInGroup) => {
       if (nodesInGroup.length >= 2) {
@@ -2230,10 +2272,18 @@ class CampusStore {
           fetch("/api/published-graph"),
         ]);
 
+        let draftLoaded = false;
         if (resDraft.ok) {
           const jsonDraft = await resDraft.json();
           const draft = jsonDraft?.draft;
-          if (draft && typeof draft === "object") {
+          const hasDraftEntities =
+            draft &&
+            typeof draft === "object" &&
+            ((Array.isArray(draft.buildings) && draft.buildings.length > 0) ||
+              (Array.isArray(draft.nodes) && draft.nodes.length > 0) ||
+              (Array.isArray(draft.floors) && draft.floors.length > 0));
+
+          if (hasDraftEntities) {
             this.buildings = Array.isArray(draft.buildings) ? draft.buildings : [];
             this.floors = Array.isArray(draft.floors) ? draft.floors : [];
             this.nodes = Array.isArray(draft.nodes) ? draft.nodes : [];
@@ -2248,13 +2298,22 @@ class CampusStore {
             this.syncVerticalGroupPositions();
             (this.stairGroups || []).forEach((sg) => this.rebuildStairGroupConnections(sg));
             this.autoConnectMatchingVerticalNodesAcrossFloors();
+            draftLoaded = true;
+            try {
+              localStorage.setItem("campusnav_working_draft_cache", JSON.stringify(this.getWorkingData()));
+            } catch (e) {}
           }
         }
 
         if (resPub.ok) {
           const jsonPub = await resPub.json();
           const graph = jsonPub?.graph;
-          if (graph) {
+          const hasPubEntities =
+            graph &&
+            ((Array.isArray(graph.buildings) && graph.buildings.length > 0) ||
+              (Array.isArray(graph.nodes) && graph.nodes.length > 0));
+
+          if (hasPubEntities) {
             this.publishedGraph = {
               buildings: graph.buildings || [],
               floors: graph.floors || [],
@@ -2267,6 +2326,23 @@ class CampusStore {
               liftGroups: graph.liftGroups || [],
               doors: graph.doors || [],
             };
+
+            // If draft was not loaded and local store is empty, fallback to published graph
+            if (!draftLoaded && this.buildings.length === 0 && this.nodes.length === 0) {
+              this.buildings = JSON.parse(JSON.stringify(this.publishedGraph.buildings));
+              this.floors = JSON.parse(JSON.stringify(this.publishedGraph.floors));
+              this.nodes = JSON.parse(JSON.stringify(this.publishedGraph.nodes));
+              this.edges = JSON.parse(JSON.stringify(this.publishedGraph.edges));
+              this.destinations = JSON.parse(JSON.stringify(this.publishedGraph.destinations));
+              this.events = JSON.parse(JSON.stringify(this.publishedGraph.events || []));
+              this.obstacles = JSON.parse(JSON.stringify(this.publishedGraph.obstacles || []));
+              this.stairGroups = JSON.parse(JSON.stringify(this.publishedGraph.stairGroups || []));
+              this.liftGroups = JSON.parse(JSON.stringify(this.publishedGraph.liftGroups || []));
+              this.doors = JSON.parse(JSON.stringify(this.publishedGraph.doors || []));
+              try {
+                localStorage.setItem("campusnav_working_draft_cache", JSON.stringify(this.getWorkingData()));
+              } catch (e) {}
+            }
           }
         }
       } else {
@@ -2599,12 +2675,16 @@ class CampusStore {
     return door;
   }
 
-  public updateDoor(id: string, patch: Partial<Door>) {
+  public updateDoor(id: string, patch: Partial<Door>, recordHistory = true) {
     const idx = this.doors.findIndex((d) => d.id === id);
     if (idx === -1) return;
-    this.saveSnapshotToUndo();
+    if (recordHistory) {
+      this.saveSnapshotToUndo();
+    }
     this.doors[idx] = { ...this.doors[idx], ...patch };
-    this.generateGraphSuggestions(this.doors[idx].floorId);
+    if (recordHistory) {
+      this.generateGraphSuggestions(this.doors[idx].floorId);
+    }
     this.notify();
   }
 
@@ -3042,9 +3122,41 @@ class CampusStore {
       this.saveSnapshotToUndo();
       if (Array.isArray(s.buildings)) this.buildings = s.buildings;
       if (Array.isArray(s.floors)) this.floors = s.floors;
-      if (Array.isArray(s.nodes)) this.nodes = s.nodes;
+      if (Array.isArray(s.nodes)) {
+        this.nodes = s.nodes.map((n: Node) => {
+          let nx = n.x;
+          let ny = n.y;
+          let nlat = n.lat;
+          let nlng = n.lng;
+
+          // If GPS is provided but canvas x,y is missing or both 0
+          if ((nx === undefined || ny === undefined || (nx === 0 && ny === 0)) && typeof nlat === "number" && typeof nlng === "number") {
+            const c = gpsToCanvas(nlat, nlng);
+            nx = c.x;
+            ny = c.y;
+          } else if ((nlat === undefined || nlng === undefined) && typeof nx === "number" && typeof ny === "number") {
+            const g = canvasToGps(nx, ny);
+            nlat = Number(g.lat.toFixed(9));
+            nlng = Number(g.lng.toFixed(9));
+          }
+          return { ...n, x: nx ?? 0, y: ny ?? 0, lat: nlat, lng: nlng };
+        });
+      }
       if (Array.isArray(s.edges)) this.edges = s.edges;
-      if (Array.isArray(s.destinations)) this.destinations = s.destinations;
+      if (Array.isArray(s.destinations)) {
+        this.destinations = s.destinations.map((d: Destination) => {
+          let dx = d.x;
+          let dy = d.y;
+          if ((dx === undefined || dy === undefined) && d.nodeId) {
+            const linkedNode = this.nodes.find((n) => n.id === d.nodeId);
+            if (linkedNode) {
+              dx = linkedNode.x;
+              dy = linkedNode.y;
+            }
+          }
+          return { ...d, x: dx, y: dy };
+        });
+      }
       if (Array.isArray(s.events)) this.events = s.events;
       if (Array.isArray(s.obstacles)) this.obstacles = s.obstacles;
       if (Array.isArray(s.stairGroups)) this.stairGroups = s.stairGroups;

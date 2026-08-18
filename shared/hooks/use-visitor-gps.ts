@@ -179,12 +179,16 @@ export function useVisitorGps(
 
         // Direct GPS-to-Canvas conversion: calculate canvas position directly from real GPS latitude and longitude
         const computedCanvas = gpsToCanvas(normalized.latitude, normalized.longitude);
-        const nextCanvasPos = { x: computedCanvas.x, y: computedCanvas.y, floorId: "f-out" };
-
-        // Optional nearest node match for routing if nodes exist, without overriding canvasPos
         const nodes = campusStore.getPublishedData().nodes || [];
-        const nearestMatch = nodes.length > 0 ? findNearestNodeByGps(normalized.latitude, normalized.longitude, nodes) : { node: null };
+        const nearestMatch = nodes.length > 0 ? findNearestNodeByGps(normalized.latitude, normalized.longitude, nodes) : { node: null, distance: Infinity };
         const nearestNode = nearestMatch.node;
+
+        let floorId = "f-out";
+        if (nearestNode && nearestMatch.distanceMeters <= 25 && nearestNode.floorId && nearestNode.floorId !== "outdoor") {
+          floorId = nearestNode.floorId;
+        }
+
+        const nextCanvasPos = { x: computedCanvas.x, y: computedCanvas.y, floorId };
 
 
         // Sync to Zustand location store

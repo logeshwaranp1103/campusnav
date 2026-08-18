@@ -79,7 +79,16 @@ export function getObstructedEdgeIds(
       const dx = toNode.x - fromNode.x;
       const dy = toNode.y - fromNode.y;
       const lenSq = dx * dx + dy * dy;
-      if (lenSq === 0) continue;
+      if (lenSq === 0) {
+        // Vertical shaft / coincident nodes: check circular radial distance directly to node point
+        const ptDist = Math.hypot(obs.x - fromNode.x, obs.y - fromNode.y);
+        if (ptDist <= radius) {
+          blockedEdgeIds.add(e.id);
+          blockedEdgeIds.add(`${e.id}_rev`);
+          break;
+        }
+        continue;
+      }
 
       let t = ((obs.x - fromNode.x) * dx + (obs.y - fromNode.y) * dy) / lenSq;
       t = Math.max(0, Math.min(1, t));
@@ -250,8 +259,8 @@ export function buildAdjacencyGraph(
     if (e.type === "STAIRS") modePenalty = 2;
     if (e.type === "LIFT") modePenalty = 1;
 
-    // Filter out direct non-adjacent multi-floor stair/lift shortcuts (e.g. Ground -> Floor 2 directly)
-    if (e.type === "STAIRS" || e.type === "LIFT") {
+    // Filter out direct non-adjacent multi-floor stair shortcuts (e.g. Ground -> Floor 2 directly)
+    if (e.type === "STAIRS") {
       const rankA = getNodeFloorRank(fn);
       const rankB = getNodeFloorRank(tn);
       if (Math.abs(rankA - rankB) > 1) {
@@ -371,42 +380,6 @@ export function buildAdjacencyGraph(
       }
     }
   });
-
-  // ── Ensure every stair node is connected to nearest node on the same floor ──
-  if (travelMode === "WALK") {
-    nodes.forEach((stairNode) => {
-      const isStair =
-        stairNode.type === "STAIR" ||
-        Boolean(stairNode.stairGroupId) ||
-        (stairNode.name && /stair|sts|rs/i.test(stairNode.name));
-
-      if (isStair) {
-        const sameFloorNodes = nodes.filter(
-          (n) => n.floorId === stairNode.floorId && n.id !== stairNode.id
-        );
-
-        if (sameFloorNodes.length > 0) {
-          let closest: Node | null = null;
-          let minDist = Infinity;
-          sameFloorNodes.forEach((n) => {
-            const d = Math.hypot(n.x - stairNode.x, n.y - stairNode.y);
-            if (d < minDist) {
-              minDist = d;
-              closest = n;
-            }
-          });
-
-          if (closest && minDist <= 500) {
-            const targetNode = closest as Node;
-            const autoFloorEdgeId = `e-stair-floorlink-${stairNode.id}-${targetNode.id}`;
-            const dist = Math.max(1, Math.round(minDist / 4));
-            addDirectedEdge(stairNode.id, targetNode.id, autoFloorEdgeId, "WALK", dist, dist, true, "WALK");
-            addDirectedEdge(targetNode.id, stairNode.id, `${autoFloorEdgeId}_rev`, "WALK", dist, dist, true, "WALK");
-          }
-        }
-      }
-    });
-  }
 
   return { graph, nodeMap };
 }
