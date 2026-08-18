@@ -1938,7 +1938,7 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
       className={
         isFullscreen
           ? "fixed inset-0 z-[9999] flex h-screen w-screen min-h-screen min-w-full flex-col overflow-hidden bg-[rgb(var(--bg))]"
-          : "relative flex h-[calc(100vh-1.5rem)] flex-col overflow-hidden rounded-xl border bg-[rgb(var(--bg-elev))] shadow-[var(--shadow-md)]"
+          : "relative flex h-full min-h-[500px] max-h-[calc(100vh-4.5rem)] flex-1 flex-col overflow-hidden rounded-xl border bg-[rgb(var(--bg-elev))] shadow-[var(--shadow-md)]"
       }
     >
       {/* Top Header Toolbar - Compacted to extend Graph Map to top */}
@@ -3293,7 +3293,7 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
           </svg>
 
           {/* Floating CAD Zoom & Viewport Controls Container (Single Line Bar) */}
-          <div className="absolute bottom-3 left-1/2 -translate-x-1/2 z-20 pointer-events-auto max-w-[calc(100%-1.5rem)]">
+          <div className="absolute bottom-3 left-1/2 -translate-x-1/2 z-30 pointer-events-auto max-w-[calc(100%-1rem)] sm:max-w-[calc(100%-2rem)]">
             <div className="flex items-center gap-1.5 rounded-xl border bg-[rgb(var(--card))]/95 px-2.5 py-1.5 shadow-xl backdrop-blur-md text-xs border-[rgb(var(--border))] whitespace-nowrap overflow-x-auto scrollbar-none">
               <button
                 onClick={() => {
