@@ -186,11 +186,6 @@ export function useVisitorGps(
         const nearestMatch = nodes.length > 0 ? findNearestNodeByGps(normalized.latitude, normalized.longitude, nodes) : { node: null };
         const nearestNode = nearestMatch.node;
 
-        console.log("[GPS FIX DEBUG]", {
-          rawGPS: { lat: normalized.latitude, lng: normalized.longitude },
-          origin: MAP_ORIGIN,
-          resultingCanvas: computedCanvas
-        });
 
         // Sync to Zustand location store
         useLocationStore.getState().setLocationState({
