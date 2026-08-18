@@ -8,19 +8,17 @@ datasource db {
 }
 
 model User {
-  id            String              @id @default(uuid())
-  email         String              @unique
+  id            String     @id @default(uuid())
+  email         String     @unique
   name          String?
   passwordHash  String?
-  role          RoleName            @default(ADMIN)
+  role          RoleName   @default(ADMIN)
   image         String?
-  emailVerified Boolean             @default(false)
-  createdAt     DateTime            @default(now())
-  updatedAt     DateTime            @updatedAt
+  emailVerified Boolean    @default(false)
+  createdAt     DateTime   @default(now())
+  updatedAt     DateTime   @updatedAt
   auditLogs     AuditLog[]
-  navSessions   NavigationSession[]
   sessions      Session[]
-  roles         UserRole[]
 }
 
 model Session {
@@ -36,65 +34,23 @@ model Session {
   @@index([userId])
 }
 
-model Role {
-  id          String           @id @default(uuid())
-  name        String           @unique
-  description String?
-  isSystem    Boolean          @default(false)
-  createdAt   DateTime         @default(now())
-  permissions RolePermission[]
-  users       UserRole[]
-}
-
-model Permission {
-  id          String           @id @default(uuid())
-  key         String           @unique
-  resource    String
-  action      String
-  description String?
-  roles       RolePermission[]
-
-  @@index([resource, action])
-}
-
-model RolePermission {
-  roleId       String
-  permissionId String
-  permission   Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
-  role         Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
-
-  @@id([roleId, permissionId])
-}
-
-model UserRole {
-  userId String
-  roleId String
-  role   Role   @relation(fields: [roleId], references: [id], onDelete: Cascade)
-  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@id([userId, roleId])
-}
-
 model Campus {
-  id           String           @id @default(uuid())
+  id           String         @id @default(uuid())
   name         String
-  slug         String           @unique
+  slug         String         @unique
   description  String?
   latitude     Float
   longitude    Float
   boundary     Json?
-  status       MapStatus        @default(DRAFT)
-  createdAt    DateTime         @default(now())
-  updatedAt    DateTime         @updatedAt
+  status       MapStatus      @default(DRAFT)
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
   buildings    Building[]
   destinations Destination[]
   doors        Door[]
   events       Event[]
-  facilities   Facility[]
-  calibrations GeoCalibration[]
   liftGroups   LiftGroup[]
   mapVersions  MapVersion[]
-  mediaAssets  MediaAsset[]
   nodes        Node[]
   obstacles    Obstacle[]
   stairGroups  StairGroup[]
@@ -139,28 +95,9 @@ model Floor {
   doors      Door[]
   building   Building  @relation(fields: [buildingId], references: [id], onDelete: Cascade)
   nodes      Node[]
-  rooms      Room[]
 
   @@unique([buildingId, ordinal])
   @@index([buildingId])
-}
-
-model Room {
-  id                String   @id @default(uuid())
-  floorId           String
-  name              String
-  code              String
-  category          String?
-  department        String?
-  description       String?
-  destinationNodeId String?  @unique
-  createdAt         DateTime @default(now())
-  updatedAt         DateTime @updatedAt
-  destinationNode   Node?    @relation("RoomDestination", fields: [destinationNodeId], references: [id])
-  floor             Floor    @relation(fields: [floorId], references: [id], onDelete: Cascade)
-
-  @@unique([floorId, code])
-  @@index([floorId])
 }
 
 model Door {
@@ -211,22 +148,6 @@ model LiftGroup {
   @@index([buildingId])
 }
 
-model Facility {
-  id          String   @id @default(uuid())
-  campusId    String
-  name        String
-  category    String
-  description String?
-  x           Float
-  y           Float
-  floorId     String?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-  campus      Campus   @relation(fields: [campusId], references: [id], onDelete: Cascade)
-
-  @@index([campusId])
-}
-
 model Node {
   id           String        @id @default(uuid())
   campusId     String
@@ -250,7 +171,6 @@ model Node {
   edgesIn      Edge[]        @relation("EdgeTo")
   campus       Campus        @relation(fields: [campusId], references: [id], onDelete: Cascade)
   floor        Floor?        @relation(fields: [floorId], references: [id])
-  room         Room?         @relation("RoomDestination")
 
   @@index([campusId])
   @@index([floorId])
@@ -319,22 +239,8 @@ model Event {
   @@index([campusId])
 }
 
-model GeoCalibration {
-  id        String   @id @default(uuid())
-  campusId  String
-  floorId   String?
-  canvasX   Float
-  canvasY   Float
-  lat       Float
-  lng       Float
-  createdAt DateTime @default(now())
-  campus    Campus   @relation(fields: [campusId], references: [id], onDelete: Cascade)
-
-  @@index([campusId])
-}
-
 model Destination {
-  id          String        @id @default(uuid())
+  id          String   @id @default(uuid())
   campusId    String
   nodeId      String
   name        String
@@ -347,26 +253,14 @@ model Destination {
   height      Float?
   doorId      String?
   description String?
-  popularity  Int           @default(0)
-  createdAt   DateTime      @default(now())
-  updatedAt   DateTime      @updatedAt
-  campus      Campus        @relation(fields: [campusId], references: [id], onDelete: Cascade)
-  node        Node          @relation(fields: [nodeId], references: [id], onDelete: Cascade)
-  aliases     SearchAlias[]
+  popularity  Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  campus      Campus   @relation(fields: [campusId], references: [id], onDelete: Cascade)
+  node        Node     @relation(fields: [nodeId], references: [id], onDelete: Cascade)
 
   @@index([campusId])
   @@index([nodeId])
-}
-
-model SearchAlias {
-  id            String      @id @default(uuid())
-  destinationId String
-  alias         String
-  weight        Int         @default(1)
-  destination   Destination @relation(fields: [destinationId], references: [id], onDelete: Cascade)
-
-  @@unique([destinationId, alias])
-  @@index([alias])
 }
 
 model DraftGraph {
@@ -396,45 +290,6 @@ model MapVersion {
   campus      Campus?   @relation(fields: [campusId], references: [id], onDelete: Cascade)
 
   @@index([status])
-}
-
-model MediaAsset {
-  id         String   @id @default(uuid())
-  campusId   String?
-  name       String
-  url        String
-  mimeType   String
-  sizeBytes  Int
-  entityType String
-  entityId   String?
-  createdAt  DateTime @default(now())
-  campus     Campus?  @relation(fields: [campusId], references: [id], onDelete: Cascade)
-}
-
-model NavigationSession {
-  id            String   @id @default(uuid())
-  userId        String?
-  campusId      String
-  startNodeId   String
-  destinationId String
-  distance      Float?
-  durationMs    Int?
-  completed     Boolean  @default(false)
-  route         Json?
-  createdAt     DateTime @default(now())
-  user          User?    @relation(fields: [userId], references: [id])
-
-  @@index([campusId])
-  @@index([userId])
-}
-
-model AnalyticsEvent {
-  id        String   @id @default(uuid())
-  type      String
-  payload   Json
-  createdAt DateTime @default(now())
-
-  @@index([type, createdAt])
 }
 
 model AuditLog {

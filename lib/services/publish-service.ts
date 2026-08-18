@@ -364,9 +364,6 @@ export async function publishDraftGraph(
       const validDoorIds = ((draftSnapshot.doors as any[]) || []).map((d) => d.id);
 
       if (validBuildingIds.length > 0) {
-        await prisma.searchAlias.deleteMany({ where: { destinationId: { notIn: validDestinationIds } } }).catch(() => {});
-        await prisma.room.deleteMany({ where: { floorId: { notIn: validFloorIds } } }).catch(() => {});
-        await prisma.facility.deleteMany({ where: { floorId: { notIn: validFloorIds } } }).catch(() => {});
         await prisma.destination.deleteMany({ where: { campusId: defaultCampusId, id: { notIn: validDestinationIds } } }).catch(() => {});
         await prisma.obstacle.deleteMany({ where: { campusId: defaultCampusId, id: { notIn: validObstacleIds } } }).catch(() => {});
         await prisma.door.deleteMany({ where: { id: { notIn: validDoorIds } } }).catch(() => {});
