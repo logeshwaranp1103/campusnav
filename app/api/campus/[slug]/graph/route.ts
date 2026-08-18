@@ -7,7 +7,7 @@ export async function GET(
 ) {
   const { slug } = await params;
 
-  const publishedServiceData = await getActivePublishedGraph();
+  const publishedServiceData = await getActivePublishedGraph(true);
   const rawData = publishedServiceData?.snapshot ?? {
     buildings: [],
     floors: [],
@@ -28,7 +28,7 @@ export async function GET(
       status: 304,
       headers: {
         ETag: etag,
-        "Cache-Control": "public, max-age=60, stale-while-revalidate=86400, s-maxage=3600",
+        "Cache-Control": "no-cache, must-revalidate",
       },
     });
   }
@@ -42,7 +42,7 @@ export async function GET(
     {
       headers: {
         ETag: etag,
-        "Cache-Control": "public, max-age=60, stale-while-revalidate=86400, s-maxage=3600",
+        "Cache-Control": "no-cache, must-revalidate",
       },
     }
   );

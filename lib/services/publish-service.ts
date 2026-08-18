@@ -110,24 +110,24 @@ export async function publishDraftGraph(
     };
   }
 
-  const currentSnapshot = await getActivePublishedGraph();
-  const versionNum = (currentSnapshot?.version ?? 0) + 1;
+  let versionNum = 1;
   const publishedAt = new Date();
-
-  activePublishedSnapshot = {
-    version: versionNum,
-    snapshot: draftSnapshot,
-    publishedAt,
-    publishedBy: userId,
-    notes: notes || "Published campus graph update",
-  };
 
   if (prisma) {
     try {
       const defaultCampusId = "c1";
 
-      // 1. Core Published Graph & Version Records in parallel (1 roundtrip)
-      await Promise.all([
+      // 1. Determine accurate next version directly from database record
+      const dbPublished = await prisma.publishedGraph.findUnique({
+        where: { id: "active-published" },
+        select: { version: true },
+      }).catch(() => null);
+
+      versionNum = (dbPublished?.version ?? 0) + 1;
+
+      // 2. ATOMIC DATABASE TRANSACTION for Core Publish Records
+      // Ensures publishedGraph, draftGraph, and mapVersion are atomically committed
+      await prisma.$transaction([
         prisma.campus.upsert({
           where: { id: defaultCampusId },
           update: {},
@@ -139,8 +139,7 @@ export async function publishDraftGraph(
             longitude: 77.2774,
             status: "PUBLISHED",
           },
-        }).catch((e) => console.warn("Campus upsert notice:", e?.message)),
-
+        }),
         prisma.publishedGraph.upsert({
           where: { id: "active-published" },
           update: {
@@ -157,13 +156,11 @@ export async function publishDraftGraph(
             publishedBy: userId,
           },
         }),
-
         prisma.draftGraph.upsert({
           where: { id: "active-draft" },
           update: { snapshot: draftSnapshot as any },
           create: { id: "active-draft", snapshot: draftSnapshot as any },
         }),
-
         prisma.mapVersion.create({
           data: {
             version: versionNum,
@@ -172,17 +169,13 @@ export async function publishDraftGraph(
             notes: notes || "Published campus graph update",
             publishedBy: userId,
           },
-        }).catch((e) => console.warn("MapVersion creation notice:", e?.message)),
+        }),
       ]);
 
-      // 2. Pre-fetch existing relational state to eliminate N+1 queries in subsequent steps
-      const [existingBuildings, existingFloors, existingDbNodes, existingEdges, existingObstacles, existingDestinations] = await Promise.all([
-        prisma.building.findMany({ select: { id: true } }).catch(() => []),
-        prisma.floor.findMany({ select: { id: true } }).catch(() => []),
-        prisma.node.findMany({ select: { id: true } }).catch(() => []),
+      // 3. Pre-fetch existing relational state for safe foreign-key matching and edge ID deduplication
+      const [existingEdges, existingBuildings] = await Promise.all([
         prisma.edge.findMany({ select: { id: true, fromNodeId: true, toNodeId: true, type: true } }).catch(() => []),
-        prisma.obstacle.findMany({ select: { id: true } }).catch(() => []),
-        prisma.destination.findMany({ select: { id: true } }).catch(() => []),
+        prisma.building.findMany({ select: { id: true, shortCode: true } }).catch(() => []),
       ]);
 
       const existingEdgeMap = new Map<string, string>();
@@ -190,36 +183,7 @@ export async function publishDraftGraph(
         existingEdgeMap.set(`${e.fromNodeId}_${e.toNodeId}_${e.type}`, e.id);
       }
 
-      // 3. Parallelized Deletion Cleanup (Safe Guard: only prune when valid entities are present)
-      const validBuildingIds = (buildings || []).map((b) => b.id);
-      const validFloorIds = (floors || []).map((f) => f.id);
-      const validNodeIds = (nodes || []).map((n) => n.id);
-      const validEdgeIds = (edges || []).map((e) => e.id);
-      const validDestinationIds = (destinations || []).map((d) => d.id);
-      const validObstacleIds = (obstacles || []).map((o) => o.id);
-      const validDoorIds = ((draftSnapshot.doors as any[]) || []).map((d) => d.id);
-
-      if (validBuildingIds.length > 0) {
-        // Phase 3A: Leaf entity cleanup in parallel
-        await Promise.all([
-          prisma.searchAlias.deleteMany({ where: { destinationId: { notIn: validDestinationIds } } }).catch(() => {}),
-          prisma.room.deleteMany({ where: { OR: [{ id: { notIn: validDestinationIds } }, { floorId: { notIn: validFloorIds } }] } }).catch(() => {}),
-          prisma.facility.deleteMany({ where: { floorId: { notIn: validFloorIds } } }).catch(() => {}),
-          prisma.destination.deleteMany({ where: { campusId: defaultCampusId, id: { notIn: validDestinationIds } } }).catch(() => {}),
-          prisma.obstacle.deleteMany({ where: { campusId: defaultCampusId, id: { notIn: validObstacleIds } } }).catch(() => {}),
-          prisma.door.deleteMany({ where: { id: { notIn: validDoorIds } } }).catch(() => {}),
-          prisma.edge.deleteMany({ where: { id: { notIn: validEdgeIds } } }).catch(() => {}),
-        ]);
-
-        // Phase 3B: Nodes, Floors, Buildings cleanup in parallel
-        await Promise.all([
-          prisma.node.deleteMany({ where: { campusId: defaultCampusId, id: { notIn: validNodeIds } } }).catch(() => {}),
-          prisma.floor.deleteMany({ where: { buildingId: { in: validBuildingIds }, id: { notIn: validFloorIds } } }).catch(() => {}),
-          prisma.building.deleteMany({ where: { campusId: defaultCampusId, id: { notIn: validBuildingIds } } }).catch(() => {}),
-        ]);
-      }
-
-      // 4. Concurrent Chunked Upserts for Relational Tables
+      // 4. Safe Topological Relational Upserts (Parent to Child: Campus -> Buildings -> Floors -> Nodes -> Edges/Dests/Obstacles)
       // 4.1 Buildings
       if (buildings && Array.isArray(buildings) && buildings.length > 0) {
         await runInPoolChunks(buildings, async (b) => {
@@ -283,6 +247,9 @@ export async function publishDraftGraph(
             longitude: n.lng ?? null,
             x: n.x ?? null,
             y: n.y ?? null,
+            accessible: n.accessible ?? true,
+            searchable: n.searchable ?? true,
+            navigable: n.navigable ?? true,
             metadata: Object.keys(nodeMeta).length > 0 ? nodeMeta : undefined,
           };
           return prisma.node.upsert({
@@ -293,7 +260,7 @@ export async function publishDraftGraph(
         });
       }
 
-      // 4.4 Edges (O(1) in-memory existence checks, zero N+1 findUnique roundtrips)
+      // 4.4 Edges
       if (edges && Array.isArray(edges) && edges.length > 0) {
         const validNodeIds = new Set((nodes || []).map((n) => n.id));
         const targetEdges = edges.filter((e) => {
@@ -337,7 +304,7 @@ export async function publishDraftGraph(
         });
       }
 
-      // 4.5 Obstacles & Destinations in parallel
+      // 4.5 Obstacles & Destinations
       const trailingTasks: Promise<any>[] = [];
 
       if (obstacles && Array.isArray(obstacles) && obstacles.length > 0) {
@@ -386,10 +353,46 @@ export async function publishDraftGraph(
       if (trailingTasks.length > 0) {
         await Promise.all(trailingTasks);
       }
+
+      // 5. Prune Stale Relational Entities in Leaf-to-Root Sequential Order
+      const validBuildingIds = (buildings || []).map((b) => b.id);
+      const validFloorIds = (floors || []).map((f) => f.id);
+      const validNodeIds = (nodes || []).map((n) => n.id);
+      const validEdgeIds = (edges || []).map((e) => e.id);
+      const validDestinationIds = (destinations || []).map((d) => d.id);
+      const validObstacleIds = (obstacles || []).map((o) => o.id);
+      const validDoorIds = ((draftSnapshot.doors as any[]) || []).map((d) => d.id);
+
+      if (validBuildingIds.length > 0) {
+        await prisma.searchAlias.deleteMany({ where: { destinationId: { notIn: validDestinationIds } } }).catch(() => {});
+        await prisma.room.deleteMany({ where: { OR: [{ id: { notIn: validDestinationIds } }, { floorId: { notIn: validFloorIds } }] } }).catch(() => {});
+        await prisma.facility.deleteMany({ where: { floorId: { notIn: validFloorIds } } }).catch(() => {});
+        await prisma.destination.deleteMany({ where: { campusId: defaultCampusId, id: { notIn: validDestinationIds } } }).catch(() => {});
+        await prisma.obstacle.deleteMany({ where: { campusId: defaultCampusId, id: { notIn: validObstacleIds } } }).catch(() => {});
+        await prisma.door.deleteMany({ where: { id: { notIn: validDoorIds } } }).catch(() => {});
+        await prisma.edge.deleteMany({ where: { id: { notIn: validEdgeIds } } }).catch(() => {});
+        await prisma.node.deleteMany({ where: { campusId: defaultCampusId, id: { notIn: validNodeIds } } }).catch(() => {});
+        await prisma.floor.deleteMany({ where: { buildingId: { in: validBuildingIds }, id: { notIn: validFloorIds } } }).catch(() => {});
+        await prisma.building.deleteMany({ where: { campusId: defaultCampusId, id: { notIn: validBuildingIds } } }).catch(() => {});
+      }
     } catch (e) {
-      console.warn("Failed to persist published graph to Prisma database:", e);
+      console.error("Critical error during publish database transaction:", e);
+      return {
+        success: false,
+        validationReport,
+        error: `Database persistence failure: ${e instanceof Error ? e.message : String(e)}`,
+      };
     }
   }
+
+  // Update server in-memory cache ONLY after database write succeeds
+  activePublishedSnapshot = {
+    version: versionNum,
+    snapshot: draftSnapshot,
+    publishedAt,
+    publishedBy: userId,
+    notes: notes || "Published campus graph update",
+  };
 
   await logAuditEvent({
     userId,

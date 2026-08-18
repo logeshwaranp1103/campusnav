@@ -174,6 +174,12 @@ class CampusStore {
             } else {
               this.syncWithServer();
             }
+          } else if (event.data?.type === "SYNC_PUBLISHED") {
+            if (event.data.snapshot) {
+              this.setPublishedGraphFromDatabase(event.data.snapshot, event.data.version);
+            } else {
+              this.fetchPublishedData(true);
+            }
           }
         };
       } catch (e) {
@@ -2175,6 +2181,9 @@ class CampusStore {
         if (!res.ok || data.success === false) {
           return { success: false, error: data.error || `Server return error (${res.status})` };
         }
+        if (data.version) {
+          this.publishedVersion = String(data.version).startsWith("v") ? String(data.version) : `v${data.version}`;
+        }
       } catch (err: unknown) {
         console.warn("Failed to sync published graph with server:", err);
         return { success: false, error: err instanceof Error ? err.message : String(err) };
@@ -2185,6 +2194,22 @@ class CampusStore {
     this.pendingChanges = [];
     this.persistWorkingDraft();
     this.notify();
+
+    // Broadcast published update to all tabs/windows
+    if (this.broadcastChannel) {
+      try {
+        this.broadcastChannel.postMessage({
+          type: "SYNC_PUBLISHED",
+          clientId: this.clientId,
+          snapshot: this.publishedGraph,
+          version: this.publishedVersion,
+          timestamp: Date.now(),
+        });
+      } catch (e) {
+        // Ignore broadcast failures
+      }
+    }
+
     return { success: true, version: this.publishedVersion, count: this.buildings.length };
   }
 
