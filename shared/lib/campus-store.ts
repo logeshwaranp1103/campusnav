@@ -2246,33 +2246,117 @@ class CampusStore {
         }
       } else {
         // Visitor: fetch only the published graph
-        const resPub = await fetch("/api/published-graph");
-        if (resPub.ok) {
-          const jsonPub = await resPub.json();
-          const graph = jsonPub?.graph;
-          if (graph) {
-            this.publishedGraph = {
-              buildings: graph.buildings || [],
-              floors: graph.floors || [],
-              nodes: graph.nodes || [],
-              edges: graph.edges || [],
-              destinations: graph.destinations || [],
-              events: graph.events || [],
-              obstacles: graph.obstacles || [],
-              stairGroups: graph.stairGroups || [],
-              liftGroups: graph.liftGroups || [],
-              doors: graph.doors || [],
-            };
-            this.buildings = graph.buildings || [];
-            this.floors = graph.floors || [];
-            this.nodes = graph.nodes || [];
-            this.edges = graph.edges || [];
-            this.destinations = graph.destinations || [];
-            this.events = graph.events || [];
-            this.obstacles = graph.obstacles || [];
-            this.stairGroups = graph.stairGroups || [];
-            this.liftGroups = graph.liftGroups || [];
-            this.doors = graph.doors || [];
+        let loaded = false;
+        try {
+          const resPub = await fetch("/api/published-graph", { cache: "no-store" });
+          if (resPub.ok) {
+            const jsonPub = await resPub.json();
+            const graph = jsonPub?.graph;
+            if (graph && (graph.buildings?.length > 0 || graph.nodes?.length > 0)) {
+              if (jsonPub.version) this.publishedVersion = `v${jsonPub.version}`;
+              this.publishedGraph = {
+                buildings: graph.buildings || [],
+                floors: graph.floors || [],
+                nodes: graph.nodes || [],
+                edges: graph.edges || [],
+                destinations: graph.destinations || [],
+                events: graph.events || [],
+                obstacles: graph.obstacles || [],
+                stairGroups: graph.stairGroups || [],
+                liftGroups: graph.liftGroups || [],
+                doors: graph.doors || [],
+              };
+              this.buildings = graph.buildings || [];
+              this.floors = graph.floors || [];
+              this.nodes = graph.nodes || [];
+              this.edges = graph.edges || [];
+              this.destinations = graph.destinations || [];
+              this.events = graph.events || [];
+              this.obstacles = graph.obstacles || [];
+              this.stairGroups = graph.stairGroups || [];
+              this.liftGroups = graph.liftGroups || [];
+              this.doors = graph.doors || [];
+              loaded = true;
+            }
+          }
+        } catch (e) {
+          console.warn("Failed to fetch /api/published-graph:", e);
+        }
+
+        // Fallback 1: Try /api/campus/main/graph if primary published endpoint did not return entities
+        if (!loaded) {
+          try {
+            const resSlug = await fetch("/api/campus/main/graph", { cache: "no-store" });
+            if (resSlug.ok) {
+              const jsonSlug = await resSlug.json();
+              const graph = jsonSlug?.data;
+              if (graph && (graph.buildings?.length > 0 || graph.nodes?.length > 0)) {
+                if (jsonSlug.version) this.publishedVersion = `v${jsonSlug.version}`;
+                this.publishedGraph = {
+                  buildings: graph.buildings || [],
+                  floors: graph.floors || [],
+                  nodes: graph.nodes || [],
+                  edges: graph.edges || [],
+                  destinations: graph.destinations || [],
+                  events: graph.events || [],
+                  obstacles: graph.obstacles || [],
+                  stairGroups: graph.stairGroups || [],
+                  liftGroups: graph.liftGroups || [],
+                  doors: graph.doors || [],
+                };
+                this.buildings = graph.buildings || [];
+                this.floors = graph.floors || [];
+                this.nodes = graph.nodes || [];
+                this.edges = graph.edges || [];
+                this.destinations = graph.destinations || [];
+                this.events = graph.events || [];
+                this.obstacles = graph.obstacles || [];
+                this.stairGroups = graph.stairGroups || [];
+                this.liftGroups = graph.liftGroups || [];
+                this.doors = graph.doors || [];
+                loaded = true;
+              }
+            }
+          } catch (e) {
+            console.warn("Failed to fetch /api/campus/main/graph fallback:", e);
+          }
+        }
+
+        // Fallback 2: Try /api/admin/campus-graph/draft if active published record was not yet created
+        if (!loaded) {
+          try {
+            const resDraft = await fetch("/api/admin/campus-graph/draft", { cache: "no-store" });
+            if (resDraft.ok) {
+              const jsonDraft = await resDraft.json();
+              const draft = jsonDraft?.draft;
+              if (draft && (draft.buildings?.length > 0 || draft.nodes?.length > 0)) {
+                this.publishedGraph = {
+                  buildings: draft.buildings || [],
+                  floors: draft.floors || [],
+                  nodes: draft.nodes || [],
+                  edges: draft.edges || [],
+                  destinations: draft.destinations || [],
+                  events: draft.events || [],
+                  obstacles: draft.obstacles || [],
+                  stairGroups: draft.stairGroups || [],
+                  liftGroups: draft.liftGroups || [],
+                  doors: draft.doors || [],
+                };
+                this.buildings = draft.buildings || [];
+                this.floors = draft.floors || [];
+                this.nodes = draft.nodes || [];
+                this.edges = draft.edges || [];
+                this.destinations = draft.destinations || [];
+                this.events = draft.events || [];
+                this.obstacles = draft.obstacles || [];
+                this.stairGroups = draft.stairGroups || [];
+                this.liftGroups = draft.liftGroups || [];
+                this.doors = draft.doors || [];
+                loaded = true;
+              }
+            }
+          } catch (e) {
+            console.warn("Failed to fetch /api/admin/campus-graph/draft fallback:", e);
           }
         }
       }
@@ -2292,6 +2376,20 @@ class CampusStore {
       this.isInitialized = true;
       this.notify();
     }
+  }
+
+  public async fetchPublishedData(force = false): Promise<ReturnType<CampusStore["getPublishedData"]>> {
+    if (typeof window === "undefined") return this.getPublishedData();
+    const hasData =
+      (this.publishedGraph.buildings && this.publishedGraph.buildings.length > 0) ||
+      (this.buildings && this.buildings.length > 0);
+
+    if (hasData && !force) {
+      return this.getPublishedData();
+    }
+
+    await this.syncWithServer();
+    return this.getPublishedData();
   }
 
   public async resetEntireDatabase(): Promise<{ success: boolean; message?: string; error?: string }> {

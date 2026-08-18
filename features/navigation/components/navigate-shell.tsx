@@ -106,12 +106,47 @@ export function NavigateShell() {
 
   useEffect(() => {
     setMounted(true);
+    let isCancelled = false;
+
     const updateData = () => {
-      setPublishedData(campusStore.getPublishedData());
+      if (!isCancelled) {
+        setPublishedData(campusStore.getPublishedData());
+      }
     };
+
     updateData();
     const unsub = campusStore.subscribe(updateData);
-    return () => unsub();
+
+    // Fetch fresh published graph from database on mount
+    campusStore.fetchPublishedData().then((freshData) => {
+      if (!isCancelled && freshData) {
+        setPublishedData(freshData);
+      }
+    });
+
+    // Realtime SSE sync when admin publishes map updates
+    let eventSource: EventSource | null = null;
+    try {
+      eventSource = new EventSource("/api/campus/stream");
+      eventSource.onmessage = (event) => {
+        try {
+          const payload = JSON.parse(event.data);
+          if (payload.version) {
+            campusStore.fetchPublishedData(true).then((freshData) => {
+              if (!isCancelled && freshData) {
+                setPublishedData(freshData);
+              }
+            });
+          }
+        } catch {}
+      };
+    } catch {}
+
+    return () => {
+      isCancelled = true;
+      unsub();
+      if (eventSource) eventSource.close();
+    };
   }, []);
 
   // Filter start/end destinations: no staircase, no lift group, no unnamed nodes. Show all named nodes.

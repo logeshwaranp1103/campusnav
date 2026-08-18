@@ -43,11 +43,25 @@ export function CampusMap({ route, livePosition, progress, gps: passedGps, onNav
 
   useEffect(() => {
     setMounted(true);
+    let isCancelled = false;
     setPublishedData(campusStore.getPublishedData());
-    const unsub = campusStore.subscribe(() => {
-      setPublishedData(campusStore.getPublishedData());
+
+    campusStore.fetchPublishedData().then((freshData) => {
+      if (!isCancelled && freshData) {
+        setPublishedData(freshData);
+      }
     });
-    return () => unsub();
+
+    const unsub = campusStore.subscribe(() => {
+      if (!isCancelled) {
+        setPublishedData(campusStore.getPublishedData());
+      }
+    });
+
+    return () => {
+      isCancelled = true;
+      unsub();
+    };
   }, []);
 
   // Auto-switch floor view when live position, real GPS location, or route floor changes

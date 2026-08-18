@@ -43,12 +43,23 @@ export function ExplorePanel() {
 
   useEffect(() => {
     setMounted(true);
+    let isCancelled = false;
     const updateData = () => {
-      setStoreData(campusStore.getPublishedData());
+      if (!isCancelled) {
+        setStoreData(campusStore.getPublishedData());
+      }
     };
     updateData();
+    campusStore.fetchPublishedData().then((freshData) => {
+      if (!isCancelled && freshData) {
+        setStoreData(freshData);
+      }
+    });
     const unsub = campusStore.subscribe(updateData);
-    return () => unsub();
+    return () => {
+      isCancelled = true;
+      unsub();
+    };
   }, []);
 
   const items = useMemo(() => {
