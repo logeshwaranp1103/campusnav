@@ -23,6 +23,38 @@ export type DraftSnapshot = {
 
 let activePublishedSnapshot: { version: number; snapshot: DraftSnapshot; publishedAt: Date; publishedBy: string; notes: string } | null = null;
 
+export function sanitizeSnapshotForPayload(snapshot: DraftSnapshot): DraftSnapshot {
+  if (!snapshot) return {};
+  const safeNodes = (snapshot.nodes || []).map((n) => {
+    if (n.photoUrl && n.photoUrl.startsWith("data:")) {
+      return {
+        ...n,
+        photoUrl: `/api/nodes/${n.id}/photo`,
+      };
+    }
+    return n;
+  });
+
+  return {
+    ...snapshot,
+    nodes: safeNodes,
+  };
+}
+
+async function runInPoolChunks<T, R>(
+  items: T[],
+  fn: (item: T) => Promise<R>,
+  concurrency = 3
+): Promise<R[]> {
+  const results: R[] = [];
+  for (let i = 0; i < items.length; i += concurrency) {
+    const chunk = items.slice(i, i + concurrency);
+    const chunkResults = await Promise.all(chunk.map(fn));
+    results.push(...chunkResults);
+  }
+  return results;
+}
+
 export async function publishDraftGraph(
   draftSnapshot: DraftSnapshot = {},
   userId = "admin-id-1",
@@ -30,6 +62,36 @@ export async function publishDraftGraph(
 ): Promise<PublishResult> {
   const safeSnapshot = draftSnapshot || {};
   const { buildings, floors, nodes, edges, destinations, obstacles } = safeSnapshot;
+
+  const hasAnyEntities =
+    (buildings && buildings.length > 0) ||
+    (nodes && nodes.length > 0) ||
+    (floors && floors.length > 0) ||
+    (destinations && destinations.length > 0);
+
+  // Safety Guard: Never publish an empty snapshot over real database data
+  if (!hasAnyEntities) {
+    return {
+      success: false,
+      validationReport: {
+        healthScore: 0,
+        status: "CRITICAL",
+        canPublish: false,
+        criticalCount: 1,
+        warningCount: 0,
+        infoCount: 0,
+        checks: [],
+        issues: [{
+          id: "empty-snapshot-safety",
+          severity: "CRITICAL",
+          code: "EMPTY_GRAPH",
+          title: "Empty Campus Graph",
+          description: "Publishing blocked: Cannot publish an empty campus graph.",
+        }],
+      },
+      error: "Publishing blocked: Cannot publish an empty campus graph.",
+    };
+  }
 
   const validationReport = validateCampusGraph(
     buildings || [],
@@ -64,54 +126,71 @@ export async function publishDraftGraph(
     try {
       const defaultCampusId = "c1";
 
-      // 1. Core Published Graph & Version Records (Critical)
-      await prisma.campus.upsert({
-        where: { id: defaultCampusId },
-        update: {},
-        create: {
-          id: defaultCampusId,
-          name: "Main Campus",
-          slug: "main",
-          latitude: 11.4965,
-          longitude: 77.2774,
-          status: "PUBLISHED",
-        },
-      }).catch((e) => console.warn("Campus upsert notice:", e?.message));
+      // 1. Core Published Graph & Version Records in parallel (1 roundtrip)
+      await Promise.all([
+        prisma.campus.upsert({
+          where: { id: defaultCampusId },
+          update: {},
+          create: {
+            id: defaultCampusId,
+            name: "Main Campus",
+            slug: "main",
+            latitude: 11.4965,
+            longitude: 77.2774,
+            status: "PUBLISHED",
+          },
+        }).catch((e) => console.warn("Campus upsert notice:", e?.message)),
 
-      await prisma.publishedGraph.upsert({
-        where: { id: "active-published" },
-        update: {
-          version: versionNum,
-          snapshot: draftSnapshot as any,
-          publishedAt,
-          publishedBy: userId,
-        },
-        create: {
-          id: "active-published",
-          version: versionNum,
-          snapshot: draftSnapshot as any,
-          publishedAt,
-          publishedBy: userId,
-        },
-      });
+        prisma.publishedGraph.upsert({
+          where: { id: "active-published" },
+          update: {
+            version: versionNum,
+            snapshot: draftSnapshot as any,
+            publishedAt,
+            publishedBy: userId,
+          },
+          create: {
+            id: "active-published",
+            version: versionNum,
+            snapshot: draftSnapshot as any,
+            publishedAt,
+            publishedBy: userId,
+          },
+        }),
 
-      await prisma.draftGraph.upsert({
-        where: { id: "active-draft" },
-        update: { snapshot: draftSnapshot as any },
-        create: { id: "active-draft", snapshot: draftSnapshot as any },
-      });
+        prisma.draftGraph.upsert({
+          where: { id: "active-draft" },
+          update: { snapshot: draftSnapshot as any },
+          create: { id: "active-draft", snapshot: draftSnapshot as any },
+        }),
 
-      await prisma.mapVersion.create({
-        data: {
-          version: versionNum,
-          status: "PUBLISHED",
-          snapshot: draftSnapshot as any,
-          notes: notes || "Published campus graph update",
-          publishedBy: userId,
-        },
-      }).catch((e) => console.warn("MapVersion creation notice:", e?.message));
+        prisma.mapVersion.create({
+          data: {
+            version: versionNum,
+            status: "PUBLISHED",
+            snapshot: draftSnapshot as any,
+            notes: notes || "Published campus graph update",
+            publishedBy: userId,
+          },
+        }).catch((e) => console.warn("MapVersion creation notice:", e?.message)),
+      ]);
 
-      // 2. Relational Table Synchronization & Deletion Cleanup
+      // 2. Pre-fetch existing relational state to eliminate N+1 queries in subsequent steps
+      const [existingBuildings, existingFloors, existingDbNodes, existingEdges, existingObstacles, existingDestinations] = await Promise.all([
+        prisma.building.findMany({ select: { id: true } }).catch(() => []),
+        prisma.floor.findMany({ select: { id: true } }).catch(() => []),
+        prisma.node.findMany({ select: { id: true } }).catch(() => []),
+        prisma.edge.findMany({ select: { id: true, fromNodeId: true, toNodeId: true, type: true } }).catch(() => []),
+        prisma.obstacle.findMany({ select: { id: true } }).catch(() => []),
+        prisma.destination.findMany({ select: { id: true } }).catch(() => []),
+      ]);
+
+      const existingEdgeMap = new Map<string, string>();
+      for (const e of existingEdges) {
+        existingEdgeMap.set(`${e.fromNodeId}_${e.toNodeId}_${e.type}`, e.id);
+      }
+
+      // 3. Parallelized Deletion Cleanup (Safe Guard: only prune when valid entities are present)
       const validBuildingIds = (buildings || []).map((b) => b.id);
       const validFloorIds = (floors || []).map((f) => f.id);
       const validNodeIds = (nodes || []).map((n) => n.id);
@@ -120,191 +199,152 @@ export async function publishDraftGraph(
       const validObstacleIds = (obstacles || []).map((o) => o.id);
       const validDoorIds = ((draftSnapshot.doors as any[]) || []).map((d) => d.id);
 
-      // Clean up deleted entities from relational database tables (cascading child-to-parent)
-      await prisma.searchAlias.deleteMany({ where: { destinationId: { notIn: validDestinationIds } } }).catch(() => {});
-      await prisma.room.deleteMany({ where: { OR: [{ id: { notIn: validDestinationIds } }, { floorId: { notIn: validFloorIds } }] } }).catch(() => {});
-      await prisma.facility.deleteMany({ where: { floorId: { notIn: validFloorIds } } }).catch(() => {});
-      await prisma.destination.deleteMany({ where: { id: { notIn: validDestinationIds } } }).catch(() => {});
-      await prisma.obstacle.deleteMany({ where: { id: { notIn: validObstacleIds } } }).catch(() => {});
-      await prisma.door.deleteMany({ where: { id: { notIn: validDoorIds } } }).catch(() => {});
-      await prisma.edge.deleteMany({ where: { id: { notIn: validEdgeIds } } }).catch(() => {});
-      await prisma.node.deleteMany({ where: { id: { notIn: validNodeIds } } }).catch(() => {});
-      await prisma.floor.deleteMany({ where: { id: { notIn: validFloorIds } } }).catch(() => {});
-      await prisma.building.deleteMany({ where: { id: { notIn: validBuildingIds } } }).catch(() => {});
+      if (validBuildingIds.length > 0) {
+        // Phase 3A: Leaf entity cleanup in parallel
+        await Promise.all([
+          prisma.searchAlias.deleteMany({ where: { destinationId: { notIn: validDestinationIds } } }).catch(() => {}),
+          prisma.room.deleteMany({ where: { OR: [{ id: { notIn: validDestinationIds } }, { floorId: { notIn: validFloorIds } }] } }).catch(() => {}),
+          prisma.facility.deleteMany({ where: { floorId: { notIn: validFloorIds } } }).catch(() => {}),
+          prisma.destination.deleteMany({ where: { campusId: defaultCampusId, id: { notIn: validDestinationIds } } }).catch(() => {}),
+          prisma.obstacle.deleteMany({ where: { campusId: defaultCampusId, id: { notIn: validObstacleIds } } }).catch(() => {}),
+          prisma.door.deleteMany({ where: { id: { notIn: validDoorIds } } }).catch(() => {}),
+          prisma.edge.deleteMany({ where: { id: { notIn: validEdgeIds } } }).catch(() => {}),
+        ]);
 
-      if (buildings && Array.isArray(buildings)) {
-        for (const b of buildings) {
+        // Phase 3B: Nodes, Floors, Buildings cleanup in parallel
+        await Promise.all([
+          prisma.node.deleteMany({ where: { campusId: defaultCampusId, id: { notIn: validNodeIds } } }).catch(() => {}),
+          prisma.floor.deleteMany({ where: { buildingId: { in: validBuildingIds }, id: { notIn: validFloorIds } } }).catch(() => {}),
+          prisma.building.deleteMany({ where: { campusId: defaultCampusId, id: { notIn: validBuildingIds } } }).catch(() => {}),
+        ]);
+      }
+
+      // 4. Concurrent Chunked Upserts for Relational Tables
+      // 4.1 Buildings
+      if (buildings && Array.isArray(buildings) && buildings.length > 0) {
+        await runInPoolChunks(buildings, async (b) => {
           const safeCode = b.shortCode ? `${b.shortCode}_${b.id.slice(-6)}` : b.id;
-          await prisma.building.upsert({
+          const bldData = {
+            campusId: b.campusId || defaultCampusId,
+            name: b.name,
+            shortCode: safeCode,
+            color: b.color || "#4f46e5",
+            description: b.description || null,
+            x: b.x ?? null,
+            y: b.y ?? null,
+            width: b.width ?? null,
+            height: b.height ?? null,
+            floorsCount: b.floorsCount ?? 0,
+            basementsCount: b.basementsCount ?? 0,
+            status: "PUBLISHED" as const,
+          };
+          return prisma.building.upsert({
             where: { id: b.id },
-            update: {
-              campusId: b.campusId || defaultCampusId,
-              name: b.name,
-              shortCode: safeCode,
-              color: b.color || "#4f46e5",
-              description: b.description || null,
-              x: b.x ?? null,
-              y: b.y ?? null,
-              width: b.width ?? null,
-              height: b.height ?? null,
-              floorsCount: b.floorsCount ?? 0,
-              basementsCount: b.basementsCount ?? 0,
-              status: "PUBLISHED",
-            },
-            create: {
-              id: b.id,
-              campusId: b.campusId || defaultCampusId,
-              name: b.name,
-              shortCode: safeCode,
-              color: b.color || "#4f46e5",
-              description: b.description || null,
-              x: b.x ?? null,
-              y: b.y ?? null,
-              width: b.width ?? null,
-              height: b.height ?? null,
-              floorsCount: b.floorsCount ?? 0,
-              basementsCount: b.basementsCount ?? 0,
-              status: "PUBLISHED",
-            },
-          }).catch((e) => console.warn(`Building ${b.id} upsert deferred:`, e?.message));
-        }
+            update: bldData,
+            create: { id: b.id, ...bldData },
+          }).catch((e) => console.warn(`Building ${b.id} upsert notice:`, e?.message));
+        });
       }
 
-      if (floors && Array.isArray(floors)) {
+      // 4.2 Floors
+      if (floors && Array.isArray(floors) && floors.length > 0) {
         const validBuildingIds = new Set((buildings || []).map((b) => b.id));
-        for (const f of floors) {
-          if (validBuildingIds.has(f.buildingId)) {
-            await prisma.floor.upsert({
-              where: { id: f.id },
-              update: {
-                buildingId: f.buildingId,
-                name: f.name,
-                ordinal: f.ordinal ?? 0,
-              },
-              create: {
-                id: f.id,
-                buildingId: f.buildingId,
-                name: f.name,
-                ordinal: f.ordinal ?? 0,
-              },
-            }).catch((e) => console.warn(`Floor ${f.id} upsert deferred:`, e?.message));
-          }
-        }
+        const targetFloors = floors.filter((f) => validBuildingIds.has(f.buildingId));
+        await runInPoolChunks(targetFloors, async (f) => {
+          const floorData = {
+            buildingId: f.buildingId,
+            name: f.name,
+            ordinal: f.ordinal ?? 0,
+          };
+          return prisma.floor.upsert({
+            where: { id: f.id },
+            update: floorData,
+            create: { id: f.id, ...floorData },
+          }).catch((e) => console.warn(`Floor ${f.id} upsert notice:`, e?.message));
+        });
       }
 
-      if (nodes && Array.isArray(nodes)) {
+      // 4.3 Nodes
+      if (nodes && Array.isArray(nodes) && nodes.length > 0) {
         const validFloorIds = new Set((floors || []).map((f) => f.id));
-        for (const n of nodes) {
+        await runInPoolChunks(nodes, async (n) => {
           const floorId = n.floorId && validFloorIds.has(n.floorId) ? n.floorId : null;
           const nodeMeta = {
             ...(n.photoUrl ? { photoUrl: n.photoUrl, photoUploadedAt: n.photoUploadedAt } : {}),
             ...(n.physicalVerified !== undefined ? { physicalVerified: n.physicalVerified } : {}),
+            ...(n.visibleToUser !== undefined ? { visibleToUser: n.visibleToUser } : {}),
           };
-          await prisma.node.upsert({
+          const nodeData = {
+            campusId: n.campusId || defaultCampusId,
+            floorId,
+            type: n.type as any,
+            name: n.name || null,
+            latitude: n.lat ?? null,
+            longitude: n.lng ?? null,
+            x: n.x ?? null,
+            y: n.y ?? null,
+            metadata: Object.keys(nodeMeta).length > 0 ? nodeMeta : undefined,
+          };
+          return prisma.node.upsert({
             where: { id: n.id },
-            update: {
-              campusId: n.campusId || defaultCampusId,
-              floorId,
-              type: n.type as any,
-              name: n.name || null,
-              latitude: n.lat ?? null,
-              longitude: n.lng ?? null,
-              x: n.x ?? null,
-              y: n.y ?? null,
-              metadata: Object.keys(nodeMeta).length > 0 ? nodeMeta : undefined,
-            },
-            create: {
-              id: n.id,
-              campusId: n.campusId || defaultCampusId,
-              floorId,
-              type: n.type as any,
-              name: n.name || null,
-              latitude: n.lat ?? null,
-              longitude: n.lng ?? null,
-              x: n.x ?? null,
-              y: n.y ?? null,
-              metadata: Object.keys(nodeMeta).length > 0 ? nodeMeta : undefined,
-            },
-          }).catch((e) => console.warn(`Node ${n.id} upsert deferred:`, e?.message));
-        }
+            update: nodeData,
+            create: { id: n.id, ...nodeData },
+          }).catch((e) => console.warn(`Node ${n.id} upsert notice:`, e?.message));
+        });
       }
 
-      if (edges && Array.isArray(edges)) {
-        const dbNodes = await prisma.node.findMany({ select: { id: true } }).catch(() => []);
-        const validNodeIds = new Set([
-          ...(nodes || []).map((n) => n.id),
-          ...dbNodes.map((n) => n.id),
-        ]);
-        for (const e of edges) {
+      // 4.4 Edges (O(1) in-memory existence checks, zero N+1 findUnique roundtrips)
+      if (edges && Array.isArray(edges) && edges.length > 0) {
+        const validNodeIds = new Set((nodes || []).map((n) => n.id));
+        const targetEdges = edges.filter((e) => {
           const fromId = e.fromNodeId || e.from;
           const toId = e.toNodeId || e.to;
-          if (fromId && toId && validNodeIds.has(fromId) && validNodeIds.has(toId)) {
-            const edgeType = (e.type as any) || "WALK";
-            const pathType = (e.pathType as any) || "WALK";
-            const distance = typeof e.distance === "number" && !isNaN(e.distance) ? e.distance : 1;
-            const bidirectional = e.bidirectional ?? true;
+          return fromId && toId && validNodeIds.has(fromId) && validNodeIds.has(toId);
+        });
 
-            try {
-              const existingByNodes = await prisma.edge.findUnique({
-                where: {
-                  fromNodeId_toNodeId_type: {
-                    fromNodeId: fromId,
-                    toNodeId: toId,
-                    type: edgeType,
-                  },
-                },
-              });
+        await runInPoolChunks(targetEdges, async (e) => {
+          const fromId = e.fromNodeId || e.from;
+          const toId = e.toNodeId || e.to;
+          const edgeType = (e.type as any) || "WALK";
+          const pathType = (e.pathType as any) || "WALK";
+          const distance = typeof e.distance === "number" && !isNaN(e.distance) ? e.distance : 1;
+          const bidirectional = e.bidirectional ?? true;
+          const edgeKey = `${fromId}_${toId}_${edgeType}`;
+          const existingId = existingEdgeMap.get(edgeKey);
 
-              if (existingByNodes) {
-                await prisma.edge.update({
-                  where: { id: existingByNodes.id },
-                  data: {
-                    fromNodeId: fromId,
-                    toNodeId: toId,
-                    type: edgeType,
-                    ...(pathType ? { pathType: pathType as any } : {}),
-                    distance,
-                    bidirectional,
-                    status: "PUBLISHED",
-                  },
-                });
-              } else {
-                await prisma.edge.upsert({
-                  where: { id: e.id },
-                  update: {
-                    fromNodeId: fromId,
-                    toNodeId: toId,
-                    type: edgeType,
-                    ...(pathType ? { pathType: pathType as any } : {}),
-                    distance,
-                    bidirectional,
-                    status: "PUBLISHED",
-                  },
-                  create: {
-                    id: e.id,
-                    fromNodeId: fromId,
-                    toNodeId: toId,
-                    type: edgeType,
-                    ...(pathType ? { pathType: pathType as any } : {}),
-                    distance,
-                    bidirectional,
-                    status: "PUBLISHED",
-                  },
-                });
-              }
-            } catch (err: any) {
-              console.warn(`Edge ${e.id} upsert notice:`, err?.message);
-            }
+          const edgeData = {
+            fromNodeId: fromId,
+            toNodeId: toId,
+            type: edgeType,
+            ...(pathType ? { pathType: pathType as any } : {}),
+            distance,
+            bidirectional,
+            status: "PUBLISHED" as const,
+          };
+
+          if (existingId) {
+            return prisma.edge.update({
+              where: { id: existingId },
+              data: edgeData,
+            }).catch((err) => console.warn(`Edge ${e.id} update notice:`, err?.message));
+          } else {
+            return prisma.edge.upsert({
+              where: { id: e.id },
+              update: edgeData,
+              create: { id: e.id, ...edgeData },
+            }).catch((err) => console.warn(`Edge ${e.id} upsert notice:`, err?.message));
           }
-        }
+        });
       }
 
-      if (obstacles && Array.isArray(obstacles)) {
-        for (const obs of obstacles) {
-          const floorId = obs.floorId && obs.floorId !== "f-out" ? obs.floorId : null;
-          await prisma.obstacle.upsert({
-            where: { id: obs.id },
-            update: {
+      // 4.5 Obstacles & Destinations in parallel
+      const trailingTasks: Promise<any>[] = [];
+
+      if (obstacles && Array.isArray(obstacles) && obstacles.length > 0) {
+        trailingTasks.push(
+          runInPoolChunks(obstacles, async (obs) => {
+            const floorId = obs.floorId && obs.floorId !== "f-out" ? obs.floorId : null;
+            const obsData = {
               campusId: obs.campusId || defaultCampusId,
               floorId,
               x: obs.x ?? 0,
@@ -313,44 +353,38 @@ export async function publishDraftGraph(
               edgeIds: obs.edgeIds || [],
               reason: obs.reason || null,
               expiresAt: obs.expiresAt ? new Date(obs.expiresAt) : null,
-            },
-            create: {
-              id: obs.id,
-              campusId: obs.campusId || defaultCampusId,
-              floorId,
-              x: obs.x ?? 0,
-              y: obs.y ?? 0,
-              radius: obs.radius ?? 15,
-              edgeIds: obs.edgeIds || [],
-              reason: obs.reason || null,
-              expiresAt: obs.expiresAt ? new Date(obs.expiresAt) : null,
-            },
-          }).catch((err) => console.warn(`Obstacle ${obs.id} upsert deferred:`, err?.message));
-        }
+            };
+            return prisma.obstacle.upsert({
+              where: { id: obs.id },
+              update: obsData,
+              create: { id: obs.id, ...obsData },
+            }).catch((err) => console.warn(`Obstacle ${obs.id} upsert notice:`, err?.message));
+          })
+        );
       }
 
-      if (destinations && Array.isArray(destinations)) {
+      if (destinations && Array.isArray(destinations) && destinations.length > 0) {
         const validNodeIds = new Set((nodes || []).map((n) => n.id));
-        for (const d of destinations) {
-          if (d.nodeId && validNodeIds.has(d.nodeId)) {
-            await prisma.destination.upsert({
+        const targetDests = destinations.filter((d) => d.nodeId && validNodeIds.has(d.nodeId));
+        trailingTasks.push(
+          runInPoolChunks(targetDests, async (d) => {
+            const destData = {
+              campusId: defaultCampusId,
+              nodeId: d.nodeId!,
+              name: d.name,
+              category: d.category || "Custom",
+            };
+            return prisma.destination.upsert({
               where: { id: d.id },
-              update: {
-                campusId: defaultCampusId,
-                nodeId: d.nodeId,
-                name: d.name,
-                category: d.category || "Custom",
-              },
-              create: {
-                id: d.id,
-                campusId: defaultCampusId,
-                nodeId: d.nodeId,
-                name: d.name,
-                category: d.category || "Custom",
-              },
-            }).catch((err) => console.warn(`Destination ${d.id} upsert deferred:`, err?.message));
-          }
-        }
+              update: destData,
+              create: { id: d.id, ...destData },
+            }).catch((err) => console.warn(`Destination ${d.id} upsert notice:`, err?.message));
+          })
+        );
+      }
+
+      if (trailingTasks.length > 0) {
+        await Promise.all(trailingTasks);
       }
     } catch (e) {
       console.warn("Failed to persist published graph to Prisma database:", e);
@@ -436,6 +470,7 @@ export async function getRelationalGraphFromDatabase(): Promise<DraftSnapshot | 
         lat: n.latitude !== undefined ? n.latitude : (n.lat !== undefined ? n.lat : undefined),
         lng: n.longitude !== undefined ? n.longitude : (n.lng !== undefined ? n.lng : undefined),
         searchable: n.searchable ?? true,
+        visibleToUser: n.visibleToUser !== undefined ? n.visibleToUser : (meta.visibleToUser !== undefined ? meta.visibleToUser : true),
         photoUrl: n.photoUrl || meta.photoUrl || undefined,
         photoUploadedAt: n.photoUploadedAt || meta.photoUploadedAt || undefined,
         physicalVerified: n.physicalVerified !== undefined ? n.physicalVerified : meta.physicalVerified,
@@ -505,7 +540,15 @@ export async function getRelationalGraphFromDatabase(): Promise<DraftSnapshot | 
   }
 }
 
+export function invalidatePublishedCache() {
+  activePublishedSnapshot = null;
+}
+
 export async function getActivePublishedGraph() {
+  if (activePublishedSnapshot) {
+    return activePublishedSnapshot;
+  }
+
   if (prisma) {
     try {
       const dbRecord = (await prisma.publishedGraph.findUnique({

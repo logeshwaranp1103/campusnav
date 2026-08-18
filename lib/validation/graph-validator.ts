@@ -215,10 +215,10 @@ export function validateCampusGraph(
       noDisconnectedGraphPassed = false;
       issues.push({
         id: "disconnected-components",
-        severity: "CRITICAL",
+        severity: "WARNING",
         code: "DISCONNECTED_SUBGRAPH",
         title: `Disconnected Subgraphs Found (${unreachableCount} isolated nodes)`,
-        description: `The navigation graph contains separate isolated clusters that cannot reach each other.`,
+        description: `The navigation graph contains separate isolated clusters that cannot reach each other. Connect nodes with edges to enable complete routing.`,
       });
     }
   }
@@ -316,7 +316,7 @@ export function validateCampusGraph(
         floorsReachablePassed = false;
         issues.push({
           id: `no-stair-${fl.id}`,
-          severity: "CRITICAL",
+          severity: "WARNING",
           code: "INVALID_STAIR_CONNECTION",
           title: `No Stairs/Lifts on Floor: "${fl.name}"`,
           description: `Floor "${fl.name}" has no vertical transit nodes (STAIR/LIFT). Visitors cannot change floors.`,
@@ -349,7 +349,7 @@ export function validateCampusGraph(
           const targetNode = nodeMap.get(targetNodeId);
           issues.push({
             id: `unreachable-dest-${dest.id}`,
-            severity: "CRITICAL",
+            severity: "WARNING",
             code: "UNREACHABLE_DESTINATION",
             title: `Unreachable Destination: "${dest.name}"`,
             description: `Dijkstra pathfinding could not calculate a route to "${dest.name}".`,

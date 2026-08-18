@@ -1,8 +1,19 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
+import { requireAdminSession } from "@/lib/auth/auth";
 
-export async function POST() {
+export async function POST(req: Request) {
   try {
+    const user = await requireAdminSession(req).catch(() => null);
+    if (!user) {
+      return NextResponse.json({ error: "Unauthorized: Admin session required to reset database." }, { status: 401 });
+    }
+
+    const body = await req.json().catch(() => ({}));
+    if (body.confirm !== "RESET_CAMPUSNAV_DATABASE") {
+      return NextResponse.json({ error: "Explicit confirmation parameter 'confirm: RESET_CAMPUSNAV_DATABASE' is required." }, { status: 400 });
+    }
+
     if (prisma) {
       // Execute single TRUNCATE CASCADE query to safely clear all tables in one connection
       await prisma.$executeRawUnsafe(`

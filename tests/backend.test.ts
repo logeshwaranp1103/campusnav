@@ -10,19 +10,19 @@ import { prisma } from "../lib/db";
 describe("Production Backend & API Services", () => {
   const testBuildingIds = ["b-clean", "b-new-tech"];
   const testFloorIds = ["f-clean-1"];
-  const testNodeIds = ["n-ent-clean", "n-stair-bad"];
+  const testNodeIds = ["n-ent-clean", "n-stair-bad", "n-corr-2"];
+  const testEdgeIds = ["e-test-1"];
+  const testObstacleIds = ["obs-test-1"];
 
   const cleanupTestData = async () => {
     if (prisma) {
       try {
-        // Clean relational rows and snapshot tables created by tests
+        // Clean only the test relational rows created by tests - never wipe global tables
+        await prisma.edge.deleteMany({ where: { id: { in: testEdgeIds } } });
+        await prisma.obstacle.deleteMany({ where: { id: { in: testObstacleIds } } });
         await prisma.node.deleteMany({ where: { id: { in: testNodeIds } } });
         await prisma.floor.deleteMany({ where: { id: { in: testFloorIds } } });
         await prisma.building.deleteMany({ where: { id: { in: testBuildingIds } } });
-        await prisma.mapVersion.deleteMany();
-        await prisma.draftGraph.deleteMany();
-        await prisma.publishedGraph.deleteMany();
-        await prisma.auditLog.deleteMany();
       } catch (e) {}
     }
   };

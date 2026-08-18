@@ -150,18 +150,24 @@ export function getBuildingFootprintVertices(b: Building): LatLngPoint[] {
     ];
   }
 
-  if (b.lat && b.lng) {
-    const centerCanvas = gpsToCanvas(b.lat, b.lng);
-    const bw = b.width ?? 180;
-    const bh = b.height ?? 120;
-    const tl = canvasToGps(centerCanvas.x - bw / 2, centerCanvas.y - bh / 2);
-    const tr = canvasToGps(centerCanvas.x + bw / 2, centerCanvas.y - bh / 2);
-    const br = canvasToGps(centerCanvas.x + bw / 2, centerCanvas.y + bh / 2);
-    const bl = canvasToGps(centerCanvas.x - bw / 2, centerCanvas.y + bh / 2);
-    return [tl, tr, br, bl];
+  const centerLat = b.centerLat ?? b.lat;
+  const centerLng = b.centerLng ?? b.lng;
+  const bw = b.width ?? 180;
+  const bh = b.height ?? 120;
+  let centerCanvasX = b.x ?? 400;
+  let centerCanvasY = b.y ?? 300;
+
+  if (typeof centerLat === "number" && typeof centerLng === "number" && !isNaN(centerLat) && !isNaN(centerLng)) {
+    const centerCanvas = gpsToCanvas(centerLat, centerLng);
+    centerCanvasX = centerCanvas.x;
+    centerCanvasY = centerCanvas.y;
   }
 
-  return [];
+  const tl = canvasToGps(centerCanvasX - bw / 2, centerCanvasY - bh / 2);
+  const tr = canvasToGps(centerCanvasX + bw / 2, centerCanvasY - bh / 2);
+  const br = canvasToGps(centerCanvasX + bw / 2, centerCanvasY + bh / 2);
+  const bl = canvasToGps(centerCanvasX - bw / 2, centerCanvasY + bh / 2);
+  return [tl, tr, br, bl];
 }
 
 /**
@@ -226,3 +232,56 @@ export function evaluateBuildingContainment(
     reason: `Outside '${building.name}' (distance to boundary: ${distToBoundary}m, GPS accuracy: ${accuracyMeters}m)`,
   };
 }
+
+export interface DetectedBuildingResult {
+  isInside: boolean;
+  building: Building | null;
+  confidence: AccuracyConfidence;
+  distanceToBoundaryMeters: number;
+}
+
+/**
+ * Evaluates live GPS coordinates across all campus buildings to detect
+ * if the user is physically inside any building footprint.
+ */
+export function detectBuildingAtGps(
+  lat: number,
+  lng: number,
+  accuracyMeters: number = 10,
+  buildings: Building[] = []
+): DetectedBuildingResult {
+  if (!lat || !lng || isNaN(lat) || isNaN(lng) || !buildings || buildings.length === 0) {
+    return {
+      isInside: false,
+      building: null,
+      confidence: "INVALID",
+      distanceToBoundaryMeters: Infinity,
+    };
+  }
+
+  const conf = classifyGpsConfidence(accuracyMeters);
+
+  for (const b of buildings) {
+    const footprint = getBuildingFootprintVertices(b);
+    if (footprint.length < 3) continue;
+
+    const isInside = isPointInBuildingPolygon(lat, lng, footprint);
+    if (isInside) {
+      const dist = getDistanceToBuildingBoundary(lat, lng, footprint);
+      return {
+        isInside: true,
+        building: b,
+        confidence: conf,
+        distanceToBoundaryMeters: dist,
+      };
+    }
+  }
+
+  return {
+    isInside: false,
+    building: null,
+    confidence: conf,
+    distanceToBoundaryMeters: Infinity,
+  };
+}
+

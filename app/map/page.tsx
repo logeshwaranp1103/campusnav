@@ -32,16 +32,9 @@ export default function VisitorPage() {
     edges: Edge[];
     destinations: Destination[];
     obstacles: Obstacle[];
-  }>({
-    buildings: [],
-    floors: [],
-    nodes: [],
-    edges: [],
-    destinations: [],
-    obstacles: [],
-  });
+  }>(() => campusStore.getPublishedData());
 
-  const [version, setVersion] = useState("v1.0");
+  const [version, setVersion] = useState(() => campusStore.getPublishedVersion());
   const [activeFloorId, setActiveFloorId] = useState<string>("f-out");
 
   // Navigation State
@@ -727,7 +720,7 @@ export default function VisitorPage() {
           )}
 
           {/* Nodes */}
-          {currentFloorNodes.map((n) => {
+          {currentFloorNodes.filter((n) => n.visibleToUser === undefined || n.visibleToUser === true).map((n) => {
             const isRouteNode = routeNodes.some((rn) => rn.id === n.id);
             return (
               <g key={n.id} transform={`translate(${n.x}, ${n.y})`}>

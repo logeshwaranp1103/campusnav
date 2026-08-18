@@ -26,9 +26,6 @@ export async function POST(req: Request) {
       );
     }
 
-    // Update published snapshot in store
-    campusStore.publish();
-
     return NextResponse.json({
       success: true,
       version: result.version,

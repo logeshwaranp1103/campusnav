@@ -1,12 +1,13 @@
 import { NextResponse } from "next/server";
-import { campusStore } from "@/shared/lib/campus-store";
+import { getActivePublishedGraph } from "@/lib/services/publish-service";
 
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
   const q = (searchParams.get("q") ?? "").trim().toLowerCase();
   const limit = Number(searchParams.get("limit") ?? 8);
 
-  const data = campusStore.getPublishedData();
+  const published = await getActivePublishedGraph();
+  const data = published?.snapshot ?? { buildings: [], destinations: [] };
 
   const buildingDestinations = (data.buildings || []).map((b) => ({
     id: b.id,
@@ -15,7 +16,7 @@ export async function GET(req: Request) {
     aliases: [b.shortCode || "", b.name],
   }));
 
-  const allDestinations = [...data.destinations, ...buildingDestinations];
+  const allDestinations = [...(data.destinations || []), ...buildingDestinations];
 
   const scored = allDestinations
     .map((d) => {

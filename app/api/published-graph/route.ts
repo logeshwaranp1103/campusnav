@@ -1,11 +1,11 @@
 import { NextResponse } from "next/server";
-import { getActivePublishedGraph, publishDraftGraph } from "@/lib/services/publish-service";
+import { getActivePublishedGraph, publishDraftGraph, sanitizeSnapshotForPayload } from "@/lib/services/publish-service";
 
-export async function GET() {
+export async function GET(req: Request) {
   try {
     const publishedServiceData = await getActivePublishedGraph();
 
-    const data = publishedServiceData?.snapshot ?? {
+    const rawData = publishedServiceData?.snapshot ?? {
       buildings: [],
       floors: [],
       nodes: [],
@@ -14,15 +14,33 @@ export async function GET() {
       obstacles: [],
     };
 
+    const data = sanitizeSnapshotForPayload(rawData);
+    const version = publishedServiceData?.version ?? 1;
+    const publishedAt = publishedServiceData?.publishedAt ?? new Date();
+    const etag = `W/"v${version}-${new Date(publishedAt).getTime()}"`;
+
+    // 304 Not Modified check
+    const ifNoneMatch = req.headers.get("if-none-match");
+    if (ifNoneMatch && ifNoneMatch === etag) {
+      return new NextResponse(null, {
+        status: 304,
+        headers: {
+          ETag: etag,
+          "Cache-Control": "public, max-age=60, stale-while-revalidate=86400, s-maxage=3600",
+        },
+      });
+    }
+
     return NextResponse.json(
       {
-        publishedAt: publishedServiceData?.publishedAt ?? new Date(),
-        version: publishedServiceData?.version ?? 1,
+        publishedAt,
+        version,
         graph: data,
       },
       {
         headers: {
-          "Cache-Control": "no-store, max-age=0",
+          ETag: etag,
+          "Cache-Control": "public, max-age=60, stale-while-revalidate=86400, s-maxage=3600",
         },
       }
     );

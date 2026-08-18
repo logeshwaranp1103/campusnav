@@ -270,6 +270,71 @@ export function EntityManager() {
   const [copiedEntityPayload, setCopiedEntityPayload] = useState<{ category: EntityCategory; name: string; [key: string]: any } | null>(null);
   const [copiedRowId, setCopiedRowId] = useState<string | null>(null);
 
+  // Existing Node Visibility Management State
+  const [existingNodeSearchText, setExistingNodeSearchText] = useState("");
+  const [existingSelectedNodeId, setExistingSelectedNodeId] = useState("");
+  const [existingNodeVisibleToUser, setExistingNodeVisibleToUser] = useState(true);
+  const [isNodeSearchOpen, setIsNodeSearchOpen] = useState(false);
+  const nodeSearchContainerRef = useRef<HTMLDivElement>(null);
+
+  // Close combobox popover on outside click
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (
+        nodeSearchContainerRef.current &&
+        !nodeSearchContainerRef.current.contains(event.target as globalThis.Node)
+      ) {
+        setIsNodeSearchOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  const filteredExistingNodesForVisibility = useMemo(() => {
+    const q = existingNodeSearchText.trim().toLowerCase();
+    return storeData.nodes.filter((n) => {
+      if (!q) return true;
+      return (
+        (n.name && n.name.toLowerCase().includes(q)) ||
+        n.id.toLowerCase().includes(q) ||
+        (n.floorId && n.floorId.toLowerCase().includes(q)) ||
+        (n.type && n.type.toLowerCase().includes(q))
+      );
+    });
+  }, [storeData.nodes, existingNodeSearchText]);
+
+  const handleSelectNodeItem = (node: Node) => {
+    setExistingSelectedNodeId(node.id);
+    setExistingNodeSearchText(node.name || node.id);
+    setExistingNodeVisibleToUser(node.visibleToUser !== undefined ? node.visibleToUser : true);
+    setIsNodeSearchOpen(false);
+  };
+
+  const handleApplyExistingNodeVisibility = () => {
+    if (!existingSelectedNodeId) {
+      toast({ type: "error", title: "No Node Selected", description: "Please type and select an existing node first." });
+      return;
+    }
+    const found = storeData.nodes.find((n) => n.id === existingSelectedNodeId);
+    if (!found) {
+      toast({ type: "error", title: "Node Not Found", description: "The selected node was not found in the campus graph." });
+      return;
+    }
+
+    campusStore.updateNode(existingSelectedNodeId, {
+      visibleToUser: existingNodeVisibleToUser,
+    });
+
+    toast({
+      type: "success",
+      title: "Node Visibility Updated",
+      description: `Node "${found.name || found.id}" is now set to Visible: ${existingNodeVisibleToUser ? "YES" : "NO"}!`,
+    });
+
+    setStoreData({ ...campusStore.getWorkingData() });
+  };
+
   // Edit Object Modal State
   const [editingItem, setEditingItem] = useState<{ id: string; category: EntityCategory; name: string; raw: any } | null>(null);
   const [editForm, setEditForm] = useState({
@@ -303,6 +368,7 @@ export function EntityManager() {
     pathType: "WALK" as PathType,
     distance: 0,
     accessible: true,
+    visibleToUser: true,
     expiresAt: "",
     photoUrl: "",
     photoUploadedAt: "",
@@ -497,6 +563,7 @@ export function EntityManager() {
     floorId: "",
     type: "CORRIDOR" as NodeType,
     accessible: true,
+    visibleToUser: true,
     description: "",
   });
 
@@ -888,11 +955,12 @@ export function EntityManager() {
           lat,
           lng,
           searchable: true,
+          visibleToUser: nodeForm.visibleToUser ?? true,
         };
 
         campusStore.addNode(newNode);
         toast({ type: "success", title: "Node Created & Synced", description: `Node "${newNode.name}" added to Store & CAD Editor!` });
-        setNodeForm((prev) => ({ ...prev, name: "", lat: "11.", lng: "77." }));
+        setNodeForm((prev) => ({ ...prev, name: "", lat: "11.", lng: "77.", visibleToUser: true }));
         setStoreData({ ...campusStore.getWorkingData() });
         break;
       }
@@ -1148,6 +1216,7 @@ export function EntityManager() {
       floorId: defaultFloors[0]?.id || "f-out",
       type: "CORRIDOR",
       accessible: true,
+      visibleToUser: true,
       description: "",
     });
 
@@ -1455,6 +1524,7 @@ export function EntityManager() {
           floorId: payload.floorId || nodeForm.floorId,
           type: payload.nodeType || "CORRIDOR",
           accessible: payload.accessible !== undefined ? payload.accessible : true,
+          visibleToUser: payload.visibleToUser !== undefined ? payload.visibleToUser : true,
           description: payload.description || "",
         });
         break;
@@ -1539,6 +1609,7 @@ export function EntityManager() {
       pathType: getEdgePathType(item.raw),
       distance: item.raw.distance !== undefined ? item.raw.distance : 0,
       accessible: item.raw.accessible !== undefined ? item.raw.accessible : true,
+      visibleToUser: item.raw.visibleToUser !== undefined ? item.raw.visibleToUser : true,
       expiresAt: item.raw.expiresAt || "",
       photoUrl: item.raw.photoUrl || "",
       photoUploadedAt: item.raw.photoUploadedAt || "",
@@ -1652,6 +1723,7 @@ export function EntityManager() {
           type: editForm.nodeType,
           floorId: editForm.floorId || editingItem.raw.floorId,
           accessible: editForm.accessible,
+          visibleToUser: editForm.visibleToUser !== undefined ? editForm.visibleToUser : true,
           photoUrl: editForm.photoUrl || undefined,
           photoUploadedAt: editForm.photoUploadedAt || undefined,
           physicalVerified: editForm.physicalVerified,
@@ -2132,7 +2204,7 @@ export function EntityManager() {
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
 
         {/* STEP 1: ENTITY TYPE SELECTOR (4 COLS - Hidden by default on mobile unless toggled) */}
-        <div className={cn("lg:col-span-4 space-y-3 transition-all duration-300", !showMobilePanel ? "hidden lg:block" : "block")}>
+        <div className={cn("lg:col-span-4 space-y-3 transition-all duration-300 flex flex-col lg:sticky lg:top-20 self-start", !showMobilePanel ? "hidden lg:block" : "block")}>
           <div className="flex items-center justify-between px-1">
             <div className="flex items-center gap-2">
               <span className="flex h-6 w-6 items-center justify-center rounded-full bg-[rgb(var(--primary))] text-white text-xs font-extrabold shadow-sm">1</span>
@@ -2143,7 +2215,7 @@ export function EntityManager() {
             </span>
           </div>
 
-          <div className="grid grid-cols-1 gap-2.5 max-h-[640px] overflow-y-auto pr-1 scrollbar-thin">
+          <div className="grid grid-cols-1 gap-2.5 max-h-[calc(100vh-220px)] overflow-y-auto pr-1 scrollbar-thin">
             {ENTITY_TYPES.map((item) => {
               const Icon = item.icon;
               const isSelected = selectedType === item.type;
@@ -2190,6 +2262,25 @@ export function EntityManager() {
                 </button>
               );
             })}
+          </div>
+
+          {/* CONTEXTUAL ENTITY GUIDANCE CARD TO FILL REMAINING SPACE */}
+          <div className="rounded-xl border border-[rgb(var(--border))] bg-[rgb(var(--card)/0.6)] p-3.5 space-y-2 text-xs text-[rgb(var(--muted-fg))] shadow-xs mt-auto">
+            <div className="flex items-center justify-between font-bold text-[rgb(var(--fg))]">
+              <span className="flex items-center gap-1.5"><Sparkles className="h-3.5 w-3.5 text-[rgb(var(--primary))]" /> Active Selection</span>
+              <Badge variant="primary" className="text-[10px] uppercase font-bold">{ENTITY_TYPES.find((t) => t.type === selectedType)?.label}</Badge>
+            </div>
+            <p className="text-[11px] leading-relaxed text-[rgb(var(--muted-fg))]">
+              {selectedType === "BUILDING" && "Configure 4-corner polygon footprints, GPS center coordinates, and floor counts for campus buildings."}
+              {selectedType === "NODE" && "Manage walkable junction nodes, GPS coordinates, wheelchair accessibility, and user visibility toggle."}
+              {selectedType === "ROOM" && "Create room destinations, link them to specific floors and entry nodes for search and navigation."}
+              {selectedType === "EDGE" && "Connect walkable corridors and EV transit routes between existing navigation nodes."}
+              {selectedType === "STAIR" && "Link multiple floors together with multi-level stairway connector nodes."}
+              {selectedType === "LIFT" && "Link accessible elevators across multiple building floor levels."}
+              {selectedType === "OBSTACLE" && "Add temporary or permanent hazard zones to automatically detour routing."}
+              {selectedType === "FLOOR" && "Create and order architectural floor levels within campus buildings."}
+              {selectedType === "PHOTO" && "Upload reference photos to verify physical landmarks and nodes."}
+            </p>
           </div>
         </div>
 
@@ -2813,7 +2904,7 @@ export function EntityManager() {
                   </div>
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                   <div>
                     <label className="text-xs font-bold text-[rgb(var(--fg))]">Latitude Coordinate</label>
                     <Input
@@ -2830,6 +2921,150 @@ export function EntityManager() {
                       className="mt-1.5"
                     />
                   </div>
+                  <div>
+                    <label className="text-xs font-bold text-[rgb(var(--fg))]">Visible to user</label>
+                    <select
+                      className="mt-1.5 w-full rounded-lg border border-[rgb(var(--border))] bg-[rgb(var(--bg))] p-2.5 text-sm font-medium"
+                      value={nodeForm.visibleToUser ? "YES" : "NO"}
+                      onChange={(e) => setNodeForm({ ...nodeForm, visibleToUser: e.target.value === "YES" })}
+                    >
+                      <option value="YES">YES</option>
+                      <option value="NO">NO</option>
+                    </select>
+                  </div>
+                </div>
+
+                {/* EXISTING NODE VISIBILITY MANAGEMENT CARD (COMBINED SEARCH & DROPDOWN) */}
+                <div className="rounded-xl border border-[rgb(var(--primary)/0.25)] bg-[rgb(var(--primary)/0.04)] p-4 space-y-3.5 mt-4">
+                  <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[rgb(var(--primary)/0.15)] pb-2.5">
+                    <div className="flex items-center gap-2">
+                      <Eye className="h-4 w-4 text-[rgb(var(--primary))]" />
+                      <div>
+                        <h4 className="text-xs font-extrabold uppercase tracking-wider text-[rgb(var(--fg))]">
+                          Set Visibility on Existing Navigation Node
+                        </h4>
+                        <p className="text-[11px] text-[rgb(var(--muted-fg))] mt-0.5">
+                          Type any letter to search existing nodes, choose from the auto-suggest list, and set Visible to user.
+                        </p>
+                      </div>
+                    </div>
+                    {existingSelectedNodeId && (
+                      <Badge variant={existingNodeVisibleToUser ? "success" : "default"} className="text-[11px]">
+                        Currently: {existingNodeVisibleToUser ? "YES (Visible)" : "NO (Hidden)"}
+                      </Badge>
+                    )}
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-12 gap-3 items-end">
+                    {/* 1. Combined Search Input & Autocomplete Dropdown List */}
+                    <div className="md:col-span-6 relative" ref={nodeSearchContainerRef}>
+                      <label className="text-xs font-bold text-[rgb(var(--fg))] block mb-1.5">
+                        Search & Select Node (Type to show list)
+                      </label>
+                      <div className="relative">
+                        <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-[rgb(var(--muted-fg))]" />
+                        <Input
+                          placeholder="Type node name, floor, or ID..."
+                          value={existingNodeSearchText}
+                          onChange={(e) => {
+                            setExistingNodeSearchText(e.target.value);
+                            setIsNodeSearchOpen(true);
+                          }}
+                          onFocus={() => setIsNodeSearchOpen(true)}
+                          className="pl-8 pr-8 text-xs h-9"
+                        />
+                        {existingNodeSearchText && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setExistingNodeSearchText("");
+                              setExistingSelectedNodeId("");
+                              setIsNodeSearchOpen(true);
+                            }}
+                            className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[rgb(var(--muted-fg))] hover:text-[rgb(var(--fg))]"
+                          >
+                            <X className="h-3.5 w-3.5" />
+                          </button>
+                        )}
+                      </div>
+
+                      {/* Dropdown Suggestions List (shown when typing or focused) */}
+                      {isNodeSearchOpen && (
+                        <div className="absolute left-0 right-0 top-full mt-1 z-50 max-h-56 overflow-y-auto rounded-xl border border-[rgb(var(--border))] bg-[rgb(var(--card))] shadow-xl p-1 space-y-0.5 scrollbar-thin">
+                          {filteredExistingNodesForVisibility.length === 0 ? (
+                            <div className="p-3 text-center text-xs text-[rgb(var(--muted-fg))]">
+                              No matching nodes found for "{existingNodeSearchText}"
+                            </div>
+                          ) : (
+                            filteredExistingNodesForVisibility.map((n) => {
+                              const isVis = n.visibleToUser !== undefined ? n.visibleToUser : true;
+                              const isSelected = n.id === existingSelectedNodeId;
+                              return (
+                                <button
+                                  key={n.id}
+                                  type="button"
+                                  onClick={() => handleSelectNodeItem(n)}
+                                  className={cn(
+                                    "w-full flex items-center justify-between p-2 rounded-lg text-left text-xs transition-colors",
+                                    isSelected
+                                      ? "bg-[rgb(var(--primary)/0.12)] text-[rgb(var(--primary))] font-bold"
+                                      : "hover:bg-[rgb(var(--muted)/0.5)] text-[rgb(var(--fg))]"
+                                  )}
+                                >
+                                  <div className="min-w-0 pr-2">
+                                    <div className="font-bold truncate">{n.name || n.id}</div>
+                                    <div className="text-[10px] text-[rgb(var(--muted-fg))] font-mono">
+                                      {n.type} · Floor: {n.floorId || "Outdoor"}
+                                    </div>
+                                  </div>
+                                  <Badge
+                                    variant={isVis ? "success" : "default"}
+                                    className="text-[9px] shrink-0 font-bold"
+                                  >
+                                    {isVis ? "YES" : "NO"}
+                                  </Badge>
+                                </button>
+                              );
+                            })
+                          )}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* 2. Visibility Option YES / NO */}
+                    <div className="md:col-span-3">
+                      <label className="text-xs font-bold text-[rgb(var(--fg))] block mb-1.5">
+                        Visible to user
+                      </label>
+                      <select
+                        className="w-full rounded-lg border border-[rgb(var(--border))] bg-[rgb(var(--bg))] p-2 text-xs font-bold h-9"
+                        value={existingNodeVisibleToUser ? "YES" : "NO"}
+                        onChange={(e) => setExistingNodeVisibleToUser(e.target.value === "YES")}
+                      >
+                        <option value="YES">YES (Visible)</option>
+                        <option value="NO">NO (Hidden)</option>
+                      </select>
+                    </div>
+
+                    {/* 3. Apply Button */}
+                    <div className="md:col-span-3">
+                      <Button
+                        type="button"
+                        size="sm"
+                        onClick={handleApplyExistingNodeVisibility}
+                        disabled={!existingSelectedNodeId}
+                        className="w-full h-9 gap-1.5 text-xs font-bold shadow-sm"
+                      >
+                        <CheckCircle2 className="h-3.5 w-3.5" /> Save Visibility
+                      </Button>
+                    </div>
+                  </div>
+
+                  {existingSelectedNodeId && (
+                    <div className="text-[11px] text-[rgb(var(--muted-fg))] pt-1 border-t border-[rgb(var(--border))/0.4]">
+                      Selected Node: <strong className="text-[rgb(var(--fg))]">{storeData.nodes.find((n) => n.id === existingSelectedNodeId)?.name || existingSelectedNodeId}</strong> (Floor: {storeData.nodes.find((n) => n.id === existingSelectedNodeId)?.floorId || "Outdoor"})
+                    </div>
+                  )}
                 </div>
               </div>
             )}
@@ -3550,6 +3785,30 @@ export function EntityManager() {
                                 <CheckCircle2 className="h-3 w-3" /> Verified
                               </span>
                             )}
+                            {item.category === "NODE" && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const currentVis = item.raw?.visibleToUser !== undefined ? item.raw.visibleToUser : true;
+                                  campusStore.updateNode(item.id, { visibleToUser: !currentVis });
+                                  toast({
+                                    type: "success",
+                                    title: "Visibility Toggled",
+                                    description: `Node "${item.name}" visibility set to ${!currentVis ? "YES" : "NO"}!`,
+                                  });
+                                  setStoreData({ ...campusStore.getWorkingData() });
+                                }}
+                                className={cn(
+                                  "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-bold transition-all cursor-pointer",
+                                  (item.raw?.visibleToUser !== undefined ? item.raw.visibleToUser : true)
+                                    ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-500/25"
+                                    : "bg-rose-500/15 text-rose-700 dark:text-rose-300 hover:bg-rose-500/25"
+                                )}
+                                title="Click to toggle Visible to user (YES / NO)"
+                              >
+                                {(item.raw?.visibleToUser !== undefined ? item.raw.visibleToUser : true) ? "👁 Visible: YES" : "✕ Visible: NO"}
+                              </button>
+                            )}
                           </div>
                         </td>
                         <td className="p-3.5 text-right">
@@ -3962,15 +4221,29 @@ export function EntityManager() {
                     </div>
                   </div>
 
-                  <label className="flex items-center gap-2 font-bold text-[rgb(var(--fg))] cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={editForm.accessible}
-                      onChange={(e) => setEditForm({ ...editForm, accessible: e.target.checked })}
-                      className="h-4 w-4 rounded border-[rgb(var(--border))] text-[rgb(var(--primary))]"
-                    />
-                    <span>Wheelchair Accessible Node</span>
-                  </label>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <label className="flex items-center gap-2 font-bold text-[rgb(var(--fg))] cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={editForm.accessible}
+                        onChange={(e) => setEditForm({ ...editForm, accessible: e.target.checked })}
+                        className="h-4 w-4 rounded border-[rgb(var(--border))] text-[rgb(var(--primary))]"
+                      />
+                      <span>Wheelchair Accessible Node</span>
+                    </label>
+
+                    <div>
+                      <label className="font-bold text-[rgb(var(--fg))] block mb-1">Visible to user</label>
+                      <select
+                        className="w-full rounded-lg border border-[rgb(var(--border))] bg-[rgb(var(--bg))] p-2 text-xs font-medium"
+                        value={editForm.visibleToUser ? "YES" : "NO"}
+                        onChange={(e) => setEditForm({ ...editForm, visibleToUser: e.target.value === "YES" })}
+                      >
+                        <option value="YES">YES</option>
+                        <option value="NO">NO</option>
+                      </select>
+                    </div>
+                  </div>
 
                   {/* Selective Node Reference Photo Section */}
                   <div className="rounded-xl border border-[rgb(var(--border))] bg-[rgb(var(--card))] p-3.5 space-y-3 shadow-xs">

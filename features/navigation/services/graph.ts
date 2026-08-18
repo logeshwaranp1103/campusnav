@@ -1,7 +1,8 @@
-import { campusStore } from "@/shared/lib/campus-store";
-import type { Edge, Node, Obstacle } from "@/shared/data/campus";
-import { buildAdjacencyGraph } from "@/lib/routing/graph";
-import { findShortestPath } from "@/lib/routing/dijkstra";
+import { campusStore } from "../../../shared/lib/campus-store";
+import type { Edge, Node, Obstacle } from "../../../shared/data/campus";
+import { buildAdjacencyGraph } from "../../../lib/routing/graph";
+import { findShortestPath } from "../../../lib/routing/dijkstra";
+import { calculateTurnAngle, turnIconFromAngle, getNodeVector } from "../../../lib/routing/directions";
 
 export type RouteInstruction = {
   text: string;
@@ -24,18 +25,23 @@ export type Route = {
 
 const WALK_SPEED = 1.3; // m/s
 
-import { validateCampusGraph } from "@/shared/lib/graph-validator";
-import { type TravelMode } from "@/lib/routing/edge-accessibility";
+import { validateCampusGraph } from "../../../shared/lib/graph-validator";
+import { type TravelMode } from "../../../lib/routing/edge-accessibility";
 
 export function shortestPath(
   startId: string,
   endId: string,
-  options?: { isDraftMode?: boolean; travelMode?: TravelMode }
+  options?: { isDraftMode?: boolean; travelMode?: TravelMode; graphData?: any }
 ): Route | null {
   if (!startId || !endId) return null;
 
-  const isDraft = options?.isDraftMode ?? false;
   const travelMode = options?.travelMode ?? "WALK";
+
+  if (options?.graphData) {
+    return computeShortestPathForData(options.graphData, startId, endId, travelMode);
+  }
+
+  const isDraft = options?.isDraftMode ?? false;
   const work = campusStore.getWorkingData();
 
   if (isDraft) {
@@ -89,6 +95,21 @@ function computeShortestPathForData(
     // 1. Direct node ID match
     if (nodeMap.has(paramId)) {
       return [paramId];
+    }
+
+    // Live Location query identifier fallback
+    if (
+      normalized === "dest-live-user-location" ||
+      normalized === "n-live-user" ||
+      normalized === "your location"
+    ) {
+      const outdoorNode = data.nodes.find(
+        (n) =>
+          n.floorId === "f-out" &&
+          (n.type === "BUILDING_ENTRANCE" || n.type === "OUTDOOR" || n.type === "OUTDOOR_PATH" || n.isEntranceNode)
+      );
+      if (outdoorNode) return [outdoorNode.id];
+      if (data.nodes.length > 0) return [data.nodes[0].id];
     }
 
     // 2. Direct exact node name match (Ground / Entrance node priority)
@@ -324,7 +345,7 @@ function buildInstructions(
 ): RouteInstruction[] {
   const out: RouteInstruction[] = [];
   let lastFloor = ns[0]?.floorId;
-  let prevBearing: number | null = null;
+  let prevVector: { dx: number; dy: number } | null = null;
 
   for (let i = 0; i < es.length; i++) {
     const edge = es[i];
@@ -336,32 +357,12 @@ function buildInstructions(
     const bld = floor ? buildingById(floor.buildingId) : undefined;
     const isFloorTransition = to.floorId !== lastFloor;
 
-    // Calculate bearing if coordinates are present
-    let currentBearing: number | null = null;
+    const currentVector = getNodeVector(fromNode, to);
     let turnType: "straight" | "slight-left" | "left" | "sharp-left" | "slight-right" | "right" | "sharp-right" | "u-turn" | null = null;
 
-    if (fromNode.x !== undefined && fromNode.y !== undefined && to.x !== undefined && to.y !== undefined) {
-      const dx = to.x - fromNode.x;
-      const dy = to.y - fromNode.y;
-      if (dx !== 0 || dy !== 0) {
-        let deg = (Math.atan2(dy, dx) * 180) / Math.PI;
-        if (deg < 0) deg += 360;
-        currentBearing = deg;
-
-        if (prevBearing !== null) {
-          let norm = ((deg - prevBearing) % 360 + 360) % 360;
-          if (norm > 180) norm -= 360;
-
-          if (norm >= -20 && norm <= 20) turnType = "straight";
-          else if (norm > 20 && norm <= 45) turnType = "slight-right";
-          else if (norm > 45 && norm <= 120) turnType = "right";
-          else if (norm > 120 && norm <= 160) turnType = "sharp-right";
-          else if (norm < -20 && norm >= -45) turnType = "slight-left";
-          else if (norm < -45 && norm >= -120) turnType = "left";
-          else if (norm < -120 && norm >= -160) turnType = "sharp-left";
-          else turnType = "u-turn";
-        }
-      }
+    if (prevVector !== null && !isFloorTransition && edge.type !== "LIFT" && edge.type !== "STAIRS") {
+      const angleDeg = calculateTurnAngle(prevVector, currentVector);
+      turnType = turnIconFromAngle(angleDeg) as any;
     }
 
     let text = "";
@@ -375,7 +376,7 @@ function buildInstructions(
       ];
       text = liftPhrases[i % liftPhrases.length];
       transitionType = "floor";
-      prevBearing = null;
+      prevVector = null;
     } else if (edge.type === "STAIRS") {
       const stairPhrases = [
         `Take the stairs to ${floor?.name ?? "next floor"}`,
@@ -384,11 +385,11 @@ function buildInstructions(
       ];
       text = stairPhrases[i % stairPhrases.length];
       transitionType = "floor";
-      prevBearing = null;
+      prevVector = null;
     } else if (isFloorTransition && edge.type === "RAMP") {
       text = `Take the ramp to ${floor?.name ?? "next floor"}`;
       transitionType = "floor";
-      prevBearing = currentBearing;
+      prevVector = currentVector;
     } else if (to.type === "ENTRANCE" && isFloorTransition) {
       const entrancePhrases = [
         `Enter ${bld?.name ?? "the building"}`,
@@ -398,11 +399,11 @@ function buildInstructions(
       ];
       text = entrancePhrases[i % entrancePhrases.length];
       transitionType = "outdoor->indoor";
-      prevBearing = currentBearing;
+      prevVector = currentVector;
     } else if (isFloorTransition) {
       text = `Walk outdoor path to ${floor?.name ?? "next floor"}`;
       transitionType = "floor";
-      prevBearing = currentBearing;
+      prevVector = currentVector;
     } else if (to.name) {
       if (turnType && turnType !== "straight") {
         switch (turnType) {
@@ -483,7 +484,7 @@ function buildInstructions(
           text = generalPhrases[i % generalPhrases.length];
         }
       }
-      prevBearing = currentBearing;
+      prevVector = currentVector;
     } else {
       if (turnType && turnType !== "straight") {
         const action = turnType.replace("-", " ");
@@ -497,7 +498,7 @@ function buildInstructions(
         ];
         text = walkPhrases[i % walkPhrases.length];
       }
-      prevBearing = currentBearing;
+      prevVector = currentVector;
     }
 
     out.push({

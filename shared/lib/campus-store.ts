@@ -239,7 +239,7 @@ class CampusStore {
     }
   }
 
-  private saveToLocalStorage() {
+  private persistWorkingDraft() {
     this.saveWorkingDraftToDatabase();
   }
 
@@ -297,7 +297,7 @@ class CampusStore {
     };
     this.auditLogs.unshift(entry);
     if (this.auditLogs.length > 100) this.auditLogs.pop();
-    this.saveToLocalStorage();
+    this.persistWorkingDraft();
     this.notify();
   }
 
@@ -361,7 +361,7 @@ class CampusStore {
 
   private notify(broadcast = true) {
     if (this.isBatching) return;
-    this.saveToLocalStorage();
+    this.persistWorkingDraft();
     this.listeners.forEach((l) => l());
     if (broadcast && this.broadcastChannel) {
       try {
@@ -924,7 +924,7 @@ class CampusStore {
       prevData: deleted,
     });
 
-    this.saveToLocalStorage();
+    this.persistWorkingDraft();
     this.notify();
   }
 
@@ -951,7 +951,7 @@ class CampusStore {
       timestamp: Date.now(),
       prevData: deleted,
     });
-    this.saveToLocalStorage();
+    this.persistWorkingDraft();
     this.notify();
   }
 
@@ -1093,7 +1093,7 @@ class CampusStore {
       timestamp: Date.now(),
       prevData: deleted,
     });
-    this.saveToLocalStorage();
+    this.persistWorkingDraft();
     this.notify();
   }
 
@@ -1124,7 +1124,7 @@ class CampusStore {
       timestamp: Date.now(),
       prevData: targetEdge,
     });
-    this.saveToLocalStorage();
+    this.persistWorkingDraft();
     this.notify();
   }
 
@@ -1143,7 +1143,7 @@ class CampusStore {
       timestamp: Date.now(),
       prevData: deleted,
     });
-    this.saveToLocalStorage();
+    this.persistWorkingDraft();
     this.notify();
   }
 
@@ -1162,7 +1162,7 @@ class CampusStore {
       timestamp: Date.now(),
       prevData: deleted,
     });
-    this.saveToLocalStorage();
+    this.persistWorkingDraft();
     this.notify();
   }
 
@@ -1181,7 +1181,7 @@ class CampusStore {
       timestamp: Date.now(),
       prevData: deleted,
     });
-    this.saveToLocalStorage();
+    this.persistWorkingDraft();
     this.notify();
   }
 
@@ -1205,7 +1205,7 @@ class CampusStore {
       description: "Cleared all campus graph elements",
       timestamp: Date.now(),
     });
-    this.saveToLocalStorage();
+    this.persistWorkingDraft();
     this.notify();
   }
 
@@ -1454,7 +1454,7 @@ class CampusStore {
     });
 
     if (createdAny) {
-      this.saveToLocalStorage();
+      this.persistWorkingDraft();
     }
   }
 
@@ -2136,6 +2136,17 @@ class CampusStore {
   }
 
   public async publishToServer(): Promise<{ success: boolean; version?: string; count?: number; error?: string }> {
+    const hasEntities =
+      this.buildings.length > 0 ||
+      this.nodes.length > 0 ||
+      this.floors.length > 0 ||
+      this.destinations.length > 0;
+
+    if (!hasEntities && this.isInitialized) {
+      console.warn("[CampusStore] Blocked publish attempt of an empty graph.");
+      return { success: false, error: "Cannot publish an empty campus graph." };
+    }
+
     // Commit working draft graph to published graph
     this.publishedGraph = {
       buildings: JSON.parse(JSON.stringify(this.buildings)),
@@ -2172,7 +2183,7 @@ class CampusStore {
 
     this.logAction("PUBLISH", `Map ${this.publishedVersion} (${this.buildings.length} Buildings)`);
     this.pendingChanges = [];
-    this.saveToLocalStorage();
+    this.persistWorkingDraft();
     this.notify();
     return { success: true, version: this.publishedVersion, count: this.buildings.length };
   }
@@ -2185,52 +2196,87 @@ class CampusStore {
   public async syncWithServer(): Promise<boolean> {
     if (typeof window === "undefined" || this.isSyncing) return false;
     this.isSyncing = true;
-    console.log("[CampusStore] Initial database synchronization started");
+    const isAdmin = typeof window !== "undefined" && window.location.pathname.startsWith("/admin");
     try {
-      // 1. Sync working draft graph from server PostgreSQL database
-      const resDraft = await fetch("/api/admin/campus-graph/draft", { cache: "no-store" });
-      if (resDraft.ok) {
-        const jsonDraft = await resDraft.json();
-        const draft = jsonDraft?.draft;
-        if (draft && typeof draft === "object") {
-          // Replace working state with server state
-          this.buildings = Array.isArray(draft.buildings) ? draft.buildings : [];
-          this.floors = Array.isArray(draft.floors) ? draft.floors : [];
-          this.nodes = Array.isArray(draft.nodes) ? draft.nodes : [];
-          this.edges = Array.isArray(draft.edges) ? draft.edges : [];
-          this.destinations = Array.isArray(draft.destinations) ? draft.destinations : [];
-          this.events = Array.isArray(draft.events) ? draft.events : [];
-          this.obstacles = Array.isArray(draft.obstacles) ? draft.obstacles : [];
-          this.stairGroups = Array.isArray(draft.stairGroups) ? draft.stairGroups : [];
-          this.liftGroups = Array.isArray(draft.liftGroups) ? draft.liftGroups : [];
-          this.doors = Array.isArray(draft.doors) ? draft.doors : [];
-          this.ensureDefaultGroundFloors();
-          this.syncVerticalGroupPositions();
-          (this.stairGroups || []).forEach((sg) => this.rebuildStairGroupConnections(sg));
-          this.autoConnectMatchingVerticalNodesAcrossFloors();
+      if (isAdmin) {
+        // Admin: fetch draft and published graph in parallel
+        const [resDraft, resPub] = await Promise.all([
+          fetch("/api/admin/campus-graph/draft"),
+          fetch("/api/published-graph"),
+        ]);
+
+        if (resDraft.ok) {
+          const jsonDraft = await resDraft.json();
+          const draft = jsonDraft?.draft;
+          if (draft && typeof draft === "object") {
+            this.buildings = Array.isArray(draft.buildings) ? draft.buildings : [];
+            this.floors = Array.isArray(draft.floors) ? draft.floors : [];
+            this.nodes = Array.isArray(draft.nodes) ? draft.nodes : [];
+            this.edges = Array.isArray(draft.edges) ? draft.edges : [];
+            this.destinations = Array.isArray(draft.destinations) ? draft.destinations : [];
+            this.events = Array.isArray(draft.events) ? draft.events : [];
+            this.obstacles = Array.isArray(draft.obstacles) ? draft.obstacles : [];
+            this.stairGroups = Array.isArray(draft.stairGroups) ? draft.stairGroups : [];
+            this.liftGroups = Array.isArray(draft.liftGroups) ? draft.liftGroups : [];
+            this.doors = Array.isArray(draft.doors) ? draft.doors : [];
+            this.ensureDefaultGroundFloors();
+            this.syncVerticalGroupPositions();
+            (this.stairGroups || []).forEach((sg) => this.rebuildStairGroupConnections(sg));
+            this.autoConnectMatchingVerticalNodesAcrossFloors();
+          }
+        }
+
+        if (resPub.ok) {
+          const jsonPub = await resPub.json();
+          const graph = jsonPub?.graph;
+          if (graph) {
+            this.publishedGraph = {
+              buildings: graph.buildings || [],
+              floors: graph.floors || [],
+              nodes: graph.nodes || [],
+              edges: graph.edges || [],
+              destinations: graph.destinations || [],
+              events: graph.events || [],
+              obstacles: graph.obstacles || [],
+              stairGroups: graph.stairGroups || [],
+              liftGroups: graph.liftGroups || [],
+              doors: graph.doors || [],
+            };
+          }
+        }
+      } else {
+        // Visitor: fetch only the published graph
+        const resPub = await fetch("/api/published-graph");
+        if (resPub.ok) {
+          const jsonPub = await resPub.json();
+          const graph = jsonPub?.graph;
+          if (graph) {
+            this.publishedGraph = {
+              buildings: graph.buildings || [],
+              floors: graph.floors || [],
+              nodes: graph.nodes || [],
+              edges: graph.edges || [],
+              destinations: graph.destinations || [],
+              events: graph.events || [],
+              obstacles: graph.obstacles || [],
+              stairGroups: graph.stairGroups || [],
+              liftGroups: graph.liftGroups || [],
+              doors: graph.doors || [],
+            };
+            this.buildings = graph.buildings || [];
+            this.floors = graph.floors || [];
+            this.nodes = graph.nodes || [];
+            this.edges = graph.edges || [];
+            this.destinations = graph.destinations || [];
+            this.events = graph.events || [];
+            this.obstacles = graph.obstacles || [];
+            this.stairGroups = graph.stairGroups || [];
+            this.liftGroups = graph.liftGroups || [];
+            this.doors = graph.doors || [];
+          }
         }
       }
 
-      // 2. Sync published graph from server PostgreSQL database
-      const resPub = await fetch("/api/published-graph", { cache: "no-store" });
-      if (resPub.ok) {
-        const jsonPub = await resPub.json();
-        const graph = jsonPub?.graph;
-        if (graph) {
-          this.publishedGraph = {
-            buildings: graph.buildings || [],
-            floors: graph.floors || [],
-            nodes: graph.nodes || [],
-            edges: graph.edges || [],
-            destinations: graph.destinations || [],
-            events: graph.events || [],
-            obstacles: graph.obstacles || [],
-            stairGroups: graph.stairGroups || [],
-            liftGroups: graph.liftGroups || [],
-            doors: graph.doors || [],
-          };
-        }
-      }
       const hasWorkingEntities =
         this.buildings.length > 0 ||
         this.nodes.length > 0 ||
@@ -2244,15 +2290,17 @@ class CampusStore {
     } finally {
       this.isSyncing = false;
       this.isInitialized = true;
-      console.log("[CampusStore] Initial database synchronization completed");
-      console.log("[CampusStore] Automatic persistence enabled");
       this.notify();
     }
   }
 
   public async resetEntireDatabase(): Promise<{ success: boolean; message?: string; error?: string }> {
     try {
-      const res = await fetch("/api/admin/reset-database", { method: "POST" });
+      const res = await fetch("/api/admin/reset-database", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ confirm: "RESET_CAMPUSNAV_DATABASE" }),
+      });
       const data = await res.json().catch(() => ({}));
       if (res.ok && data.success !== false) {
         this.buildings = [];
@@ -2278,13 +2326,8 @@ class CampusStore {
           liftGroups: [],
           doors: [],
         };
-        if (typeof localStorage !== "undefined") {
-          try {
-            localStorage.clear();
-          } catch (e) {}
-        }
         this.notify();
-        return { success: true, message: "Database wiped and local storage cleared." };
+        return { success: true, message: "Database wiped." };
       }
       return { success: false, error: data.error || "Failed to reset database." };
     } catch (err: unknown) {
@@ -2292,18 +2335,8 @@ class CampusStore {
     }
   }
 
-  public clearLocalStorageData(): void {
-    if (typeof localStorage !== "undefined") {
-      try {
-        localStorage.removeItem("campusnav_working_store_v4");
-        localStorage.removeItem("cad_editor_fullscreen_active");
-        localStorage.removeItem("campusnav_copied_attributes");
-        localStorage.clear();
-        console.log("[CampusStore] Local storage cleared.");
-      } catch (e) {
-        console.warn("Failed to clear local storage:", e);
-      }
-    }
+  public clearWorkingStore(): void {
+    this.resetToInitialData(true);
   }
 
   // ── Named Checkpoints ────────────────────────────────────
@@ -2328,7 +2361,7 @@ class CampusStore {
       },
     };
     this.checkpoints.unshift(cp);
-    this.saveToLocalStorage();
+    this.persistWorkingDraft();
     this.notify();
     return cp;
   }
@@ -2355,7 +2388,7 @@ class CampusStore {
         pendingChanges: JSON.parse(JSON.stringify(this.pendingChanges)),
       },
     };
-    this.saveToLocalStorage();
+    this.persistWorkingDraft();
     this.notify();
     return true;
   }
@@ -2382,7 +2415,7 @@ class CampusStore {
       this.pendingChanges = JSON.parse(JSON.stringify(cp.snapshot.pendingChanges));
     }
     this.logAction("UPDATE", `Restored Checkpoint "${cp.name}"`);
-    this.saveToLocalStorage();
+    this.persistWorkingDraft();
     this.notify();
     return true;
   }
@@ -2423,7 +2456,7 @@ class CampusStore {
     const deleted = this.doors[idx];
     this.doors.splice(idx, 1);
     this.generateGraphSuggestions(deleted.floorId);
-    this.saveToLocalStorage();
+    this.persistWorkingDraft();
     this.notify();
   }
 
@@ -2530,7 +2563,7 @@ class CampusStore {
     this.events = this.events.filter((ev) => !idSet.has(ev.id));
     this.buildings = this.buildings.filter((b) => !idSet.has(b.id));
 
-    this.saveToLocalStorage();
+    this.persistWorkingDraft();
     this.notify();
   }
 
@@ -2618,7 +2651,7 @@ class CampusStore {
     this.doors = this.doors.filter((dr) => !idSet.has(dr.id));
     this.obstacles = this.obstacles.filter((o) => !idSet.has(o.id));
     this.events = this.events.filter((ev) => !idSet.has(ev.id));
-    this.saveToLocalStorage();
+    this.persistWorkingDraft();
     this.notify();
   }
 
@@ -2673,7 +2706,7 @@ class CampusStore {
 
   public deleteCheckpoint(checkpointId: string) {
     this.checkpoints = this.checkpoints.filter((c) => c.id !== checkpointId);
-    this.saveToLocalStorage();
+    this.persistWorkingDraft();
     this.notify();
   }
 
@@ -2704,7 +2737,7 @@ class CampusStore {
     };
     try {
       this.memoryDraft = JSON.stringify(draftPayload);
-      this.saveToLocalStorage();
+      this.persistWorkingDraft();
       this.logAction("UPDATE", `Saved Draft "${draftName}"`);
       this.notify();
       return { success: true, timestamp, name: draftName };
@@ -2806,7 +2839,7 @@ class CampusStore {
           if (Array.isArray(s.liftGroups)) this.liftGroups = s.liftGroups;
           if (Array.isArray(s.doors)) this.doors = s.doors;
           if (Array.isArray(s.pendingChanges)) this.pendingChanges = s.pendingChanges;
-          this.saveToLocalStorage();
+          this.persistWorkingDraft();
           this.notify();
           return true;
         }
@@ -2838,7 +2871,7 @@ class CampusStore {
       return;
     }
     this.pendingChanges = [];
-    this.saveToLocalStorage();
+    this.persistWorkingDraft();
     this.logAction("UPDATE", "Discarded Draft Edits");
     this.notify();
   }
@@ -2860,7 +2893,7 @@ class CampusStore {
       if (Array.isArray(s.doors)) this.doors = s.doors;
       this.pendingChanges = [];
       this.logAction("UPDATE", "Imported Whole Campus Data");
-      this.saveToLocalStorage();
+      this.persistWorkingDraft();
       this.notify();
       return true;
     } catch (e) {

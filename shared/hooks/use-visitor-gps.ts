@@ -67,11 +67,14 @@ function createInitialState(initialCanvasPos = DEFAULT_CANVAS_POS): VisitorGpsSt
 // ── Hook ────────────────────────────────────────────────────────────────────
 
 export function useVisitorGps(
-  initialCanvasPos = DEFAULT_CANVAS_POS
+  initialCanvasPos = DEFAULT_CANVAS_POS,
+  options?: { autoStart?: boolean }
 ): VisitorGpsReturn {
   const [state, setState] = useState<VisitorGpsState>(() =>
     createInitialState(initialCanvasPos)
   );
+
+  const autoStart = options?.autoStart ?? true;
 
   // Refs to prevent duplicate watchers and hold stable references
   const watchIdRef = useRef<number | null>(null);
@@ -271,9 +274,11 @@ export function useVisitorGps(
   // ── Auto-start GPS on mount ─────────────────────────────────────────────
 
   useEffect(() => {
-    startTracking();
+    if (autoStart) {
+      startTracking();
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [autoStart]);
 
   // ── Tab visibility: pause/resume GPS when tab is hidden/shown ───────────
 

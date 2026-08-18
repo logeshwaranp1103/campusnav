@@ -16,20 +16,24 @@ import {
   AlertTriangle,
   Plus,
   Minus,
+  Building2,
+  Layers,
+  Check,
 } from "lucide-react";
 import { Button } from "@/shared/components/ui/button";
 import { Input } from "@/shared/components/ui/input";
 import { Badge } from "@/shared/components/ui/badge";
 import { useToast } from "@/shared/components/ui/toast";
 import { cn } from "@/shared/lib/utils";
-import type { Destination, Node as CampusNode, Edge } from "@/shared/data/campus";
+import type { Destination, Node as CampusNode, Edge, Building, Floor } from "@/shared/data/campus";
 import { shortestPath, type Route, type RouteInstruction } from "@/features/navigation/services/graph";
 import { campusStore } from "@/shared/lib/campus-store";
 import { CampusMap } from "./campus-map";
 import { LiveRoutePanel } from "./live-route-panel";
 import { TurnByTurnBar } from "./turn-by-turn-bar";
 import { getValidNavigationDestinations } from "@/shared/lib/destination-utils";
-import { findNearestNodeByGps } from "@/lib/geo/haversine";
+import { findNearestNodeByGps, findContextAwareNearestNode } from "@/lib/geo/haversine";
+import { detectBuildingAtGps } from "@/lib/geo/containment";
 import { useVisitorGps } from "@/shared/hooks/use-visitor-gps";
 import { useNavigationStore } from "@/features/navigation/navigation-store";
 
@@ -57,6 +61,12 @@ export function NavigateShell() {
   const [publishedData, setPublishedData] = useState(() => campusStore.getPublishedData());
   const gps = useVisitorGps();
   const navSession = useNavigationStore();
+
+  // Building & Floor Indoor Navigation Context (Feature 1 & 2)
+  const [detectedBuilding, setDetectedBuilding] = useState<Building | null>(null);
+  const [selectedFloorId, setSelectedFloorId] = useState<string>("f-out");
+  const [showFloorModal, setShowFloorModal] = useState(false);
+  const lastPromptedBuildingIdRef = useRef<string | null>(null);
 
   // Search state for FROM (Start Location)
   const [fromQuery, setFromQuery] = useState("");
@@ -147,7 +157,13 @@ export function NavigateShell() {
     });
   }, [toQuery, allDestinations]);
 
-  async function calculateRoute(startDest: Destination | null, endDest: Destination | null, currentStops: StopEntry[] = stops) {
+  async function calculateRoute(
+    startDest: Destination | null,
+    endDest: Destination | null,
+    currentStops: StopEntry[] = stops,
+    currentFloorId = selectedFloorId,
+    currentBuildingId: string | null | undefined = detectedBuilding?.id
+  ) {
     if (!endDest || !startDest) {
       setRoute(null);
       setLive(false);
@@ -158,6 +174,34 @@ export function NavigateShell() {
     setRoute(null);
     setLive(false);
     setLivePos(null);
+
+    // If startDest is Live Location, resolve context-aware nearest node
+    let liveStartNodeId: string | null = null;
+    if (startDest.id === YOUR_LOCATION_ID) {
+      const isInsideBld = Boolean(currentBuildingId && currentFloorId !== "f-out");
+      const nearestResult = findContextAwareNearestNode(
+        gps.lat,
+        gps.lng,
+        publishedData.nodes || [],
+        {
+          isInside: isInsideBld,
+          buildingId: currentBuildingId,
+          floorId: isInsideBld ? currentFloorId : "f-out",
+          floors: publishedData.floors,
+        }
+      );
+
+      if (!nearestResult.node) {
+        setLoading(false);
+        toast({
+          type: "error",
+          title: "Floor Navigation Unavailable",
+          description: nearestResult.error || "No navigation nodes are available on this floor.",
+        });
+        return;
+      }
+      liveStartNodeId = nearestResult.node.id;
+    }
 
     // Build ordered waypoints: start → stop1 → stop2 → ... → end
     const waypoints: Destination[] = [
@@ -177,15 +221,30 @@ export function NavigateShell() {
     for (let i = 0; i < waypoints.length - 1; i++) {
       const segStart = waypoints[i];
       const segEnd = waypoints[i + 1];
-      const segRoute = shortestPath(segStart.id, segEnd.id);
+
+      const segStartId =
+        segStart.id === YOUR_LOCATION_ID
+          ? (liveStartNodeId || segStart.nodeId || "n1")
+          : (segStart.nodeId || segStart.id);
+      const segEndId =
+        segEnd.id === YOUR_LOCATION_ID
+          ? (liveStartNodeId || segEnd.nodeId || "n1")
+          : (segEnd.nodeId || segEnd.id);
+
+      const segRoute = shortestPath(segStartId, segEndId);
       if (!segRoute) {
         setLoading(false);
-        toast({ type: "error", title: "No route found", description: `No path from "${segStart.name}" to "${segEnd.name}".` });
+        toast({
+          type: "error",
+          title: "No route found",
+          description: `No path from "${segStart.name}" to "${segEnd.name}".`,
+        });
         return;
       }
       totalDistance += segRoute.distance;
       totalDurationSec += segRoute.durationSec;
       if (segRoute.hasObstacles) hasObstacles = true;
+
       // Merge (avoid duplicating the connecting node)
       if (i === 0) {
         combinedNodes = [...segRoute.nodes];
@@ -215,7 +274,11 @@ export function NavigateShell() {
     setLoading(false);
 
     if (hasObstacles) {
-      toast({ type: "warning", title: "All Routes Have Obstacles", description: "No 100% obstacle-free path exists. Routing through the least obstructed path." });
+      toast({
+        type: "warning",
+        title: "All Routes Have Obstacles",
+        description: "No 100% obstacle-free path exists. Routing through the least obstructed path.",
+      });
     } else {
       const stopCount = currentStops.filter((s) => s.dest).length;
       toast({
@@ -223,6 +286,60 @@ export function NavigateShell() {
         title: stopCount > 0 ? `Multi-Stop Route (${stopCount + 2} waypoints)` : `Route to ${endDest.name}`,
         description: `${Math.round(totalDistance)} m · ~${Math.round(totalDurationSec / 60)} min`,
       });
+    }
+  }
+
+  function handleSelectFloor(floorId: string) {
+    setSelectedFloorId(floorId);
+    setShowFloorModal(false);
+
+    const bld = detectedBuilding;
+    useNavigationStore.getState().setIndoorContext(
+      bld?.id ?? null,
+      floorId,
+      "MANUAL_FLOOR_SELECTION",
+      "HIGH"
+    );
+
+    const nearestResult = findContextAwareNearestNode(
+      gps.lat,
+      gps.lng,
+      publishedData.nodes || [],
+      {
+        isInside: true,
+        buildingId: bld?.id,
+        floorId,
+        floors: publishedData.floors,
+      }
+    );
+
+    const floorName = (publishedData.floors || []).find((f) => f.id === floorId)?.name || "Floor";
+
+    if (!nearestResult.node) {
+      toast({
+        type: "error",
+        title: "Floor Unavailable",
+        description: nearestResult.error || "No navigation nodes are available on this floor.",
+      });
+      setRoute(null);
+      return;
+    }
+
+    const updatedDest: Destination = {
+      ...YOUR_LOCATION_DEST,
+      nodeId: nearestResult.node.id,
+      floorId,
+    };
+    setFromSelected(updatedDest);
+
+    toast({
+      type: "success",
+      title: "Floor Selected",
+      description: `Floor: ${floorName} (${bld?.name ?? "Building"}). Entry node: ${nearestResult.node.name || nearestResult.node.id}`,
+    });
+
+    if (toSelected) {
+      calculateRoute(updatedDest, toSelected, stops, floorId, bld?.id);
     }
   }
 
@@ -245,40 +362,121 @@ export function NavigateShell() {
       return;
     }
 
+    // Start tracking if not active
+    if (!gps.isTracking) {
+      gps.startTracking();
+    }
+
     // Use the hook's live GPS position if available
     if (gps.isGpsActive && gps.lat !== 0 && gps.lng !== 0) {
-      const { node: nearestNode } = findNearestNodeByGps(gps.lat, gps.lng, publishedData.nodes || [], "f-out");
-      const liveNodeId = nearestNode ? nearestNode.id : (publishedData.nodes[0]?.id ?? "n1");
-      const liveDest: Destination = {
-        ...YOUR_LOCATION_DEST,
-        nodeId: liveNodeId,
-      };
+      const detection = detectBuildingAtGps(
+        gps.lat,
+        gps.lng,
+        gps.accuracy || 10,
+        publishedData.buildings || []
+      );
 
-      setFromSelected(liveDest);
-      setFromQuery("Your Location");
-      setFromFocus(false);
-      if (nearestNode) {
-        setLivePos({ node: nearestNode, progress: 0 });
-      }
-      toast({
-        type: "success",
-        title: "Live Location On",
-        description: `Acquired live location near ${nearestNode?.name ?? "Campus node"}.`,
-      });
+      if (detection.isInside && detection.building) {
+        const bld = detection.building;
+        setDetectedBuilding(bld);
+        lastPromptedBuildingIdRef.current = bld.id;
 
-      if (toSelected) {
-        calculateRoute(liveDest, toSelected);
+        const bldFloors = (publishedData.floors || [])
+          .filter((f) => f.buildingId === bld.id)
+          .sort((a, b) => a.ordinal - b.ordinal);
+
+        let floorToUse = selectedFloorId;
+        if (bldFloors.length === 1) {
+          // Edge Case 3: Single-floor building -> auto select without prompting
+          floorToUse = bldFloors[0].id;
+          setSelectedFloorId(floorToUse);
+          setShowFloorModal(false);
+          useNavigationStore.getState().setIndoorContext(bld.id, floorToUse, "INDOOR_GRAPH_CONTEXT", "HIGH");
+        } else if (bldFloors.length > 1) {
+          if (!bldFloors.some((f) => f.id === selectedFloorId) || selectedFloorId === "f-out") {
+            const ground = bldFloors.find((f) => f.ordinal === 0) || bldFloors[0];
+            floorToUse = ground.id;
+            setSelectedFloorId(ground.id);
+          }
+          // Multi-floor building -> open prompt
+          setShowFloorModal(true);
+          useNavigationStore.getState().setIndoorContext(bld.id, floorToUse, "INDOOR_GRAPH_CONTEXT", "MEDIUM");
+        }
+
+        const nearestResult = findContextAwareNearestNode(
+          gps.lat,
+          gps.lng,
+          publishedData.nodes || [],
+          {
+            isInside: true,
+            buildingId: bld.id,
+            floorId: floorToUse,
+            floors: publishedData.floors,
+          }
+        );
+
+        const liveDest: Destination = {
+          ...YOUR_LOCATION_DEST,
+          nodeId: nearestResult.node?.id || "n1",
+          floorId: floorToUse,
+        };
+
+        setFromSelected(liveDest);
+        setFromQuery("Your Location");
+        setFromFocus(false);
+
+        if (nearestResult.node) {
+          setLivePos({ node: nearestResult.node, progress: 0 });
+        }
+
+        if (toSelected) {
+          calculateRoute(liveDest, toSelected, stops, floorToUse, bld.id);
+        }
+      } else {
+        // Outdoor user -> NEVER ask for floor
+        setDetectedBuilding(null);
+        setSelectedFloorId("f-out");
+        setShowFloorModal(false);
+        useNavigationStore.getState().setIndoorContext(null, "f-out", "OUTDOOR_GPS", "HIGH");
+
+        const nearestResult = findContextAwareNearestNode(
+          gps.lat,
+          gps.lng,
+          publishedData.nodes || [],
+          { isInside: false, floorId: "f-out" }
+        );
+
+        const liveDest: Destination = {
+          ...YOUR_LOCATION_DEST,
+          nodeId: nearestResult.node?.id || "n1",
+          floorId: "f-out",
+        };
+
+        setFromSelected(liveDest);
+        setFromQuery("Your Location");
+        setFromFocus(false);
+
+        if (nearestResult.node) {
+          setLivePos({ node: nearestResult.node, progress: 0 });
+        }
+
+        toast({
+          type: "success",
+          title: "Live Location On",
+          description: `Acquired outdoor location near ${nearestResult.node?.name ?? "Campus node"}.`,
+        });
+
+        if (toSelected) {
+          calculateRoute(liveDest, toSelected, stops, "f-out", null);
+        }
       }
     } else {
-      // GPS still acquiring — set up as "Your Location" and it will update via the useEffect below
+      // GPS still acquiring — set up as "Your Location"
       toast({
         type: "info",
         title: "Requesting Location...",
         description: "Please allow location access. Your position will update automatically.",
       });
-      if (!gps.isTracking) {
-        gps.startTracking();
-      }
       setFromSelected(YOUR_LOCATION_DEST);
       setFromQuery("Your Location");
       setFromFocus(false);
@@ -334,43 +532,8 @@ export function NavigateShell() {
     setRoute(null);
     setLive(false);
     setStops([]);
+    setShowFloorModal(false);
   }
-
-  // Feed live GPS position into navigation store for route progress, off-route detection & rerouting
-  useEffect(() => {
-    if (!gps.isGpsActive || (gps.lat === 0 && gps.lng === 0)) {
-      if (gps.status === "error" || gps.status === "unavailable") {
-        useNavigationStore.getState().setGpsSignalLost();
-      }
-      return;
-    }
-
-    const { node: nearestNode } = findNearestNodeByGps(gps.lat, gps.lng, publishedData.nodes || [], "f-out");
-    if (nearestNode) {
-      setLivePos((prev) => {
-        if (prev?.node.id === nearestNode.id) return prev;
-        return { node: nearestNode, progress: 0 };
-      });
-
-      // Auto-update the from destination nodeId to keep route calculation current
-      if (fromSelected?.id === YOUR_LOCATION_ID && fromSelected.nodeId !== nearestNode.id) {
-        const updatedDest: Destination = { ...YOUR_LOCATION_DEST, nodeId: nearestNode.id };
-        setFromSelected(updatedDest);
-      }
-    }
-
-    // Trigger Phase 2 Route Progress & Rerouting Update
-    const store = useNavigationStore.getState();
-    if (store.status === "NAVIGATING" || store.status === "OFF_ROUTE" || store.status === "GPS_SIGNAL_LOST") {
-      store.updateGpsProgress(
-        gps.lat,
-        gps.lng,
-        nearestNode,
-        publishedData.nodes || [],
-        (fromId, toId) => shortestPath(fromId, toId)
-      );
-    }
-  }, [gps.isGpsActive, gps.lat, gps.lng, gps.status, fromSelected?.id, publishedData.nodes]);
 
   function startLive() {
     setLive(true);
@@ -378,15 +541,6 @@ export function NavigateShell() {
     if (fromSelected && toSelected && route) {
       useNavigationStore.getState().startNavigationSession(fromSelected, toSelected, route);
     }
-  }
-
-  if (!mounted) {
-    return (
-      <div className="flex flex-1 items-center justify-center p-6 text-sm text-[rgb(var(--muted-fg))]">
-        <span className="h-5 w-5 animate-spin rounded-full border-2 border-[rgb(var(--primary))] border-t-transparent mr-2" />
-        Loading map and navigation data…
-      </div>
-    );
   }
 
   return (
@@ -483,6 +637,35 @@ export function NavigateShell() {
                 </motion.div>
               )}
             </AnimatePresence>
+
+            {/* Contextual Live Location Info & Floor Switcher */}
+            {fromSelected?.id === YOUR_LOCATION_ID && (
+              <div className="mt-1.5 flex items-center justify-between rounded-lg border border-emerald-600/30 bg-emerald-50 dark:bg-emerald-950/60 dark:border-emerald-500/40 px-2.5 py-1.5 text-xs shadow-xs">
+                <div className="flex items-center gap-1.5 min-w-0">
+                  {detectedBuilding ? (
+                    <>
+                      <Building2 className="h-3.5 w-3.5 shrink-0 text-emerald-800 dark:text-emerald-300" />
+                      <span className="truncate font-bold text-[11px] text-emerald-950 dark:text-emerald-100">
+                        Inside {detectedBuilding.name} · {publishedData.floors.find((f) => f.id === selectedFloorId)?.name || "Ground Floor"}
+                      </span>
+                    </>
+                  ) : (
+                    <>
+                      <Navigation2 className="h-3.5 w-3.5 shrink-0 text-emerald-800 dark:text-emerald-300 animate-pulse" />
+                      <span className="truncate font-bold text-[11px] text-emerald-950 dark:text-emerald-100">Outdoor Campus Location</span>
+                    </>
+                  )}
+                </div>
+                {detectedBuilding && publishedData.floors.filter((f) => f.buildingId === detectedBuilding.id).length > 1 && (
+                  <button
+                    onClick={() => setShowFloorModal(true)}
+                    className="ml-2 shrink-0 rounded px-2 py-0.5 bg-emerald-700 hover:bg-emerald-800 dark:bg-emerald-600 dark:hover:bg-emerald-500 text-white text-[10px] font-bold transition-colors cursor-pointer shadow-xs"
+                  >
+                    Change Floor
+                  </button>
+                )}
+              </div>
+            )}
           </div>
 
           {/* Multi-Stop Fields */}
@@ -626,7 +809,7 @@ export function NavigateShell() {
         <div className="flex-1 overflow-y-auto p-3 pb-24 md:pb-4 scrollbar-thin [scrollbar-width:thin] [&::-webkit-scrollbar]:w-1 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-slate-300 dark:[&::-webkit-scrollbar-thumb]:bg-slate-700">
           {/* Only show PopularList when neither from nor to is chosen */}
           {!fromSelected && !toSelected && !route && (
-            <PopularList onPick={(d) => pickToDestination(d)} allDestinations={allDestinations} />
+            <PopularList onPick={(d) => pickToDestination(d)} allDestinations={allDestinations} mounted={mounted} />
           )}
 
           {/* If only one point is selected, guide the user to select the other without showing the route box */}
@@ -881,6 +1064,82 @@ export function NavigateShell() {
           {route && <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />}
         </button>
       </div>
+
+      {/* Indoor Floor Selection Modal (Feature 1) */}
+      <AnimatePresence>
+        {showFloorModal && detectedBuilding && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 12 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 12 }}
+              transition={{ duration: 0.2 }}
+              className="w-full max-w-sm rounded-2xl border bg-[rgb(var(--card))] p-5 shadow-2xl space-y-4"
+            >
+              <div className="flex items-start justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-[rgb(var(--primary)/0.12)] text-[rgb(var(--primary))] shrink-0">
+                    <Building2 className="h-5 w-5" />
+                  </div>
+                  <div>
+                    <div className="text-[10px] font-bold uppercase tracking-wider text-[rgb(var(--primary))]">
+                      Indoor Floor Detection
+                    </div>
+                    <h2 className="text-sm font-bold text-[rgb(var(--fg))]">
+                      You're inside {detectedBuilding.name}
+                    </h2>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setShowFloorModal(false)}
+                  className="rounded-lg p-1.5 text-[rgb(var(--muted-fg))] hover:bg-[rgb(var(--muted))] hover:text-[rgb(var(--fg))] transition-colors cursor-pointer"
+                  aria-label="Close Floor Selection"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+
+              <p className="text-xs text-[rgb(var(--muted-fg))] leading-relaxed">
+                Which floor are you currently on?
+              </p>
+
+              <div className="space-y-1.5 max-h-60 overflow-y-auto">
+                {publishedData.floors
+                  .filter((f) => f.buildingId === detectedBuilding.id)
+                  .sort((a, b) => a.ordinal - b.ordinal)
+                  .map((f) => {
+                    const isSelected = selectedFloorId === f.id;
+                    return (
+                      <button
+                        key={f.id}
+                        onClick={() => handleSelectFloor(f.id)}
+                        className={cn(
+                          "flex w-full items-center justify-between rounded-xl border p-3 text-left transition-all text-xs font-semibold cursor-pointer",
+                          isSelected
+                            ? "border-[rgb(var(--primary))] bg-[rgb(var(--primary)/0.1)] text-[rgb(var(--primary))] ring-1 ring-[rgb(var(--primary))]"
+                            : "border-[rgb(var(--border))] hover:bg-[rgb(var(--muted))] text-[rgb(var(--fg))]"
+                        )}
+                      >
+                        <div className="flex items-center gap-2.5">
+                          <Layers className="h-4 w-4 shrink-0 text-[rgb(var(--muted-fg))]" />
+                          <span>{f.name}</span>
+                        </div>
+                        {isSelected ? (
+                          <div className="flex items-center gap-1 text-[11px] text-[rgb(var(--primary))] font-bold">
+                            <Check className="h-3.5 w-3.5" />
+                            <span>Selected</span>
+                          </div>
+                        ) : (
+                          <span className="text-[11px] text-[rgb(var(--muted-fg))]">{f.code || `L${f.ordinal}`}</span>
+                        )}
+                      </button>
+                    );
+                  })}
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
@@ -900,16 +1159,19 @@ function Stat({ icon: Icon, label, value }: { icon: React.ComponentType<{ classN
 function PopularList({
   onPick,
   allDestinations,
+  mounted,
 }: {
   onPick: (d: Destination) => void;
   allDestinations: Destination[];
+  mounted?: boolean;
 }) {
   const items = useMemo(() => allDestinations.slice(0, 6), [allDestinations]);
 
+  if (mounted !== undefined && !mounted) return null;
   if (items.length === 0) return null;
 
   return (
-    <div>
+    <div suppressHydrationWarning>
       <div className="mb-3 text-[11px] font-semibold uppercase tracking-[0.16em] text-[rgb(var(--muted-fg))]">
         Popular destinations
       </div>

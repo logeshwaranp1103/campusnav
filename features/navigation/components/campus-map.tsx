@@ -38,7 +38,7 @@ export function CampusMap({ route, livePosition, progress, gps: passedGps, onNav
   const [showObstacles, setShowObstacles] = useState(true);
 
   // Avoid duplicate geolocation watcher by instantiating hook only when passedGps is missing
-  const internalGps = useVisitorGps();
+  const internalGps = useVisitorGps(undefined, { autoStart: !passedGps });
   const gps = passedGps ?? internalGps;
 
   useEffect(() => {
@@ -81,6 +81,17 @@ export function CampusMap({ route, livePosition, progress, gps: passedGps, onNav
 
   const allBuildings = publishedData.buildings;
   const allFloors = publishedData.floors;
+
+  if (!mounted) {
+    return (
+      <div className="relative h-full w-full select-none overflow-hidden touch-none bg-[#f8fafc] flex items-center justify-center" suppressHydrationWarning>
+        <div className="flex items-center gap-2 text-xs text-slate-400">
+          <span className="h-4 w-4 animate-spin rounded-full border-2 border-slate-400 border-t-transparent" />
+          <span>Loading map…</span>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="relative h-full w-full select-none overflow-hidden touch-none" suppressHydrationWarning>
@@ -417,35 +428,44 @@ function MapCanvas({
     [floorId, isGroundFloor, publishedData.floors, publishedData.buildings, connectedNodeIdsToActiveFloor, activeFloorStairGroupIds]
   );
 
-  const scopeNodes = allNodes.filter((n) => isNodeOnActiveFloor(n));
+  const scopeNodes = useMemo(() => {
+    return allNodes.filter((n) => isNodeOnActiveFloor(n) && (n.visibleToUser === undefined || n.visibleToUser === true));
+  }, [allNodes, isNodeOnActiveFloor]);
 
-  const scopeEdges = allEdges.filter((e) => {
-    const from = findNode(e.from);
-    const to = findNode(e.to);
-    if (!from || !to) return false;
-
-    const fromOutdoor = isNodeOnActiveFloor(from);
-    const toOutdoor = isNodeOnActiveFloor(to);
-
-    return (
-      (from.floorId === floorId && to.floorId === floorId) ||
-      (fromOutdoor && toOutdoor)
-    );
-  });
-
-  const routeNodes = route?.nodes.filter((n) => isNodeOnActiveFloor(n)) ?? [];
-
-  const routeEdges =
-    route?.edges.filter((e) => {
+  const scopeEdges = useMemo(() => {
+    return allEdges.filter((e) => {
       const from = findNode(e.from);
       const to = findNode(e.to);
       if (!from || !to) return false;
+
+      const fromOutdoor = isNodeOnActiveFloor(from);
+      const toOutdoor = isNodeOnActiveFloor(to);
+
       return (
-        from.floorId === floorId ||
-        to.floorId === floorId ||
-        (isNodeOnActiveFloor(from) && isNodeOnActiveFloor(to))
+        (from.floorId === floorId && to.floorId === floorId) ||
+        (fromOutdoor && toOutdoor)
       );
-    }) ?? [];
+    });
+  }, [allEdges, findNode, isNodeOnActiveFloor, floorId]);
+
+  const routeNodes = useMemo(() => {
+    return route?.nodes.filter((n) => isNodeOnActiveFloor(n)) ?? [];
+  }, [route?.nodes, isNodeOnActiveFloor]);
+
+  const routeEdges = useMemo(() => {
+    return (
+      route?.edges.filter((e) => {
+        const from = findNode(e.from);
+        const to = findNode(e.to);
+        if (!from || !to) return false;
+        return (
+          from.floorId === floorId ||
+          to.floorId === floorId ||
+          (isNodeOnActiveFloor(from) && isNodeOnActiveFloor(to))
+        );
+      }) ?? []
+    );
+  }, [route?.edges, findNode, isNodeOnActiveFloor, floorId]);
 
   const blockedEdgeIds = useMemo(() => {
     return getObstructedEdgeIds(allNodes, allEdges, publishedData.obstacles);
@@ -779,6 +799,7 @@ function MapCanvas({
     <svg
       ref={svgRef}
       viewBox={viewBoxStr}
+      suppressHydrationWarning
       onMouseDown={handleMouseDown}
       onMouseMove={handleMouseMove}
       onMouseUp={handleMouseUp}
@@ -1239,6 +1260,31 @@ function MapCanvas({
           />
           {/* Pulsing Blue GPS Marker Dot */}
           <circle r="8" fill="#3b82f6" stroke="#ffffff" strokeWidth="2.5" className="shadow-md" />
+        </g>
+      )}
+
+      {/* Dynamic Connector Line: Live GPS Position to Nearest Routing Entry Node */}
+      {gps && gps.isGpsActive && route && route.nodes.length > 0 && (route.nodes[0].floorId === floorId || floorId === "f-out") && (
+        <g pointerEvents="none">
+          <line
+            x1={gps.canvasPos.x}
+            y1={gps.canvasPos.y}
+            x2={route.nodes[0].x}
+            y2={route.nodes[0].y}
+            stroke="#3b82f6"
+            strokeWidth="2"
+            strokeDasharray="4 4"
+            strokeOpacity="0.85"
+            strokeLinecap="round"
+          />
+          <circle
+            cx={route.nodes[0].x}
+            cy={route.nodes[0].y}
+            r="3.5"
+            fill="#3b82f6"
+            stroke="#ffffff"
+            strokeWidth="1.5"
+          />
         </g>
       )}
 
