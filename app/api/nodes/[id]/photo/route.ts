@@ -204,21 +204,67 @@ export async function POST(
           select: { metadata: true },
         }).catch(() => null);
 
-        if (existingNode) {
-          const existingMeta = (existingNode?.metadata && typeof existingNode?.metadata === "object") ? existingNode.metadata : {};
-          const updatedMeta = {
-            ...existingMeta,
-            photoData: photoDataUri,
-            photoUrl: stableUrl,
-            photoUploadedAt: new Date().toISOString(),
-          };
+        const existingMeta = (existingNode?.metadata && typeof existingNode?.metadata === "object") ? existingNode.metadata : {};
+        const updatedMeta = {
+          ...existingMeta,
+          photoData: photoDataUri,
+          photoUrl: stableUrl,
+          photoUploadedAt: new Date().toISOString(),
+        };
 
+        if (existingNode) {
           await prisma.node.update({
             where: { id },
             data: {
               metadata: updatedMeta,
             },
           }).catch((e) => console.warn(`Notice: Node ${id} metadata update:`, e?.message));
+        } else {
+          await prisma.node.upsert({
+            where: { id },
+            update: { metadata: updatedMeta },
+            create: {
+              id,
+              campusId: "c1",
+              type: "HALLWAY",
+              metadata: updatedMeta,
+            },
+          }).catch(() => {});
+        }
+
+        // Also synchronize active draft & published snapshots if present
+        const [draftRec, pubRec] = await Promise.all([
+          prisma.draftGraph.findUnique({ where: { id: "active-draft" } }).catch(() => null),
+          prisma.publishedGraph.findUnique({ where: { id: "active-published" } }).catch(() => null),
+        ]);
+
+        if (draftRec?.snapshot && typeof draftRec.snapshot === "object") {
+          const snap = draftRec.snapshot as any;
+          if (Array.isArray(snap.nodes)) {
+            const nd = snap.nodes.find((n: any) => n.id === id);
+            if (nd) {
+              nd.photoUrl = stableUrl;
+              nd.photoData = photoDataUri;
+              await prisma.draftGraph.update({
+                where: { id: "active-draft" },
+                data: { snapshot: snap },
+              }).catch(() => {});
+            }
+          }
+        }
+
+        if (pubRec?.snapshot && typeof pubRec.snapshot === "object") {
+          const snap = pubRec.snapshot as any;
+          if (Array.isArray(snap.nodes)) {
+            const nd = snap.nodes.find((n: any) => n.id === id);
+            if (nd) {
+              nd.photoUrl = stableUrl;
+              await prisma.publishedGraph.update({
+                where: { id: "active-published" },
+                data: { snapshot: snap },
+              }).catch(() => {});
+            }
+          }
         }
       } catch (dbErr) {
         console.warn("Notice: Database photo persistence:", dbErr);

@@ -235,17 +235,31 @@ export async function publishDraftGraph(
         const validFloorIds = new Set((floors || []).map((f) => f.id));
         await runInPoolChunks(nodes, async (n) => {
           const floorId = n.floorId && validFloorIds.has(n.floorId) ? n.floorId : null;
+          
+          // 1. Fetch existing node metadata to preserve existing database photoData
+          const existingDbNode = await prisma.node.findUnique({
+            where: { id: n.id },
+            select: { metadata: true },
+          }).catch(() => null);
+          const existingMeta = (existingDbNode?.metadata && typeof existingDbNode.metadata === "object")
+            ? (existingDbNode.metadata as Record<string, any>)
+            : {};
+
           const isBase64 = Boolean(n.photoUrl && n.photoUrl.startsWith("data:"));
-          const cleanPhotoUrl = isBase64 ? `/api/nodes/${n.id}/photo` : n.photoUrl;
+          const cleanPhotoUrl = isBase64 ? `/api/nodes/${n.id}/photo` : (n.photoUrl || existingMeta.photoUrl);
+          const photoData = isBase64 ? n.photoUrl : ((n as any).photoData || existingMeta.photoData);
+
           const nodeMeta = {
-            ...(n.photoUrl ? {
+            ...existingMeta,
+            ...(cleanPhotoUrl ? {
               photoUrl: cleanPhotoUrl,
-              ...(isBase64 ? { photoData: n.photoUrl } : {}),
-              photoUploadedAt: n.photoUploadedAt || new Date().toISOString(),
+              ...(photoData ? { photoData } : {}),
+              photoUploadedAt: n.photoUploadedAt || existingMeta.photoUploadedAt || new Date().toISOString(),
             } : {}),
             ...(n.physicalVerified !== undefined ? { physicalVerified: n.physicalVerified } : {}),
             ...(n.visibleToUser !== undefined ? { visibleToUser: n.visibleToUser } : {}),
           };
+
           const nodeData = {
             campusId: n.campusId || defaultCampusId,
             floorId,

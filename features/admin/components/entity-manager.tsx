@@ -1119,37 +1119,45 @@ export function EntityManager() {
 
         const stableUrl = `/api/nodes/${targetNode.id}/photo`;
 
-        // 1. Instant Optimistic Store Update (0ms delay)
-        campusStore.updateNode(targetNode.id, {
-          photoUrl: stableUrl,
-          photoUploadedAt: new Date().toISOString(),
-          physicalVerified: photoManagerPhysicalVerified,
-        });
-
-        setStoreData({ ...campusStore.getWorkingData() });
-
-        toast({
-          type: "success",
-          title: "Photo Linked to Node",
-          description: `Reference photo linked to node "${targetNode.name || targetNode.id}"!`,
-        });
-
-        // 2. Non-blocking Asynchronous Persistence
-        if (photoManagerFile.startsWith("data:")) {
-          fetch(`/api/nodes/${targetNode.id}/photo`, {
+        try {
+          // Direct Database Storage (Ensures photo is written directly to Postgres)
+          const res = await fetch(`/api/nodes/${targetNode.id}/photo`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ photoData: photoManagerFile }),
-          }).catch((e) => console.warn("Notice: Background photo sync:", e?.message));
-        }
+          });
 
-        // 3. Clear Select Node Box and File Selection
-        setPhotoManagerNodeId("");
-        setPhotoNodeSearchQuery("");
-        setPhotoManagerFile("");
-        setPhotoManagerPhysicalVerified(false);
-        if (dedicatedPhotoInputRef.current) {
-          dedicatedPhotoInputRef.current.value = "";
+          if (!res.ok) {
+            throw new Error(`Server returned status ${res.status}`);
+          }
+
+          campusStore.updateNode(targetNode.id, {
+            photoUrl: stableUrl,
+            photoUploadedAt: new Date().toISOString(),
+            physicalVerified: photoManagerPhysicalVerified,
+          });
+
+          setStoreData({ ...campusStore.getWorkingData() });
+
+          toast({
+            type: "success",
+            title: "Photo Saved to Database",
+            description: `Reference photo for "${targetNode.name || targetNode.id}" is saved in cloud database!`,
+          });
+
+          setPhotoManagerNodeId("");
+          setPhotoNodeSearchQuery("");
+          setPhotoManagerFile("");
+          setPhotoManagerPhysicalVerified(false);
+          if (dedicatedPhotoInputRef.current) {
+            dedicatedPhotoInputRef.current.value = "";
+          }
+        } catch (err: unknown) {
+          toast({
+            type: "error",
+            title: "Upload Failed",
+            description: `Could not save photo to database: ${err instanceof Error ? err.message : String(err)}`,
+          });
         }
         break;
       }
@@ -1748,14 +1756,24 @@ export function EntityManager() {
           ? gpsToCanvas(latNum, lngNum)
           : { x: editingItem.raw.x, y: editingItem.raw.y };
 
+        let finalPhotoUrl = editForm.photoUrl || undefined;
+        if (editForm.photoUrl && editForm.photoUrl.startsWith("data:")) {
+          finalPhotoUrl = `/api/nodes/${editingItem.id}/photo`;
+          fetch(`/api/nodes/${editingItem.id}/photo`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ photoData: editForm.photoUrl }),
+          }).catch((e) => console.warn("Notice: Background photo sync:", e));
+        }
+
         campusStore.updateNode(editingItem.id, {
           name: newName,
           type: editForm.nodeType,
           floorId: editForm.floorId || editingItem.raw.floorId,
           accessible: editForm.accessible,
           visibleToUser: editForm.visibleToUser !== undefined ? editForm.visibleToUser : false,
-          photoUrl: editForm.photoUrl || undefined,
-          photoUploadedAt: editForm.photoUploadedAt || undefined,
+          photoUrl: finalPhotoUrl,
+          photoUploadedAt: editForm.photoUploadedAt || (finalPhotoUrl ? new Date().toISOString() : undefined),
           physicalVerified: editForm.physicalVerified,
           ...(!isNaN(latNum) && !isNaN(lngNum) ? { lat: latNum, lng: lngNum, x, y } : {}),
         });
