@@ -84,12 +84,11 @@ export async function uploadNodePhotoToSupabase(
   const storagePath = `nodes/${safeId}/${Date.now()}_${uniqueToken}.${ext}`;
 
   if (!client) {
-    // If Supabase API key is not configured in environment, construct clean canonical URL
-    const fallbackUrl = `${DEFAULT_SUPABASE_URL}/storage/v1/object/public/${STORAGE_BUCKET_NAME}/${storagePath}`;
     return {
-      success: true,
-      publicUrl: fallbackUrl,
+      success: false,
+      publicUrl: "",
       storagePath,
+      error: "Supabase storage client not configured",
     };
   }
 

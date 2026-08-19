@@ -1,23 +1,9 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
-import fs from "fs";
-import path from "path";
-
-const OBJECT_STORAGE_ROOT = path.join(process.cwd(), "public", "uploads", "reference-photos", "nodes");
-
-function tryEnsureStorageDir(nodeId: string): string | null {
-  try {
-    const safeId = nodeId.replace(/[^a-zA-Z0-9_-]/g, "_");
-    const dir = path.join(OBJECT_STORAGE_ROOT, safeId);
-    if (!fs.existsSync(dir)) {
-      fs.mkdirSync(dir, { recursive: true });
-    }
-    return dir;
-  } catch {
-    // Read-only filesystem on Vercel / serverless
-    return null;
-  }
-}
+import {
+  uploadNodePhotoToSupabase,
+  deleteNodePhotoFromSupabase,
+} from "@/lib/storage/supabase-storage";
 
 export async function GET(
   _req: Request,
@@ -43,38 +29,7 @@ export async function GET(
       }
     }
 
-    // 2. Secondary: Check local disk storage cache if accessible
-    try {
-      const safeId = id.replace(/[^a-zA-Z0-9_-]/g, "_");
-      const nodeDir = path.join(OBJECT_STORAGE_ROOT, safeId);
-      if (fs.existsSync(nodeDir)) {
-        const files = fs.readdirSync(nodeDir).filter((f) => !f.endsWith(".json"));
-        if (files.length > 0) {
-          const newestFile = files.sort((a, b) => {
-            const statA = fs.statSync(path.join(nodeDir, a)).mtimeMs;
-            const statB = fs.statSync(path.join(nodeDir, b)).mtimeMs;
-            return statB - statA;
-          })[0];
-
-          const filePath = path.join(nodeDir, newestFile);
-          const fileBuffer = fs.readFileSync(filePath);
-          const ext = path.extname(newestFile).toLowerCase().replace(".", "");
-          const mimeType = ext === "png" ? "image/png" : ext === "webp" ? "image/webp" : "image/jpeg";
-
-          return new NextResponse(fileBuffer, {
-            status: 200,
-            headers: {
-              "Content-Type": mimeType,
-              "Cache-Control": "public, max-age=31536000, immutable",
-              "Content-Length": String(fileBuffer.length),
-              "Access-Control-Allow-Origin": "*",
-            },
-          });
-        }
-      }
-    } catch {}
-
-    // 3. Tertiary: Check if Node.metadata has an external photoUrl
+    // 2. Secondary: Check if Node.metadata has an external Supabase Storage photoUrl
     if (prisma) {
       const node = await prisma.node
         .findUnique({
@@ -176,46 +131,44 @@ export async function POST(
     const safeNodeId = id.replace(/[^a-zA-Z0-9_-]/g, "_");
     const uniqueToken = Math.random().toString(36).substring(2, 9);
     const uniqueFilename = `ref_${Date.now()}_${uniqueToken}.${ext}`;
-    const persistentUrl = `/api/nodes/${id}/photo`;
-    const storagePath = `nodes/${safeNodeId}/${uniqueFilename}`;
     const uploadedAt = new Date().toISOString();
 
-    // 1. Primary: Save to PostgreSQL NodePhoto table (Persistent on Vercel and Localhost)
+    // 1. Supabase Object Storage Upload (if Supabase credentials available)
+    let persistentUrl = `/api/nodes/${id}/photo`;
+    let storagePath = `nodes/${safeNodeId}/${uniqueFilename}`;
+
+    try {
+      const supabaseResult = await uploadNodePhotoToSupabase(id, rawBuffer, mimeType);
+      if (supabaseResult.success && supabaseResult.publicUrl) {
+        persistentUrl = supabaseResult.publicUrl;
+        storagePath = supabaseResult.storagePath;
+        console.log(`[SUPABASE-STORAGE] Uploaded directly to Supabase Storage: ${persistentUrl}`);
+      }
+    } catch (sbErr: any) {
+      console.warn(`[SUPABASE-STORAGE] Notice: Supabase storage upload skipped:`, sbErr?.message);
+    }
+
+    // 2. Persistent PostgreSQL Binary Storage (100% Reliable Cloud Storage)
     if (prisma) {
+      const uint8Data = new Uint8Array(rawBuffer);
       await prisma.nodePhoto.upsert({
         where: { nodeId: id },
         update: {
-          data: rawBuffer,
+          data: uint8Data,
           mimeType,
           size: rawBuffer.length,
           updatedAt: new Date(),
         },
         create: {
           nodeId: id,
-          data: rawBuffer,
+          data: uint8Data,
           mimeType,
           size: rawBuffer.length,
         },
       });
     }
 
-    // 2. Secondary: Best-effort local file cache (Safely handles EROFS on Vercel)
-    try {
-      const nodeDir = tryEnsureStorageDir(id);
-      if (nodeDir) {
-        const oldFiles = fs.readdirSync(nodeDir);
-        for (const oldFile of oldFiles) {
-          fs.unlinkSync(path.join(nodeDir, oldFile));
-        }
-        const targetFilePath = path.join(nodeDir, uniqueFilename);
-        fs.writeFileSync(targetFilePath, rawBuffer);
-        console.log(`[STORAGE-CACHE] Cached file to disk: ${targetFilePath}`);
-      }
-    } catch (fsErr: any) {
-      console.log(`[STORAGE-CACHE] Serverless environment: Disk cache skipped (${fsErr?.message || "EROFS"})`);
-    }
-
-    // 3. Persist lightweight URL & metadata in Node table
+    // 3. Persist lightweight URL & metadata in Node table (Zero Base64 bloat)
     if (prisma) {
       try {
         const updatedMeta: Record<string, any> = {
@@ -244,7 +197,7 @@ export async function POST(
           }).catch(() => {});
         } else {
           const defaultCampus = await prisma.campus.findFirst({ select: { id: true } }).catch(() => null);
-          const campusId = existingNode?.campusId || defaultCampus?.id || "c1";
+          const campusId = defaultCampus?.id || "c1";
 
           await prisma.node.upsert({
             where: { id },
@@ -262,11 +215,7 @@ export async function POST(
         setTimeout(async () => {
           if (!prisma) return;
           try {
-            const [draftRec, pubRec] = await Promise.all([
-              prisma.draftGraph.findUnique({ where: { id: "active-draft" } }).catch(() => null),
-              prisma.publishedGraph.findUnique({ where: { id: "active-published" } }).catch(() => null),
-            ]);
-
+            const draftRec = await prisma.draftGraph.findUnique({ where: { id: "active-draft" } }).catch(() => null);
             if (draftRec?.snapshot && typeof draftRec.snapshot === "object") {
               const snap = draftRec.snapshot as any;
               if (Array.isArray(snap.nodes)) {
@@ -284,6 +233,7 @@ export async function POST(
               }
             }
 
+            const pubRec = await prisma.publishedGraph.findUnique({ where: { id: "active-published" } }).catch(() => null);
             if (pubRec?.snapshot && typeof pubRec.snapshot === "object") {
               const snap = pubRec.snapshot as any;
               if (Array.isArray(snap.nodes)) {
@@ -334,18 +284,20 @@ export async function DELETE(
       await prisma.nodePhoto.deleteMany({ where: { nodeId: id } }).catch(() => {});
     }
 
-    // 2. Clean up disk cache if accessible
-    try {
-      const safeNodeId = id.replace(/[^a-zA-Z0-9_-]/g, "_");
-      const nodeDir = path.join(OBJECT_STORAGE_ROOT, safeNodeId);
-      if (fs.existsSync(nodeDir)) {
-        const files = fs.readdirSync(nodeDir);
-        for (const file of files) {
-          fs.unlinkSync(path.join(nodeDir, file));
+    // 2. Delete from Supabase Object Storage if metadata has storagePath
+    if (prisma) {
+      const existingNode = await prisma.node.findUnique({
+        where: { id },
+        select: { metadata: true },
+      }).catch(() => null);
+
+      if (existingNode?.metadata && typeof existingNode.metadata === "object") {
+        const meta = existingNode.metadata as Record<string, any>;
+        if (meta.storagePath) {
+          await deleteNodePhotoFromSupabase(meta.storagePath).catch(() => {});
         }
-        fs.rmdirSync(nodeDir);
       }
-    } catch {}
+    }
 
     // 3. Remove photo metadata from Node table and Snapshots
     if (prisma) {
@@ -368,10 +320,8 @@ export async function DELETE(
         }).catch(() => {});
       }
 
-      const [draftRec, pubRec] = await Promise.all([
-        prisma.draftGraph.findUnique({ where: { id: "active-draft" } }).catch(() => null),
-        prisma.publishedGraph.findUnique({ where: { id: "active-published" } }).catch(() => null),
-      ]);
+      const draftRec = await prisma.draftGraph.findUnique({ where: { id: "active-draft" } }).catch(() => null);
+      const pubRec = await prisma.publishedGraph.findUnique({ where: { id: "active-published" } }).catch(() => null);
 
       if (draftRec?.snapshot && typeof draftRec.snapshot === "object") {
         const snap = draftRec.snapshot as any;
