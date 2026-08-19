@@ -13,8 +13,8 @@ export async function GET(
 
   try {
     // 1. Primary: Stream binary image from persistent PostgreSQL (Supabase)
-    if (prisma) {
-      const dbPhoto = await prisma.nodePhoto.findUnique({ where: { nodeId: id } }).catch(() => null);
+    if (prisma && (prisma as any).nodePhoto) {
+      const dbPhoto = await (prisma as any).nodePhoto.findUnique({ where: { nodeId: id } }).catch(() => null);
       if (dbPhoto?.data) {
         const buffer = Buffer.from(dbPhoto.data);
         return new NextResponse(buffer, {
@@ -149,9 +149,9 @@ export async function POST(
     }
 
     // 2. Persistent PostgreSQL Binary Storage (100% Reliable Cloud Storage)
-    if (prisma) {
+    if (prisma && (prisma as any).nodePhoto) {
       const uint8Data = new Uint8Array(rawBuffer);
-      await prisma.nodePhoto.upsert({
+      await (prisma as any).nodePhoto.upsert({
         where: { nodeId: id },
         update: {
           data: uint8Data,
@@ -280,8 +280,8 @@ export async function DELETE(
 
   try {
     // 1. Delete from PostgreSQL NodePhoto table
-    if (prisma) {
-      await prisma.nodePhoto.deleteMany({ where: { nodeId: id } }).catch(() => {});
+    if (prisma && (prisma as any).nodePhoto) {
+      await (prisma as any).nodePhoto.deleteMany({ where: { nodeId: id } }).catch(() => {});
     }
 
     // 2. Delete from Supabase Object Storage if metadata has storagePath
