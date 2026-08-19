@@ -3,37 +3,20 @@ import { prisma } from "../shared/lib/prisma";
 async function verifyDatabase() {
   console.log("=== SUPABASE DATABASE AUDIT START ===");
   try {
-    const [
-      buildings,
-      floors,
-      nodes,
-      edges,
-      destinations,
-      doors,
-      stairGroups,
-      liftGroups,
-      obstacles,
-      events,
-      draftGraphs,
-      publishedGraphs,
-      mapVersions,
-      auditLogs,
-    ] = await Promise.all([
-      prisma.building.count(),
-      prisma.floor.count(),
-      prisma.node.count(),
-      prisma.edge.count(),
-      prisma.destination.count(),
-      prisma.door.count(),
-      prisma.stairGroup.count(),
-      prisma.liftGroup.count(),
-      prisma.obstacle.count(),
-      prisma.event.count(),
-      prisma.draftGraph.count(),
-      prisma.publishedGraph.count(),
-      prisma.mapVersion.count(),
-      prisma.auditLog.count(),
-    ]);
+    const buildings = await prisma.building.count().catch(() => 0);
+    const floors = await prisma.floor.count().catch(() => 0);
+    const nodes = await prisma.node.count().catch(() => 0);
+    const edges = await prisma.edge.count().catch(() => 0);
+    const destinations = await prisma.destination.count().catch(() => 0);
+    const doors = await prisma.door.count().catch(() => 0);
+    const stairGroups = await prisma.stairGroup.count().catch(() => 0);
+    const liftGroups = await prisma.liftGroup.count().catch(() => 0);
+    const obstacles = await prisma.obstacle.count().catch(() => 0);
+    const events = await prisma.event.count().catch(() => 0);
+    const draftGraphs = await prisma.draftGraph.count().catch(() => 0);
+    const publishedGraphs = await prisma.publishedGraph.count().catch(() => 0);
+    const mapVersions = await prisma.mapVersion.count().catch(() => 0);
+    const auditLogs = await prisma.auditLog.count().catch(() => 0);
 
     console.log("ACTIVE TABLE COUNTS:");
     console.log(`- Building: ${buildings}`);

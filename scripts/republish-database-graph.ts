@@ -9,7 +9,7 @@ async function republish() {
     return;
   }
 
-  console.log(`Relational graph: ${relational.buildings.length} buildings, ${relational.nodes.length} nodes, ${relational.edges.length} edges.`);
+  console.log(`Relational graph: ${(relational.buildings || []).length} buildings, ${(relational.nodes || []).length} nodes, ${(relational.edges || []).length} edges.`);
   const pubRes = await publishDraftGraph(relational, "admin", "Republished verified graph with photos");
   console.log("Publish result:", pubRes);
 }

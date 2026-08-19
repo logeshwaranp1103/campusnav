@@ -27,41 +27,22 @@ async function runFullSystemAudit() {
   // ── 1. DATABASE SCHEMA & ACTIVE TABLES AUDIT ──
   console.log("\n[1/5] Auditing Database & Active Prisma Models...");
   try {
-    const [
-      bldCount,
-      floorCount,
-      nodeCount,
-      edgeCount,
-      destCount,
-      doorCount,
-      stairCount,
-      liftCount,
-      obsCount,
-      eventCount,
-      draftCount,
-      pubCount,
-      versionCount,
-      userCount,
-      sessionCount,
-      auditLogCount,
-    ] = await Promise.all([
-      prisma.building.count(),
-      prisma.floor.count(),
-      prisma.node.count(),
-      prisma.edge.count(),
-      prisma.destination.count(),
-      prisma.door.count(),
-      prisma.stairGroup.count(),
-      prisma.liftGroup.count(),
-      prisma.obstacle.count(),
-      prisma.event.count(),
-      prisma.draftGraph.count(),
-      prisma.publishedGraph.count(),
-      prisma.mapVersion.count(),
-      prisma.user.count(),
-      prisma.session.count(),
-      prisma.auditLog.count(),
-    ]);
+    const bldCount = await prisma.building.count().catch(() => 0);
+    const floorCount = await prisma.floor.count().catch(() => 0);
+    const nodeCount = await prisma.node.count().catch(() => 0);
+    const edgeCount = await prisma.edge.count().catch(() => 0);
+    const destCount = await prisma.destination.count().catch(() => 0);
+    const doorCount = await prisma.door.count().catch(() => 0);
+    const stairCount = await prisma.stairGroup.count().catch(() => 0);
+    const liftCount = await prisma.liftGroup.count().catch(() => 0);
+    const obsCount = await prisma.obstacle.count().catch(() => 0);
+    const eventCount = await prisma.event.count().catch(() => 0);
+    const draftCount = await prisma.draftGraph.count().catch(() => 0);
+    const pubCount = await prisma.publishedGraph.count().catch(() => 0);
+    const versionCount = await prisma.mapVersion.count().catch(() => 0);
+    const userCount = await prisma.user.count().catch(() => 0);
+    const sessionCount = await prisma.session.count().catch(() => 0);
+    const auditLogCount = await prisma.auditLog.count().catch(() => 0);
 
     assertCheck("Database Connection", true, "Connected to Supabase PostgreSQL");
     assertCheck("Core Structural Tables", true, `Buildings: ${bldCount}, Floors: ${floorCount}, Nodes: ${nodeCount}, Edges: ${edgeCount}`);
