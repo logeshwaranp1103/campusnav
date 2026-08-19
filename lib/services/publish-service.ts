@@ -235,8 +235,14 @@ export async function publishDraftGraph(
         const validFloorIds = new Set((floors || []).map((f) => f.id));
         await runInPoolChunks(nodes, async (n) => {
           const floorId = n.floorId && validFloorIds.has(n.floorId) ? n.floorId : null;
+          const isBase64 = Boolean(n.photoUrl && n.photoUrl.startsWith("data:"));
+          const cleanPhotoUrl = isBase64 ? `/api/nodes/${n.id}/photo` : n.photoUrl;
           const nodeMeta = {
-            ...(n.photoUrl ? { photoUrl: n.photoUrl, photoUploadedAt: n.photoUploadedAt } : {}),
+            ...(n.photoUrl ? {
+              photoUrl: cleanPhotoUrl,
+              ...(isBase64 ? { photoData: n.photoUrl } : {}),
+              photoUploadedAt: n.photoUploadedAt || new Date().toISOString(),
+            } : {}),
             ...(n.physicalVerified !== undefined ? { physicalVerified: n.physicalVerified } : {}),
             ...(n.visibleToUser !== undefined ? { visibleToUser: n.visibleToUser } : {}),
           };
@@ -474,7 +480,7 @@ export async function getRelationalGraphFromDatabase(): Promise<DraftSnapshot | 
         lng: n.longitude !== undefined ? n.longitude : (n.lng !== undefined ? n.lng : undefined),
         searchable: n.searchable ?? true,
         visibleToUser: n.visibleToUser !== undefined ? n.visibleToUser : (meta.visibleToUser !== undefined ? meta.visibleToUser : false),
-        photoUrl: n.photoUrl || meta.photoUrl || undefined,
+        photoUrl: n.photoUrl || meta.photoUrl || (meta.photoData ? `/api/nodes/${n.id}/photo` : undefined),
         photoUploadedAt: n.photoUploadedAt || meta.photoUploadedAt || undefined,
         physicalVerified: n.physicalVerified !== undefined ? n.physicalVerified : meta.physicalVerified,
       };

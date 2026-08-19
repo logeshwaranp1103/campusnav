@@ -90,6 +90,7 @@ export function NavigateShell() {
   const [livePos, setLivePos] = useState<{ node: CampusNode; progress: number } | null>(null);
   const [mobileView, setMobileView] = useState<"panel" | "map">("panel");
   const [previewingPhoto, setPreviewingPhoto] = useState<{ url: string; title: string; nodeId?: string } | null>(null);
+  const [previewPhotoError, setPreviewPhotoError] = useState(false);
   // Fix #11: Multi-stop state
   const [stops, setStops] = useState<StopEntry[]>([]);
   const { toast } = useToast();
@@ -1315,28 +1316,40 @@ export function NavigateShell() {
                     <p className="text-[11px] text-[rgb(var(--muted-fg))]">Reference Location Photo</p>
                   </div>
                 </div>
-                <Button size="sm" variant="ghost" onClick={() => setPreviewingPhoto(null)} className="h-8 w-8 p-0">
+                <Button size="sm" variant="ghost" onClick={() => { setPreviewingPhoto(null); setPreviewPhotoError(false); }} className="h-8 w-8 p-0">
                   <X className="h-4 w-4" />
                 </Button>
               </div>
 
-              <div className="relative w-full overflow-hidden rounded-xl border border-[rgb(var(--border))] bg-transparent flex items-center justify-center">
-                <img
-                  src={previewingPhoto.url}
-                  alt={`Reference for ${previewingPhoto.title}`}
-                  className="w-full h-auto max-h-[70vh] object-contain rounded-xl"
-                  onError={(e) => {
-                    const targetNode = publishedData.nodes.find((n) => n.id === previewingPhoto.nodeId);
-                    if (targetNode?.photoUrl && targetNode.photoUrl !== previewingPhoto.url) {
-                      (e.target as HTMLImageElement).src = targetNode.photoUrl;
-                    }
-                  }}
-                />
+              <div className="relative w-full overflow-hidden rounded-xl border border-[rgb(var(--border))] bg-[rgb(var(--card))] flex items-center justify-center min-h-[160px]">
+                {previewPhotoError ? (
+                  <div className="flex flex-col items-center justify-center p-8 text-center text-[rgb(var(--muted-fg))] space-y-2">
+                    <Camera className="h-10 w-10 text-[rgb(var(--muted-fg))/0.4]" />
+                    <p className="text-sm font-semibold text-[rgb(var(--fg))]">Photo Not Available</p>
+                    <p className="text-xs text-[rgb(var(--muted-fg))] max-w-xs">
+                      Reference image for <span className="font-medium text-[rgb(var(--fg))]">{previewingPhoto.title}</span> is not stored on the cloud server.
+                    </p>
+                  </div>
+                ) : (
+                  <img
+                    src={previewingPhoto.url}
+                    alt={`Reference for ${previewingPhoto.title}`}
+                    className="w-full h-auto max-h-[70vh] object-contain rounded-xl"
+                    onError={(e) => {
+                      const targetNode = publishedData.nodes.find((n) => n.id === previewingPhoto.nodeId);
+                      if (targetNode?.photoUrl && targetNode.photoUrl !== previewingPhoto.url) {
+                        (e.target as HTMLImageElement).src = targetNode.photoUrl;
+                      } else {
+                        setPreviewPhotoError(true);
+                      }
+                    }}
+                  />
+                )}
               </div>
 
               <div className="flex items-center justify-between pt-1">
                 <span className="text-xs text-[rgb(var(--muted-fg))]">Visual Landmark Guidance</span>
-                <Button size="sm" onClick={() => setPreviewingPhoto(null)} className="bg-[rgb(var(--primary))] text-white px-5">
+                <Button size="sm" onClick={() => { setPreviewingPhoto(null); setPreviewPhotoError(false); }} className="bg-[rgb(var(--primary))] text-white px-5">
                   Close
                 </Button>
               </div>

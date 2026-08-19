@@ -35,24 +35,26 @@ export async function GET(
     const filePath = getPhotoFilePath(id);
     const metaPath = getPhotoMetaPath(id);
 
-    // 1. Check if photo binary file exists on local disk storage
+    // 1. Check if photo binary file exists on local disk storage (Fast path for local dev)
     if (fs.existsSync(filePath)) {
-      const buffer = await fs.promises.readFile(filePath);
-      let mimeType = "image/jpeg";
-      if (fs.existsSync(metaPath)) {
-        try {
-          const meta = JSON.parse(await fs.promises.readFile(metaPath, "utf-8"));
-          if (meta.mimeType) mimeType = meta.mimeType;
-        } catch {}
-      }
+      try {
+        const buffer = await fs.promises.readFile(filePath);
+        let mimeType = "image/jpeg";
+        if (fs.existsSync(metaPath)) {
+          try {
+            const meta = JSON.parse(await fs.promises.readFile(metaPath, "utf-8"));
+            if (meta.mimeType) mimeType = meta.mimeType;
+          } catch {}
+        }
 
-      return new NextResponse(buffer, {
-        headers: {
-          "Content-Type": mimeType,
-          "Cache-Control": "public, max-age=86400, stale-while-revalidate=604800",
-          "Content-Length": String(buffer.length),
-        },
-      });
+        return new NextResponse(buffer, {
+          headers: {
+            "Content-Type": mimeType,
+            "Cache-Control": "public, max-age=86400, stale-while-revalidate=604800",
+            "Content-Length": String(buffer.length),
+          },
+        });
+      } catch {}
     }
 
     let photoDataUrl: string | null | undefined = null;
@@ -67,42 +69,51 @@ export async function GET(
         .catch(() => null);
 
       if (node?.metadata && typeof node.metadata === "object") {
-        photoDataUrl = (node.metadata as any).photoData;
+        const meta = node.metadata as Record<string, any>;
+        if (typeof meta.photoData === "string" && meta.photoData.startsWith("data:")) {
+          photoDataUrl = meta.photoData;
+        } else if (typeof meta.photoUrl === "string" && meta.photoUrl.startsWith("data:")) {
+          photoDataUrl = meta.photoUrl;
+        }
       }
     }
 
-    // 3. Fallback to active published graph snapshot
-    if (!photoDataUrl) {
-      const activePub = await getActivePublishedGraph();
-      const nodeInSnapshot = activePub?.snapshot?.nodes?.find((n) => n.id === id);
-      if (nodeInSnapshot?.photoUrl && nodeInSnapshot.photoUrl.startsWith("data:")) {
-        photoDataUrl = nodeInSnapshot.photoUrl;
-      }
-    }
-
-    // 4. Fallback to draft graph snapshot if in draft mode
+    // 3. Fallback to active draft graph snapshot
     if (!photoDataUrl && prisma) {
       const draftRecord = await prisma.draftGraph
         .findUnique({ where: { id: "active-draft" } })
         .catch(() => null);
       if (draftRecord?.snapshot && typeof draftRecord.snapshot === "object") {
         const nodeInDraft = (draftRecord.snapshot as any)?.nodes?.find((n: any) => n.id === id);
-        if (nodeInDraft?.photoUrl && nodeInDraft.photoUrl.startsWith("data:")) {
+        if (nodeInDraft?.photoUrl && typeof nodeInDraft.photoUrl === "string" && nodeInDraft.photoUrl.startsWith("data:")) {
           photoDataUrl = nodeInDraft.photoUrl;
+        } else if (nodeInDraft?.photoData && typeof nodeInDraft.photoData === "string" && nodeInDraft.photoData.startsWith("data:")) {
+          photoDataUrl = nodeInDraft.photoData;
         }
       }
     }
 
-    // If base64 data URI was found, persist to disk for fast subsequent reads and stream
+    // 4. Fallback to active published graph snapshot
+    if (!photoDataUrl) {
+      const activePub = await getActivePublishedGraph();
+      const nodeInSnapshot = activePub?.snapshot?.nodes?.find((n) => n.id === id);
+      if (nodeInSnapshot?.photoUrl && typeof nodeInSnapshot.photoUrl === "string" && nodeInSnapshot.photoUrl.startsWith("data:")) {
+        photoDataUrl = nodeInSnapshot.photoUrl;
+      }
+    }
+
+    // If base64 data URI was found, parse, optionally cache to disk, and stream
     if (photoDataUrl && photoDataUrl.startsWith("data:")) {
-      const matches = photoDataUrl.match(/^data:([A-Za-z-+/]+);base64,(.+)$/);
+      const matches = photoDataUrl.match(/^data:([A-Za-z-+/0-9]+);base64,(.+)$/);
       if (matches && matches.length === 3) {
         const mimeType = matches[1];
         const buffer = Buffer.from(matches[2], "base64");
 
-        // Write to disk in background
-        await fs.promises.writeFile(filePath, buffer).catch(() => {});
-        await fs.promises.writeFile(metaPath, JSON.stringify({ mimeType, updatedAt: new Date().toISOString() })).catch(() => {});
+        // Write to disk cache if filesystem is writable
+        try {
+          await fs.promises.writeFile(filePath, buffer);
+          await fs.promises.writeFile(metaPath, JSON.stringify({ mimeType, updatedAt: new Date().toISOString() }));
+        } catch {}
 
         return new NextResponse(buffer, {
           headers: {
@@ -166,7 +177,7 @@ export async function POST(
         return NextResponse.json({ error: "Invalid image payload format." }, { status: 400 });
       }
 
-      const matches = photoDataUri.match(/^data:([A-Za-z-+/]+);base64,(.+)$/);
+      const matches = photoDataUri.match(/^data:([A-Za-z-+/0-9]+);base64,(.+)$/);
       if (matches && matches.length === 3) {
         mimeType = matches[1];
         rawBuffer = Buffer.from(matches[2], "base64");
@@ -174,42 +185,44 @@ export async function POST(
     }
 
     if (rawBuffer) {
-      // 1. Save raw binary file to disk
-      const filePath = getPhotoFilePath(id);
-      const metaPath = getPhotoMetaPath(id);
-      await fs.promises.writeFile(filePath, rawBuffer);
-      await fs.promises.writeFile(metaPath, JSON.stringify({ mimeType, updatedAt: new Date().toISOString() }));
+      // 1. Try saving raw binary file to disk if available
+      try {
+        const filePath = getPhotoFilePath(id);
+        const metaPath = getPhotoMetaPath(id);
+        await fs.promises.writeFile(filePath, rawBuffer);
+        await fs.promises.writeFile(metaPath, JSON.stringify({ mimeType, updatedAt: new Date().toISOString() }));
+      } catch {}
     }
 
     const stableUrl = `/api/nodes/${id}/photo`;
 
-    // 2. Persist to Postgres database asynchronously in background without blocking
+    // 2. Persist to Postgres database reliably with await for Serverless compatibility
     if (prisma) {
-      (async () => {
-        try {
-          const existingNode = await prisma.node.findUnique({
+      try {
+        const existingNode = await prisma.node.findUnique({
+          where: { id },
+          select: { metadata: true },
+        }).catch(() => null);
+
+        if (existingNode) {
+          const existingMeta = (existingNode?.metadata && typeof existingNode?.metadata === "object") ? existingNode.metadata : {};
+          const updatedMeta = {
+            ...existingMeta,
+            photoData: photoDataUri,
+            photoUrl: stableUrl,
+            photoUploadedAt: new Date().toISOString(),
+          };
+
+          await prisma.node.update({
             where: { id },
-            select: { metadata: true },
-          }).catch(() => null);
-
-          if (existingNode) {
-            const existingMeta = (existingNode?.metadata && typeof existingNode?.metadata === "object") ? existingNode.metadata : {};
-            const updatedMeta = {
-              ...existingMeta,
-              photoData: photoDataUri,
-              photoUrl: stableUrl,
-              photoUploadedAt: new Date().toISOString(),
-            };
-
-            await prisma.node.update({
-              where: { id },
-              data: {
-                metadata: updatedMeta,
-              },
-            }).catch(() => {});
-          }
-        } catch {}
-      })();
+            data: {
+              metadata: updatedMeta,
+            },
+          }).catch((e) => console.warn(`Notice: Node ${id} metadata update:`, e?.message));
+        }
+      } catch (dbErr) {
+        console.warn("Notice: Database photo persistence:", dbErr);
+      }
     }
 
     return NextResponse.json({
