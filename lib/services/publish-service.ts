@@ -26,13 +26,13 @@ let activePublishedSnapshot: { version: number; snapshot: DraftSnapshot; publish
 export function sanitizeSnapshotForPayload(snapshot: DraftSnapshot): DraftSnapshot {
   if (!snapshot) return {};
   const safeNodes = (snapshot.nodes || []).map((n) => {
-    if (n.photoUrl && n.photoUrl.startsWith("data:")) {
-      return {
-        ...n,
-        photoUrl: `/api/nodes/${n.id}/photo`,
-      };
+    const isBase64 = Boolean(n.photoUrl && n.photoUrl.startsWith("data:"));
+    const safeNode = { ...n };
+    delete (safeNode as any).photoData;
+    if (isBase64) {
+      safeNode.photoUrl = `/api/nodes/${n.id}/photo`;
     }
-    return n;
+    return safeNode;
   });
 
   return {
@@ -236,7 +236,7 @@ export async function publishDraftGraph(
         await runInPoolChunks(nodes, async (n) => {
           const floorId = n.floorId && validFloorIds.has(n.floorId) ? n.floorId : null;
           
-          // 1. Fetch existing node metadata to preserve existing database photoData
+          // 1. Fetch existing node metadata to preserve existing database photo metadata
           const existingDbNode = await prisma.node.findUnique({
             where: { id: n.id },
             select: { metadata: true },
@@ -247,18 +247,18 @@ export async function publishDraftGraph(
 
           const isBase64 = Boolean(n.photoUrl && n.photoUrl.startsWith("data:"));
           const cleanPhotoUrl = isBase64 ? `/api/nodes/${n.id}/photo` : (n.photoUrl || existingMeta.photoUrl);
-          const photoData = isBase64 ? n.photoUrl : ((n as any).photoData || existingMeta.photoData);
 
           const nodeMeta = {
             ...existingMeta,
             ...(cleanPhotoUrl ? {
               photoUrl: cleanPhotoUrl,
-              ...(photoData ? { photoData } : {}),
+              storagePath: (n as any).storagePath || existingMeta.storagePath,
               photoUploadedAt: n.photoUploadedAt || existingMeta.photoUploadedAt || new Date().toISOString(),
             } : {}),
             ...(n.physicalVerified !== undefined ? { physicalVerified: n.physicalVerified } : {}),
             ...(n.visibleToUser !== undefined ? { visibleToUser: n.visibleToUser } : {}),
           };
+          delete (nodeMeta as any).photoData;
 
           const nodeData = {
             campusId: n.campusId || defaultCampusId,
