@@ -44,7 +44,7 @@ export function sanitizeSnapshotForPayload(snapshot: DraftSnapshot): DraftSnapsh
 async function runInPoolChunks<T, R>(
   items: T[],
   fn: (item: T) => Promise<R>,
-  concurrency = 25
+  concurrency = 3
 ): Promise<R[]> {
   const results: R[] = [];
   for (let i = 0; i < items.length; i += concurrency) {
@@ -403,24 +403,8 @@ export async function publishDraftGraph(
         await Promise.all(trailingTasks);
       }
 
-      // 5. Prune Stale Relational Entities in Leaf-to-Root Sequential Order
-      const validBuildingIds = (buildings || []).map((b) => b.id);
-      const validFloorIds = (floors || []).map((f) => f.id);
-      const validNodeIds = (nodes || []).map((n) => n.id);
-      const validEdgeIds = (edges || []).map((e) => e.id);
-      const validDestinationIds = (destinations || []).map((d) => d.id);
-      const validObstacleIds = (obstacles || []).map((o) => o.id);
-      const validDoorIds = ((draftSnapshot.doors as any[]) || []).map((d) => d.id);
-
-      if (validBuildingIds.length > 0) {
-        await prisma.destination.deleteMany({ where: { campusId: defaultCampusId, id: { notIn: validDestinationIds } } }).catch(() => {});
-        await prisma.obstacle.deleteMany({ where: { campusId: defaultCampusId, id: { notIn: validObstacleIds } } }).catch(() => {});
-        await prisma.door.deleteMany({ where: { id: { notIn: validDoorIds } } }).catch(() => {});
-        await prisma.edge.deleteMany({ where: { id: { notIn: validEdgeIds } } }).catch(() => {});
-        await prisma.node.deleteMany({ where: { campusId: defaultCampusId, id: { notIn: validNodeIds } } }).catch(() => {});
-        await prisma.floor.deleteMany({ where: { buildingId: { in: validBuildingIds }, id: { notIn: validFloorIds } } }).catch(() => {});
-        await prisma.building.deleteMany({ where: { campusId: defaultCampusId, id: { notIn: validBuildingIds } } }).catch(() => {});
-      }
+      // 5. Preserving existing database nodes and relations safely
+      // (Never prune or delete existing relational entities during publish)
     } catch (e) {
       console.error("Critical error during publish database transaction:", e);
       return {
@@ -460,15 +444,13 @@ export async function publishDraftGraph(
 export async function getRelationalGraphFromDatabase(): Promise<DraftSnapshot | null> {
   if (!prisma) return null;
   try {
-    const [rawBuildings, rawFloors, rawNodes, rawEdges, rawDestinations, rawObstacles, rawDoors] = await Promise.all([
-      prisma.building.findMany(),
-      prisma.floor.findMany(),
-      prisma.node.findMany(),
-      prisma.edge.findMany(),
-      prisma.destination.findMany(),
-      prisma.obstacle.findMany(),
-      prisma.door.findMany().catch(() => []),
-    ]);
+    const rawBuildings = await prisma.building.findMany().catch(() => []);
+    const rawFloors = await prisma.floor.findMany().catch(() => []);
+    const rawNodes = await prisma.node.findMany().catch(() => []);
+    const rawEdges = await prisma.edge.findMany().catch(() => []);
+    const rawDestinations = await prisma.destination.findMany().catch(() => []);
+    const rawObstacles = await prisma.obstacle.findMany().catch(() => []);
+    const rawDoors = await prisma.door.findMany().catch(() => []);
 
     if (rawNodes.length === 0 && rawBuildings.length === 0) {
       return null;

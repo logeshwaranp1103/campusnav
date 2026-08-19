@@ -1658,7 +1658,7 @@ export function EntityManager() {
     });
   };
 
-  const handleSaveEditModal = () => {
+  const handleSaveEditModal = async () => {
     if (!editingItem) return;
     const newName = editForm.name.trim();
     if (!newName) {
@@ -1760,13 +1760,29 @@ export function EntityManager() {
           : { x: editingItem.raw.x, y: editingItem.raw.y };
 
         let finalPhotoUrl = editForm.photoUrl || undefined;
+        let uploadedAt = editForm.photoUploadedAt || (finalPhotoUrl ? new Date().toISOString() : undefined);
+
         if (editForm.photoUrl && editForm.photoUrl.startsWith("data:")) {
-          finalPhotoUrl = `/api/nodes/${editingItem.id}/photo`;
-          fetch(`/api/nodes/${editingItem.id}/photo`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ photoData: editForm.photoUrl }),
-          }).catch((e) => console.warn("Notice: Background photo sync:", e));
+          try {
+            const res = await fetch(`/api/nodes/${editingItem.id}/photo`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ photoData: editForm.photoUrl }),
+            });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) {
+              throw new Error(data.error || "Failed to persist reference photo to database.");
+            }
+            finalPhotoUrl = data.photoUrl || `/api/nodes/${editingItem.id}/photo`;
+            uploadedAt = data.uploadedAt || new Date().toISOString();
+          } catch (err: unknown) {
+            toast({
+              type: "error",
+              title: "Photo Save Failed",
+              description: `Could not save photo to database: ${err instanceof Error ? err.message : String(err)}`,
+            });
+            return;
+          }
         }
 
         campusStore.updateNode(editingItem.id, {
@@ -1776,7 +1792,7 @@ export function EntityManager() {
           accessible: editForm.accessible,
           visibleToUser: editForm.visibleToUser !== undefined ? editForm.visibleToUser : false,
           photoUrl: finalPhotoUrl,
-          photoUploadedAt: editForm.photoUploadedAt || (finalPhotoUrl ? new Date().toISOString() : undefined),
+          photoUploadedAt: uploadedAt,
           physicalVerified: editForm.physicalVerified,
           ...(!isNaN(latNum) && !isNaN(lngNum) ? { lat: latNum, lng: lngNum, x, y } : {}),
         });

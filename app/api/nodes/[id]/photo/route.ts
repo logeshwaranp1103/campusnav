@@ -163,6 +163,12 @@ export async function POST(
     const publicPhotoUrl = uploadResult.publicUrl;
     const storagePath = uploadResult.storagePath;
 
+    console.log(`[PHOTO] Selected Node ID: ${id}`);
+    console.log(`[PHOTO] Storage Upload: success=${uploadResult.success}`);
+    console.log(`[PHOTO] Storage Path: ${storagePath}`);
+    console.log(`[PHOTO] Generated URL: ${publicPhotoUrl}`);
+    console.log(`[PHOTO] Database Write Started for Node: ${id}`);
+
     // 2. Persist ONLY lightweight URL and metadata in PostgreSQL (ZERO base64 data)
     if (prisma) {
       try {
@@ -206,6 +212,8 @@ export async function POST(
             },
           }).catch(() => {});
         }
+
+        console.log(`[PHOTO] Database Write Result: SUCCESS for Node ${id}`);
 
         // 3. Synchronize active draft and published graph snapshots with cloud URL
         const [draftRec, pubRec] = await Promise.all([
@@ -259,13 +267,13 @@ export async function POST(
         : {};
 
       if (!verifiedNode || !verifiedMeta.photoUrl) {
-        console.error(`[DATABASE_VERIFICATION_FAILED] Node ${id} metadata missing after write.`);
+        console.error(`[PHOTO] Database Verification Result: FAILED for Node ${id}`);
         return NextResponse.json(
           { error: "Database verification failed: Photo reference could not be verified in PostgreSQL." },
           { status: 500 }
         );
       }
-      console.log(`[DATABASE_VERIFICATION_SUCCESS] Node ${id} verified photoUrl: ${verifiedMeta.photoUrl}`);
+      console.log(`[PHOTO] Database Verification Result: SUCCESS (Verified photoUrl = ${verifiedMeta.photoUrl})`);
     }
 
     return NextResponse.json({

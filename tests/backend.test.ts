@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, beforeAll, afterAll } from "vitest";
 import { hashPassword, verifyPassword } from "../lib/auth/auth";
 import { logAuditEvent, getAuditLogs } from "../lib/services/audit-service";
 import { publishDraftGraph } from "../lib/services/publish-service";
@@ -13,6 +13,39 @@ describe("Production Backend & API Services", () => {
   const testNodeIds = ["n-ent-clean", "n-stair-bad", "n-corr-2"];
   const testEdgeIds = ["e-test-1"];
   const testObstacleIds = ["obs-test-1"];
+  let savedPublishedSnap: any = null;
+  let savedDraftSnap: any = null;
+
+  beforeAll(async () => {
+    if (prisma) {
+      const [pubRec, draftRec] = await Promise.all([
+        prisma.publishedGraph.findUnique({ where: { id: "active-published" } }).catch(() => null),
+        prisma.draftGraph.findUnique({ where: { id: "active-draft" } }).catch(() => null),
+      ]);
+      savedPublishedSnap = pubRec;
+      savedDraftSnap = draftRec;
+    }
+  });
+
+  afterAll(async () => {
+    if (prisma) {
+      if (savedPublishedSnap) {
+        await prisma.publishedGraph.upsert({
+          where: { id: "active-published" },
+          update: { version: savedPublishedSnap.version, snapshot: savedPublishedSnap.snapshot },
+          create: { id: "active-published", version: savedPublishedSnap.version, snapshot: savedPublishedSnap.snapshot },
+        }).catch(() => {});
+      }
+      if (savedDraftSnap) {
+        await prisma.draftGraph.upsert({
+          where: { id: "active-draft" },
+          update: { snapshot: savedDraftSnap.snapshot },
+          create: { id: "active-draft", snapshot: savedDraftSnap.snapshot },
+        }).catch(() => {});
+      }
+      await cleanupTestData();
+    }
+  });
 
   const cleanupTestData = async () => {
     if (prisma) {

@@ -62,15 +62,17 @@ async function migratePhotosToSupabase() {
           };
           delete updatedMeta.photoData;
 
-          if (existingNode) {
-            await prisma.node.update({
-              where: { id: nodeId },
-              data: { metadata: updatedMeta },
-            });
-            console.log(`  -> Database node "${nodeId}" metadata updated.`);
-          } else {
-            console.log(`  -> Note: Node "${nodeId}" not yet committed to relational node table.`);
-          }
+          await prisma.node.upsert({
+            where: { id: nodeId },
+            update: { metadata: updatedMeta },
+            create: {
+              id: nodeId,
+              campusId: "c1",
+              type: "CORRIDOR",
+              metadata: updatedMeta,
+            },
+          });
+          console.log(`  -> Database node "${nodeId}" persisted with photoUrl: ${uploadRes.publicUrl}`);
         }
         successCount++;
       } else {
