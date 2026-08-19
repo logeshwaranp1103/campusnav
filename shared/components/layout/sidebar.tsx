@@ -75,6 +75,7 @@ export function SidebarNav({ onNavigate }: { onNavigate?: () => void }) {
                 <Link
                   key={item.href}
                   href={item.href}
+                  prefetch={true}
                   onClick={onNavigate}
                   className={cn(
                     "group relative flex items-center justify-start gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-all whitespace-nowrap overflow-hidden text-ellipsis",

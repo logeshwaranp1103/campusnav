@@ -22,7 +22,10 @@ export function Navbar() {
   const [scrolled, setScrolled] = useState(false);
 
   useEffect(() => {
-    const onScroll = () => setScrolled(window.scrollY > 8);
+    const onScroll = () => {
+      const isScrolled = window.scrollY > 8;
+      setScrolled((prev) => (prev !== isScrolled ? isScrolled : prev));
+    };
     onScroll();
     window.addEventListener("scroll", onScroll, { passive: true });
     return () => window.removeEventListener("scroll", onScroll);
@@ -31,10 +34,8 @@ export function Navbar() {
   return (
     <header
       className={cn(
-        "sticky top-0 z-40 border-b border-[rgb(var(--border))] transition-shadow duration-200",
-        scrolled
-          ? "glass-strong shadow-[var(--shadow-sm)]"
-          : "glass",
+        "sticky top-0 z-40 border-b border-[rgb(var(--border))] transition-shadow duration-200 glass-strong",
+        scrolled ? "shadow-[var(--shadow-sm)]" : "",
       )}
     >
       <div className="mx-auto flex h-16 max-w-7xl items-center justify-between px-4 md:px-6">

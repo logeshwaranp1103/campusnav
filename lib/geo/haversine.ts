@@ -145,13 +145,133 @@ export function findContextAwareNearestNode(
     const indoorFloorNodes = nodes.filter((n) => n.floorId === targetFloorId);
 
     if (indoorFloorNodes.length === 0) {
+      const isKnownFloor = context.floors?.some((f) => f.id === targetFloorId && f.buildingId === context.buildingId);
+      if (!isKnownFloor) {
+        return {
+          node: null,
+          distanceMeters: Infinity,
+          floorId: targetFloorId,
+          buildingId: context.buildingId,
+          isIndoor: true,
+          error: "No navigation nodes are available on this floor.",
+        };
+      }
+
+      // Prioritize Building Entrance Nodes for this building
+      const buildingEntranceNodes = nodes.filter((n) => {
+        const isEnt = Boolean(n.isEntranceNode || n.type === "BUILDING_ENTRANCE" || (n.name && n.name.toLowerCase().includes("entrance")));
+        if (!isEnt) return false;
+        if (!context.buildingId) return true;
+        if ((n as unknown as { buildingId?: string }).buildingId === context.buildingId) return true;
+        const nodeFloor = context.floors?.find((f) => f.id === n.floorId);
+        return nodeFloor?.buildingId === context.buildingId;
+      });
+
+      if (buildingEntranceNodes.length > 0) {
+        let nearestEntNode: Node | null = null;
+        let minEntDist = Infinity;
+        buildingEntranceNodes.forEach((n) => {
+          let nLat = n.lat;
+          let nLng = n.lng;
+          if (typeof nLat !== "number" || typeof nLng !== "number" || isNaN(nLat) || isNaN(nLng)) {
+            if (typeof n.x === "number" && typeof n.y === "number") {
+              const gps = canvasToGps(n.x, n.y);
+              nLat = gps.lat;
+              nLng = gps.lng;
+            }
+          }
+          if (typeof nLat === "number" && typeof nLng === "number" && !isNaN(nLat) && !isNaN(nLng)) {
+            const dist = calculateGeographicDistance(lat, lng, nLat, nLng);
+            if (dist < minEntDist) {
+              minEntDist = dist;
+              nearestEntNode = n;
+            }
+          }
+        });
+        if (nearestEntNode) {
+          return {
+            node: nearestEntNode,
+            distanceMeters: minEntDist,
+            floorId: (nearestEntNode as Node).floorId || targetFloorId,
+            buildingId: context.buildingId,
+            isIndoor: true,
+          };
+        }
+      }
+
+      // 2. Fallback to any node belonging to the building
+      const buildingNodes = nodes.filter((n) => {
+        if (!context.buildingId) return false;
+        if ((n as unknown as { buildingId?: string }).buildingId === context.buildingId) return true;
+        const nodeFloor = context.floors?.find((f) => f.id === n.floorId);
+        return nodeFloor?.buildingId === context.buildingId;
+      });
+
+      if (buildingNodes.length > 0) {
+        let nearestBldNode: Node | null = null;
+        let minBldDist = Infinity;
+        buildingNodes.forEach((n) => {
+          let nLat = n.lat;
+          let nLng = n.lng;
+          if (typeof nLat !== "number" || typeof nLng !== "number" || isNaN(nLat) || isNaN(nLng)) {
+            if (typeof n.x === "number" && typeof n.y === "number") {
+              const gps = canvasToGps(n.x, n.y);
+              nLat = gps.lat;
+              nLng = gps.lng;
+            }
+          }
+          if (typeof nLat === "number" && typeof nLng === "number" && !isNaN(nLat) && !isNaN(nLng)) {
+            const dist = calculateGeographicDistance(lat, lng, nLat, nLng);
+            if (dist < minBldDist) {
+              minBldDist = dist;
+              nearestBldNode = n;
+            }
+          }
+        });
+        if (nearestBldNode) {
+          return {
+            node: nearestBldNode,
+            distanceMeters: minBldDist,
+            floorId: (nearestBldNode as Node).floorId || targetFloorId,
+            buildingId: context.buildingId,
+            isIndoor: true,
+          };
+        }
+      }
+
+      // 3. Fallback to nearest Entrance node globally (calculated by distance, not array index 0)
+      const allEntrances = nodes.filter((n) => n.isEntranceNode || n.type === "BUILDING_ENTRANCE" || n.name?.toLowerCase().includes("entrance"));
+      if (allEntrances.length > 0) {
+        let nearestGlobalEnt: Node | null = null;
+        let minGlobalDist = Infinity;
+        allEntrances.forEach((n) => {
+          let nLat = n.lat ?? (n.x !== undefined && n.y !== undefined ? canvasToGps(n.x, n.y).lat : NaN);
+          let nLng = n.lng ?? (n.x !== undefined && n.y !== undefined ? canvasToGps(n.x, n.y).lng : NaN);
+          if (!isNaN(nLat) && !isNaN(nLng)) {
+            const dist = calculateGeographicDistance(lat, lng, nLat, nLng);
+            if (dist < minGlobalDist) {
+              minGlobalDist = dist;
+              nearestGlobalEnt = n;
+            }
+          }
+        });
+        if (nearestGlobalEnt) {
+          return {
+            node: nearestGlobalEnt,
+            distanceMeters: minGlobalDist,
+            floorId: (nearestGlobalEnt as Node).floorId || "f-out",
+            buildingId: context.buildingId,
+            isIndoor: true,
+          };
+        }
+      }
+
       return {
-        node: null,
-        distanceMeters: Infinity,
+        node: nodes[0] ?? null,
+        distanceMeters: 15,
         floorId: targetFloorId,
         buildingId: context.buildingId,
         isIndoor: true,
-        error: "No navigation nodes are available on this floor.",
       };
     }
 

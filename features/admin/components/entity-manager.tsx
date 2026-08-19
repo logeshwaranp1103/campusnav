@@ -2210,7 +2210,7 @@ export function EntityManager() {
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
 
         {/* STEP 1: ENTITY TYPE SELECTOR (4 COLS - Hidden by default on mobile unless toggled) */}
-        <div className={cn("lg:col-span-4 space-y-3 transition-all duration-300 flex flex-col lg:sticky lg:top-20 self-start", !showMobilePanel ? "hidden lg:block" : "block")}>
+        <div className={cn("lg:col-span-4 space-y-3 transition-all duration-300 flex flex-col self-start", !showMobilePanel ? "hidden lg:block" : "block")}>
           <div className="flex items-center justify-between px-1">
             <div className="flex items-center gap-2">
               <span className="flex h-6 w-6 items-center justify-center rounded-full bg-[rgb(var(--primary))] text-white text-xs font-extrabold shadow-sm">1</span>
@@ -2221,7 +2221,7 @@ export function EntityManager() {
             </span>
           </div>
 
-          <div className="grid grid-cols-1 gap-2.5 max-h-[calc(100vh-220px)] overflow-y-auto pr-1 scrollbar-thin">
+          <div className="grid grid-cols-1 gap-2.5">
             {ENTITY_TYPES.map((item) => {
               const Icon = item.icon;
               const isSelected = selectedType === item.type;

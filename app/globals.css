@@ -86,7 +86,7 @@ body {
   font-feature-settings: "cv02", "cv03", "cv04", "cv11";
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  text-rendering: optimizeLegibility;
+  text-rendering: optimizeSpeed;
 }
 
 ::selection { background: rgb(var(--primary) / 0.25); color: rgb(var(--fg)); }
@@ -100,17 +100,21 @@ body {
 }
 .scrollbar-thin::-webkit-scrollbar-thumb:hover { background: rgb(var(--muted-fg) / 0.5); }
 
-/* Glass surfaces */
+/* Glass surfaces — Compositor layer locked for zero-flicker scrolling */
 .glass {
   background: rgb(var(--card) / 0.72);
   backdrop-filter: saturate(180%) blur(20px);
   -webkit-backdrop-filter: saturate(180%) blur(20px);
   border-color: rgb(var(--border) / 0.7);
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
 }
 .glass-strong {
   background: rgb(var(--card) / 0.85);
   backdrop-filter: saturate(200%) blur(24px);
   -webkit-backdrop-filter: saturate(200%) blur(24px);
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
 }
 
 /* Card primitives — Unified layer rendering locked to section background */
@@ -120,13 +124,14 @@ body {
   border-radius: var(--radius);
   box-shadow: var(--shadow-sm);
   transition: box-shadow 0.2s ease, border-color 0.2s ease, background-color 0.2s ease;
+  contain: paint layout;
 }
 .card-hover:hover {
   box-shadow: var(--shadow-md);
   border-color: rgb(var(--border-strong));
 }
 
-/* Gradient utilities */
+/* Gradient utilities — GPU texture locked to eliminate subpixel text flicker */
 .gradient-primary {
   background-image: linear-gradient(135deg, rgb(var(--primary)) 0%, rgb(var(--primary-2)) 100%);
 }
@@ -135,6 +140,10 @@ body {
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
+  -webkit-font-smoothing: antialiased;
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+  transform: translateZ(0);
 }
 .gradient-border {
   position: relative;
@@ -201,24 +210,23 @@ body {
 }
 .animate-marquee { animation: marquee 30s linear infinite; }
 
-@keyframes fadeUp {
-  from { opacity: 0; transform: translateY(12px); }
-  to { opacity: 1; transform: translateY(0); }
-}
-.animate-fade-up { animation: fadeUp 0.6s ease-out both; }
-
-/* Focus ring helper */
-.ring-focus {
-  outline: none;
-}
-.ring-focus:focus-visible {
-  box-shadow: 0 0 0 2px rgb(var(--bg)), 0 0 0 4px rgb(var(--ring));
-}
-
-/* Typography helpers */
+/* Typography helpers & hardware render locking */
 .h-display {
   letter-spacing: -0.03em;
   line-height: 1.05;
+}
+
+/* Global text rendering & subpixel rasterization lock */
+h1, h2, h3, h4, h5, h6, p, span, a, button, label, input, td, th {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeSpeed;
+}
+
+/* Hardware accelerated animation keyframes */
+@keyframes fadeUp {
+  from { opacity: 0; transform: translate3d(0, 12px, 0); }
+  to { opacity: 1; transform: translate3d(0, 0, 0); }
 }
 
 /* Fix native browser fullscreen backdrop & overflow black border bleeding */

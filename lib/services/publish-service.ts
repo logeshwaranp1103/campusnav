@@ -125,6 +125,8 @@ export async function publishDraftGraph(
 
       versionNum = (dbPublished?.version ?? 0) + 1;
 
+      const sanitizedSnapshot = sanitizeSnapshotForPayload(draftSnapshot);
+
       // 2. ATOMIC DATABASE TRANSACTION for Core Publish Records
       // Ensures publishedGraph, draftGraph, and mapVersion are atomically committed
       await prisma.$transaction([
@@ -144,14 +146,14 @@ export async function publishDraftGraph(
           where: { id: "active-published" },
           update: {
             version: versionNum,
-            snapshot: draftSnapshot as any,
+            snapshot: sanitizedSnapshot as any,
             publishedAt,
             publishedBy: userId,
           },
           create: {
             id: "active-published",
             version: versionNum,
-            snapshot: draftSnapshot as any,
+            snapshot: sanitizedSnapshot as any,
             publishedAt,
             publishedBy: userId,
           },
@@ -165,7 +167,7 @@ export async function publishDraftGraph(
           data: {
             version: versionNum,
             status: "PUBLISHED",
-            snapshot: draftSnapshot as any,
+            snapshot: sanitizedSnapshot as any,
             notes: notes || "Published campus graph update",
             publishedBy: userId,
           },
@@ -383,9 +385,10 @@ export async function publishDraftGraph(
   }
 
   // Update server in-memory cache ONLY after database write succeeds
+  const finalSanitized = sanitizeSnapshotForPayload(draftSnapshot);
   activePublishedSnapshot = {
     version: versionNum,
-    snapshot: draftSnapshot,
+    snapshot: finalSanitized,
     publishedAt,
     publishedBy: userId,
     notes: notes || "Published campus graph update",
@@ -556,9 +559,10 @@ export async function getActivePublishedGraph(forceFresh = false) {
       })) as any;
 
       if (dbRecord && dbRecord.snapshot) {
+        const sanitized = sanitizeSnapshotForPayload(dbRecord.snapshot as DraftSnapshot);
         activePublishedSnapshot = {
           version: dbRecord.version,
-          snapshot: dbRecord.snapshot as DraftSnapshot,
+          snapshot: sanitized,
           publishedAt: dbRecord.publishedAt,
           publishedBy: dbRecord.publishedBy || "admin",
           notes: "Database published graph",
@@ -569,9 +573,10 @@ export async function getActivePublishedGraph(forceFresh = false) {
       // Fallback: Assemble snapshot from PostgreSQL relational tables if active-published record does not exist yet
       const relational = await getRelationalGraphFromDatabase();
       if (relational && ((relational.buildings && relational.buildings.length > 0) || (relational.nodes && relational.nodes.length > 0))) {
+        const sanitizedRelational = sanitizeSnapshotForPayload(relational);
         activePublishedSnapshot = {
           version: 1,
-          snapshot: relational,
+          snapshot: sanitizedRelational,
           publishedAt: new Date(),
           publishedBy: "system-auto",
           notes: "Auto-assembled from relational database",
@@ -580,8 +585,8 @@ export async function getActivePublishedGraph(forceFresh = false) {
         // Auto-seed active-published row so subsequent calls are fast
         await prisma.publishedGraph.upsert({
           where: { id: "active-published" },
-          update: { version: 1, snapshot: relational as any },
-          create: { id: "active-published", version: 1, snapshot: relational as any },
+          update: { version: 1, snapshot: sanitizedRelational as any },
+          create: { id: "active-published", version: 1, snapshot: sanitizedRelational as any },
         }).catch((e) => console.warn("Notice: Auto-seeding published graph failed:", e?.message));
 
         return activePublishedSnapshot;

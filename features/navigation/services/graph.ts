@@ -2,7 +2,7 @@ import { campusStore } from "../../../shared/lib/campus-store";
 import type { Edge, Node, Obstacle } from "../../../shared/data/campus";
 import { buildAdjacencyGraph } from "../../../lib/routing/graph";
 import { findShortestPath } from "../../../lib/routing/dijkstra";
-import { calculateTurnAngle, turnIconFromAngle, getNodeVector } from "../../../lib/routing/directions";
+import { calculateTurnAngle, turnIconFromAngle, getNodeVector, cleanLandmarkName, formatInstructionText } from "../../../lib/routing/directions";
 
 export type RouteInstruction = {
   text: string;
@@ -343,6 +343,18 @@ function buildInstructions(
   floorById: (id: string) => ReturnType<typeof campusStore.getWorkingData>["floors"][0] | undefined,
   buildingById: (id: string) => ReturnType<typeof campusStore.getWorkingData>["buildings"][0] | undefined
 ): RouteInstruction[] {
+  if (ns.length < 2 || es.length === 0) {
+    const lastNode = ns[0];
+    const landmark = cleanLandmarkName(lastNode?.name);
+    return [
+      {
+        text: landmark ? `Arrived at ${landmark}` : "Arrived",
+        distance: 0,
+        transition: "arrive",
+      },
+    ];
+  }
+
   const out: RouteInstruction[] = [];
   let lastFloor = ns[0]?.floorId;
   let prevVector: { dx: number; dy: number } | null = null;
@@ -358,146 +370,38 @@ function buildInstructions(
     const isFloorTransition = to.floorId !== lastFloor;
 
     const currentVector = getNodeVector(fromNode, to);
-    let turnType: "straight" | "slight-left" | "left" | "sharp-left" | "slight-right" | "right" | "sharp-right" | "u-turn" | null = null;
+    let icon = "straight" as any;
 
     if (prevVector !== null && !isFloorTransition && edge.type !== "LIFT" && edge.type !== "STAIRS") {
       const angleDeg = calculateTurnAngle(prevVector, currentVector);
-      turnType = turnIconFromAngle(angleDeg) as any;
+      icon = turnIconFromAngle(angleDeg);
     }
 
     let text = "";
     let transitionType: RouteInstruction["transition"] = undefined;
 
     if (edge.type === "LIFT") {
-      const liftPhrases = [
-        `Take the lift to ${floor?.name ?? "next floor"}`,
-        `Use the elevator to ${floor?.name ?? "next floor"}`,
-        `Take the lift up to ${floor?.name ?? "next floor"}`,
-      ];
-      text = liftPhrases[i % liftPhrases.length];
+      text = `Take lift to ${floor?.name ?? "next floor"}`;
       transitionType = "floor";
       prevVector = null;
     } else if (edge.type === "STAIRS") {
-      const stairPhrases = [
-        `Take the stairs to ${floor?.name ?? "next floor"}`,
-        `Go via stairs to ${floor?.name ?? "next floor"}`,
-        `Climb stairs to ${floor?.name ?? "next floor"}`,
-      ];
-      text = stairPhrases[i % stairPhrases.length];
+      text = `Take stairs to ${floor?.name ?? "next floor"}`;
       transitionType = "floor";
       prevVector = null;
     } else if (isFloorTransition && edge.type === "RAMP") {
-      text = `Take the ramp to ${floor?.name ?? "next floor"}`;
+      text = `Take ramp to ${floor?.name ?? "next floor"}`;
       transitionType = "floor";
       prevVector = currentVector;
-    } else if (to.type === "ENTRANCE" && isFloorTransition) {
-      const entrancePhrases = [
-        `Enter ${bld?.name ?? "the building"}`,
-        `Head inside ${bld?.name ?? "the building"}`,
-        `Proceed into ${bld?.name ?? "the building"}`,
-        `Walk into ${bld?.name ?? "the building"}`,
-      ];
-      text = entrancePhrases[i % entrancePhrases.length];
+    } else if ((to.type === "ENTRANCE" || to.type === "BUILDING_ENTRANCE" || to.isEntranceNode) && isFloorTransition) {
+      text = `Enter ${bld?.name ?? "building"}`;
       transitionType = "outdoor->indoor";
       prevVector = currentVector;
     } else if (isFloorTransition) {
-      text = `Walk outdoor path to ${floor?.name ?? "next floor"}`;
+      text = `Go to ${floor?.name ?? "next floor"}`;
       transitionType = "floor";
       prevVector = currentVector;
-    } else if (to.name) {
-      if (turnType && turnType !== "straight") {
-        switch (turnType) {
-          case "slight-left": {
-            const phrases = [`Bear slightly left towards ${to.name}`, `Veer left towards ${to.name}`, `Turn slightly left toward ${to.name}`];
-            text = phrases[i % phrases.length];
-            break;
-          }
-          case "left": {
-            const phrases = [`Turn left towards ${to.name}`, `Take a left turn toward ${to.name}`, `Head left to ${to.name}`];
-            text = phrases[i % phrases.length];
-            break;
-          }
-          case "sharp-left": {
-            const phrases = [`Make a sharp left turn towards ${to.name}`, `Turn sharply left toward ${to.name}`];
-            text = phrases[i % phrases.length];
-            break;
-          }
-          case "slight-right": {
-            const phrases = [`Bear slightly right towards ${to.name}`, `Veer right towards ${to.name}`, `Turn slightly right toward ${to.name}`];
-            text = phrases[i % phrases.length];
-            break;
-          }
-          case "right": {
-            const phrases = [`Turn right towards ${to.name}`, `Take a right turn toward ${to.name}`, `Head right to ${to.name}`];
-            text = phrases[i % phrases.length];
-            break;
-          }
-          case "sharp-right": {
-            const phrases = [`Make a sharp right turn towards ${to.name}`, `Turn sharply right toward ${to.name}`];
-            text = phrases[i % phrases.length];
-            break;
-          }
-          case "u-turn": {
-            const phrases = [`Make a U-turn towards ${to.name}`, `Turn around towards ${to.name}`];
-            text = phrases[i % phrases.length];
-            break;
-          }
-        }
-      } else {
-        if (to.type === "ENTRANCE") {
-          const phrases = [
-            `Head to ${to.name}`,
-            `Proceed to ${to.name}`,
-            `Make your way to ${to.name}`,
-            `Continue to ${to.name}`,
-          ];
-          text = phrases[i % phrases.length];
-        } else if (to.type === "CORRIDOR" || to.type === "JUNCTION") {
-          const phrases = [
-            `Follow path towards ${to.name}`,
-            `Proceed along corridor to ${to.name}`,
-            `Head straight past ${to.name}`,
-            `Continue through ${to.name}`,
-          ];
-          text = phrases[i % phrases.length];
-        } else if (to.type === "RECEPTION") {
-          const phrases = [
-            `Proceed to ${to.name}`,
-            `Head over to ${to.name}`,
-            `Walk straight to ${to.name}`,
-            `Continue to ${to.name}`,
-          ];
-          text = phrases[i % phrases.length];
-        } else {
-          // Varied general progression action verbs (avoiding repetitive "Continue to")
-          const generalPhrases = [
-            `Continue to ${to.name}`,
-            `Head towards ${to.name}`,
-            `Proceed to ${to.name}`,
-            `Walk straight to ${to.name}`,
-            `Make your way to ${to.name}`,
-            `Follow path to ${to.name}`,
-            `Head over to ${to.name}`,
-            `Advance towards ${to.name}`,
-            `Keep going towards ${to.name}`,
-          ];
-          text = generalPhrases[i % generalPhrases.length];
-        }
-      }
-      prevVector = currentVector;
     } else {
-      if (turnType && turnType !== "straight") {
-        const action = turnType.replace("-", " ");
-        text = `Turn ${action} and walk ${Math.round(edge.distance)} m`;
-      } else {
-        const walkPhrases = [
-          `Walk ${Math.round(edge.distance)} m`,
-          `Continue straight for ${Math.round(edge.distance)} m`,
-          `Proceed ${Math.round(edge.distance)} m straight`,
-          `Walk ahead for ${Math.round(edge.distance)} m`,
-        ];
-        text = walkPhrases[i % walkPhrases.length];
-      }
+      text = formatInstructionText(icon, to.name);
       prevVector = currentVector;
     }
 
@@ -512,17 +416,11 @@ function buildInstructions(
   }
 
   const last = ns[ns.length - 1];
-  if (last?.name) {
-    const arrivalPhrases = [
-      `Arrive at ${last.name}`,
-      `You have reached ${last.name}`,
-      `Arrive at ${last.name}`,
-    ];
-    out.push({
-      text: arrivalPhrases[es.length % arrivalPhrases.length],
-      distance: 0,
-      transition: "arrive",
-    });
-  }
+  const lastLandmark = cleanLandmarkName(last?.name);
+  out.push({
+    text: lastLandmark ? `Arrived at ${lastLandmark}` : "Arrived",
+    distance: 0,
+    transition: "arrive",
+  });
   return out;
 }

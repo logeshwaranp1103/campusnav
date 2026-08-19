@@ -3,7 +3,7 @@ import { getActivePublishedGraph, publishDraftGraph, sanitizeSnapshotForPayload 
 
 export async function GET(req: Request) {
   try {
-    const publishedServiceData = await getActivePublishedGraph(true);
+    const publishedServiceData = await getActivePublishedGraph(false);
 
     const rawData = publishedServiceData?.snapshot ?? {
       buildings: [],
@@ -26,7 +26,7 @@ export async function GET(req: Request) {
         status: 304,
         headers: {
           ETag: etag,
-          "Cache-Control": "no-cache, must-revalidate",
+          "Cache-Control": "public, max-age=10, s-maxage=60, stale-while-revalidate=86400",
         },
       });
     }
@@ -40,7 +40,7 @@ export async function GET(req: Request) {
       {
         headers: {
           ETag: etag,
-          "Cache-Control": "no-cache, must-revalidate",
+          "Cache-Control": "public, max-age=10, s-maxage=60, stale-while-revalidate=86400",
         },
       }
     );

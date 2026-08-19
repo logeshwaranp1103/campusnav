@@ -16,6 +16,7 @@ import {
   X,
   CheckCircle2,
   ChevronRight,
+  ChevronLeft,
 } from "lucide-react";
 import { Button } from "@/shared/components/ui/button";
 import type { DirectionStep } from "@/lib/routing/directions";
@@ -29,6 +30,8 @@ interface TurnByTurnBarProps {
   totalStepsCount: number;
   onEndNavigation: () => void;
   onRecalculate?: () => void;
+  onNextStep?: () => void;
+  onPrevStep?: () => void;
   isOffRoute?: boolean;
 }
 
@@ -41,6 +44,8 @@ export function TurnByTurnBar({
   totalStepsCount,
   onEndNavigation,
   onRecalculate,
+  onNextStep,
+  onPrevStep,
   isOffRoute,
 }: TurnByTurnBarProps) {
   if (!currentStep) return null;
@@ -129,11 +134,11 @@ export function TurnByTurnBar({
           </Button>
         </div>
 
-        {/* Next Step Preview Banner */}
+        {/* Next Step Preview Banner (Non-interactive) */}
         {nextStep && (
           <div className="flex items-center gap-2 border-t border-gray-800/80 pt-2 text-xs text-gray-300">
-            <span className="font-semibold text-gray-400 uppercase tracking-wider text-[10px]">Next:</span>
-            <span className="truncate">{nextStep.text}</span>
+            <span className="font-semibold text-emerald-400 uppercase tracking-wider text-[10px] shrink-0">NEXT:</span>
+            <span className="truncate font-medium">{nextStep.text}</span>
             <ChevronRight className="h-3.5 w-3.5 text-gray-500 shrink-0 ml-auto" />
           </div>
         )}

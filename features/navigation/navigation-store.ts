@@ -83,6 +83,8 @@ export interface NavigationSessionState {
     confidence: PositionConfidence
   ) => void;
   cancelNavigationSession: () => void;
+  advanceToNextStep: () => void;
+  advanceToPrevStep: () => void;
   setGpsSignalLost: () => void;
   setNavigationStatus: (status: NavigationStatus, errorMessage?: string) => void;
 }
@@ -334,6 +336,84 @@ export const useNavigationStore = create<NavigationSessionState>((set, get) => (
         positionConfidence: "LOW",
       });
     }
+  },
+
+  advanceToNextStep: () => {
+    const state = get();
+    const { activeRoute, currentSegmentIndex, destination } = state;
+    if (!activeRoute) return;
+
+    const instructions = activeRoute.instructions || [];
+    const nextIndex = currentSegmentIndex + 1;
+
+    if (nextIndex >= instructions.length) {
+      set({
+        status: "ARRIVED",
+        navigationMode: "ARRIVED",
+        currentSegmentIndex: Math.max(0, instructions.length - 1),
+        distanceRemaining: 0,
+        etaSeconds: 0,
+        currentInstruction: { text: `🎉 Arrived at ${destination?.name ?? "destination"}`, distance: 0, transition: "arrive" },
+        nextInstruction: null,
+      });
+      return;
+    }
+
+    const currentInstruction = instructions[nextIndex] ?? null;
+    const nextInstruction = instructions[nextIndex + 1] ?? null;
+    const matchedNode = activeRoute.nodes[nextIndex] ?? activeRoute.nodes[activeRoute.nodes.length - 1];
+
+    let remainingDistance = 0;
+    for (let i = nextIndex; i < activeRoute.nodes.length - 1; i++) {
+      const n1 = activeRoute.nodes[i];
+      const n2 = activeRoute.nodes[i + 1];
+      if (n1 && n2) {
+        remainingDistance += Math.hypot(n2.x - n1.x, n2.y - n1.y);
+      }
+    }
+
+    set({
+      status: "NAVIGATING",
+      currentSegmentIndex: nextIndex,
+      matchedNodeId: matchedNode?.id ?? state.matchedNodeId,
+      currentFloorId: matchedNode?.floorId ?? state.currentFloorId,
+      distanceRemaining: Math.round(remainingDistance),
+      etaSeconds: Math.max(1, Math.round(remainingDistance / AVERAGE_WALKING_SPEED_MPS)),
+      currentInstruction,
+      nextInstruction,
+    });
+  },
+  advanceToPrevStep: () => {
+    const state = get();
+    const { activeRoute, currentSegmentIndex } = state;
+    if (!activeRoute || currentSegmentIndex <= 0) return;
+
+    const instructions = activeRoute.instructions || [];
+    const prevIndex = currentSegmentIndex - 1;
+
+    const currentInstruction = instructions[prevIndex] ?? null;
+    const nextInstruction = instructions[prevIndex + 1] ?? null;
+    const matchedNode = activeRoute.nodes[prevIndex] ?? activeRoute.nodes[0];
+
+    let remainingDistance = 0;
+    for (let i = prevIndex; i < activeRoute.nodes.length - 1; i++) {
+      const n1 = activeRoute.nodes[i];
+      const n2 = activeRoute.nodes[i + 1];
+      if (n1 && n2) {
+        remainingDistance += Math.hypot(n2.x - n1.x, n2.y - n1.y);
+      }
+    }
+
+    set({
+      status: "NAVIGATING",
+      currentSegmentIndex: prevIndex,
+      matchedNodeId: matchedNode?.id ?? state.matchedNodeId,
+      currentFloorId: matchedNode?.floorId ?? state.currentFloorId,
+      distanceRemaining: Math.round(remainingDistance),
+      etaSeconds: Math.max(1, Math.round(remainingDistance / AVERAGE_WALKING_SPEED_MPS)),
+      currentInstruction,
+      nextInstruction,
+    });
   },
 
   cancelNavigationSession: () =>

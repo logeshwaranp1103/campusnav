@@ -2349,7 +2349,7 @@ class CampusStore {
         // Visitor: fetch only the published graph
         let loaded = false;
         try {
-          const resPub = await fetch("/api/published-graph", { cache: "no-store" });
+          const resPub = await fetch("/api/published-graph");
           if (resPub.ok) {
             const jsonPub = await resPub.json();
             const graph = jsonPub?.graph;

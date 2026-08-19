@@ -216,6 +216,7 @@ export function CampusMap({ route, livePosition, progress, gps: passedGps, onNav
         externalZoom={zoomLevel}
         resetTrigger={resetTrigger}
         onSelectDestination={(dest) => setSelectedDestForDetails(dest)}
+        fromSelected={fromSelected}
       />
 
       {/* Floating View, Zoom & Layer Controls */}
@@ -398,6 +399,7 @@ function MapCanvas({
   externalZoom = 1,
   resetTrigger = 0,
   onSelectDestination,
+  fromSelected,
 }: {
   floorId: string;
   route: Route | null;
@@ -411,6 +413,7 @@ function MapCanvas({
   externalZoom?: number;
   resetTrigger?: number;
   onSelectDestination?: (dest: Destination) => void;
+  fromSelected?: Destination | null;
 }) {
   const { buildings, nodes: allNodes, edges: allEdges, destinations: allDestinations, events: allEvents } = publishedData;
   const svgRef = useRef<SVGSVGElement | null>(null);
@@ -1338,8 +1341,8 @@ function MapCanvas({
         );
       })}
 
-      {/* Device GPS Live Marker with Accuracy Circle & Heading Cone */}
-      {gps && gps.isGpsActive && (
+      {/* Device GPS Live Marker with Accuracy Circle & Heading Cone (Rendered ONLY when starting from 'Your Location') */}
+      {gps && gps.isGpsActive && fromSelected?.id === "dest-live-user-location" && (
         <g transform={`translate(${gps.canvasPos.x}, ${gps.canvasPos.y})`}>
           {/* Accuracy Ring */}
           <circle
@@ -1361,8 +1364,8 @@ function MapCanvas({
         </g>
       )}
 
-      {/* Dynamic Connector Line: Live GPS Position to Nearest Routing Entry Node */}
-      {gps && gps.isGpsActive && route && route.nodes.length > 0 && (route.nodes[0].floorId === floorId || floorId === "f-out") && (
+      {/* Dynamic Connector Line: Live GPS Position to Nearest Routing Entry Node (Rendered ONLY when starting from 'Your Location') */}
+      {gps && gps.isGpsActive && fromSelected?.id === "dest-live-user-location" && route && route.nodes.length > 0 && (route.nodes[0].floorId === floorId || floorId === "f-out") && (
         <g pointerEvents="none">
           <line
             x1={gps.canvasPos.x}

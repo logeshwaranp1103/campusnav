@@ -74,14 +74,65 @@ export function turnIconFromAngle(angleDeg: number): DirectionIcon {
   let norm = ((angleDeg % 360) + 360) % 360;
   if (norm > 180) norm -= 360;
 
-  if (Math.abs(norm) <= 20) return "straight";
-  if (norm > 20 && norm <= 45) return "slight-right";
+  if (Math.abs(norm) <= 25) return "straight";
+  if (norm > 25 && norm <= 45) return "slight-right";
   if (norm > 45 && norm <= 135) return "right";
-  if (norm > 135 && norm < 160) return "sharp-right";
-  if (norm < -20 && norm >= -45) return "slight-left";
+  if (norm > 135 && norm < 155) return "sharp-right";
+  if (norm < -25 && norm >= -45) return "slight-left";
   if (norm < -45 && norm >= -135) return "left";
-  if (norm < -135 && norm > -160) return "sharp-left";
+  if (norm < -135 && norm > -155) return "sharp-left";
   return "u-turn";
+}
+
+export function cleanLandmarkName(name?: string): string | null {
+  if (!name) return null;
+  const trimmed = name.trim();
+  if (!trimmed) return null;
+  if (/^(n\d+|node[_\-\s]*\d+|wp[_\-\s]*\d+|point[_\-\s]*\d+|corridor[_\-\s]*\d+|junction[_\-\s]*\d+|stair[_\-\s]*\d+|lift[_\-\s]*\d+)$/i.test(trimmed)) {
+    return null;
+  }
+  return trimmed;
+}
+
+export function formatInstructionText(
+  icon: DirectionIcon,
+  targetName?: string,
+  floorChange?: { from: string; to: string; toFloorName?: string },
+  isEntrance?: boolean,
+  bldName?: string
+): string {
+  const landmark = cleanLandmarkName(targetName);
+
+  if (icon === "lift") {
+    return floorChange?.toFloorName ? `Take lift to ${floorChange.toFloorName}` : "Take the lift";
+  }
+  if (icon === "stairs-up" || icon === "stairs-down") {
+    return floorChange?.toFloorName ? `Take stairs to ${floorChange.toFloorName}` : "Take the stairs";
+  }
+  if (isEntrance) {
+    return bldName ? `Enter ${bldName}` : "Enter building";
+  }
+
+  switch (icon) {
+    case "straight":
+      return landmark ? `Go straight to ${landmark}` : "Go straight";
+    case "slight-left":
+      return landmark ? `Keep left at ${landmark}` : "Keep left";
+    case "left":
+    case "sharp-left":
+      return landmark ? `Turn left at ${landmark}` : "Turn left";
+    case "slight-right":
+      return landmark ? `Keep right at ${landmark}` : "Keep right";
+    case "right":
+    case "sharp-right":
+      return landmark ? `Turn right at ${landmark}` : "Turn right";
+    case "u-turn":
+      return landmark ? `U-turn at ${landmark}` : "U-turn";
+    case "arrive":
+      return landmark ? `Arrived at ${landmark}` : "Arrived";
+    default:
+      return "Go straight";
+  }
 }
 
 export function generateDirections(
@@ -91,9 +142,10 @@ export function generateDirections(
 ): DirectionStep[] {
   if (nodes.length < 2 || edges.length === 0) {
     if (nodes.length === 1) {
+      const landmark = cleanLandmarkName(nodes[0].name);
       return [
         {
-          text: `Arrive at ${nodes[0].name ?? "destination"}`,
+          text: landmark ? `Arrived at ${landmark}` : "Arrived",
           distanceMeters: 0,
           icon: "arrive",
           targetNodeId: nodes[0].id,
@@ -116,12 +168,11 @@ export function generateDirections(
     const toFloor = toNode.floorId;
     const isFloorTransition = fromFloor !== toFloor;
 
-    const fromFloorName = floorNames.get(fromFloor) ?? fromFloor;
     const toFloorName = floorNames.get(toFloor) ?? toFloor;
 
     if (edge.type === "LIFT") {
       steps.push({
-        text: `Take the lift from ${fromFloorName} to ${toFloorName}`,
+        text: `Take lift to ${toFloorName}`,
         distanceMeters: edge.distance,
         icon: "lift",
         floorChange: { from: fromFloor, to: toFloor },
@@ -134,20 +185,19 @@ export function generateDirections(
     if (edge.type === "STAIRS") {
       const getFloorRank = (fId?: string, fName?: string, nName?: string): number => {
         const combined = `${fId || ""} ${fName || ""} ${nName || ""}`.toLowerCase();
-        if (combined.includes("ground") || combined.includes("gnd") || combined.endsWith("-g") || combined.endsWith("-gnd") || combined.endsWith("-0")) return 0;
+        if (combined.includes("ground") || combined.includes("gnd") || combined.endsWith("-g") || combined.endsWith("-0")) return 0;
         if (combined.includes("base") || combined.includes("b-") || combined.includes("-1")) return -1;
         const match = combined.match(/(?:floor|fl|level|lvl|f)\s*(\d+)/i);
         if (match) return parseInt(match[1], 10);
         return 0;
       };
 
-      const fromRank = getFloorRank(fromFloor, fromFloorName, fromNode.name);
+      const fromRank = getFloorRank(fromFloor, floorNames.get(fromFloor), fromNode.name);
       const toRank = getFloorRank(toFloor, toFloorName, toNode.name);
       const isUp = toRank >= fromRank;
-      const dirWord = toRank > fromRank ? "up " : toRank < fromRank ? "down " : "";
 
       steps.push({
-        text: `Take the stairs to ${toFloorName}`,
+        text: `Take stairs to ${toFloorName}`,
         distanceMeters: edge.distance,
         icon: isUp ? "stairs-up" : "stairs-down",
         floorChange: isFloorTransition ? { from: fromFloor, to: toFloor } : undefined,
@@ -167,44 +217,13 @@ export function generateDirections(
     }
     prevVector = currentVector;
 
-    let text = "";
-    if (toNode.name) {
-      if (icon === "straight") {
-        const straightPhrases = [
-          `Continue straight toward ${toNode.name}`,
-          `Head straight towards ${toNode.name}`,
-          `Proceed straight to ${toNode.name}`,
-          `Walk straight to ${toNode.name}`,
-          `Make your way to ${toNode.name}`,
-          `Follow path to ${toNode.name}`,
-        ];
-        text = straightPhrases[i % straightPhrases.length];
-      } else {
-        const turnAction = icon.replace("-", " ");
-        if (icon === "slight-left" || icon === "slight-right") {
-          const phrases = [`Bear ${turnAction} toward ${toNode.name}`, `Veer ${turnAction.replace("slight ", "")} toward ${toNode.name}`];
-          text = phrases[i % phrases.length];
-        } else if (icon === "sharp-left" || icon === "sharp-right") {
-          text = `Make a sharp ${turnAction.replace("sharp ", "")} turn toward ${toNode.name}`;
-        } else if (icon === "u-turn") {
-          text = `Make a U-turn toward ${toNode.name}`;
-        } else {
-          const phrases = [`Turn ${turnAction} toward ${toNode.name}`, `Take a ${turnAction} turn toward ${toNode.name}`, `Head ${turnAction} to ${toNode.name}`];
-          text = phrases[i % phrases.length];
-        }
-      }
-    } else {
-      if (icon === "straight") {
-        const walkPhrases = [
-          `Walk ${Math.round(edge.distance)} m straight`,
-          `Continue straight for ${Math.round(edge.distance)} m`,
-          `Proceed ${Math.round(edge.distance)} m ahead`,
-        ];
-        text = walkPhrases[i % walkPhrases.length];
-      } else {
-        text = `Turn ${icon.replace("-", " ")} and walk ${Math.round(edge.distance)} m`;
-      }
-    }
+    const isEntrance = toNode.type === "ENTRANCE" || toNode.type === "BUILDING_ENTRANCE" || toNode.isEntranceNode;
+    const text = formatInstructionText(
+      icon,
+      toNode.name,
+      isFloorTransition ? { from: fromFloor, to: toFloor, toFloorName } : undefined,
+      isEntrance && isFloorTransition
+    );
 
     steps.push({
       text,
@@ -217,8 +236,9 @@ export function generateDirections(
   }
 
   const lastNode = nodes[nodes.length - 1];
+  const lastLandmark = cleanLandmarkName(lastNode.name);
   steps.push({
-    text: `Arrive at ${lastNode.name ?? "your destination"}`,
+    text: lastLandmark ? `Arrived at ${lastLandmark}` : "Arrived",
     distanceMeters: 0,
     icon: "arrive",
     targetNodeId: lastNode.id,

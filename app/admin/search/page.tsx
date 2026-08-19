@@ -7,7 +7,22 @@ import { Badge } from "@/shared/components/ui/badge";
 import { Button } from "@/shared/components/ui/button";
 import { Plus, LayoutGrid, Table } from "lucide-react";
 import { campusStore } from "@/shared/lib/campus-store";
-import { DigitalTwinEditor } from "@/features/admin/components/digital-twin-editor";
+import dynamic from "next/dynamic";
+
+const DigitalTwinEditor = dynamic(
+  () => import("@/features/admin/components/digital-twin-editor").then((mod) => mod.DigitalTwinEditor),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="flex h-96 w-full items-center justify-center rounded-2xl border bg-[rgb(var(--card))]">
+        <div className="flex items-center gap-3 text-sm font-semibold text-[rgb(var(--muted-fg))]">
+          <div className="h-5 w-5 animate-spin rounded-full border-2 border-[rgb(var(--primary))] border-t-transparent" />
+          <span>Loading CAD Canvas Editor...</span>
+        </div>
+      </div>
+    ),
+  }
+);
 
 export default function Page() {
   const [storeData, setStoreData] = useState(campusStore.getWorkingData());

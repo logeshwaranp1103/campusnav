@@ -34,6 +34,7 @@ import { TurnByTurnBar } from "./turn-by-turn-bar";
 import { getValidNavigationDestinations } from "@/shared/lib/destination-utils";
 import { findNearestNodeByGps, findContextAwareNearestNode } from "@/lib/geo/haversine";
 import { detectBuildingAtGps } from "@/lib/geo/containment";
+import { isPointInsideBuilding } from "@/lib/geo/building-geometry";
 import { useVisitorGps } from "@/shared/hooks/use-visitor-gps";
 import { useNavigationStore } from "@/features/navigation/navigation-store";
 
@@ -167,7 +168,7 @@ export function NavigateShell() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mounted, params, allDestinations]);
 
-  // Auto-detect building containment & prompt for floor when user is using live location
+  // Auto-detect building containment silently for live GPS tracking (NO automatic modal popups)
   useEffect(() => {
     if (!mounted || !gps.isGpsActive || gps.lat === 0 || gps.lng === 0) return;
     if (fromSelected?.id !== YOUR_LOCATION_ID && !live) return;
@@ -181,41 +182,33 @@ export function NavigateShell() {
 
     if (detection.isInside && detection.building) {
       const bld = detection.building;
-      const bldFloors = (publishedData.floors || [])
-        .filter((f) => f.buildingId === bld.id)
-        .sort((a, b) => a.ordinal - b.ordinal);
-
       if (lastPromptedBuildingIdRef.current !== bld.id) {
         lastPromptedBuildingIdRef.current = bld.id;
         setDetectedBuilding(bld);
-
-        if (bldFloors.length > 1) {
-          // Multi-floor building -> Prompt user for floor!
-          setShowFloorModal(true);
-          toast({
-            type: "info",
-            title: `Inside ${bld.name}`,
-            description: "Please confirm which floor you are on for accurate indoor routing.",
-          });
-        } else if (bldFloors.length === 1) {
-          // Single-floor building -> auto-select
-          const singleFloorId = bldFloors[0].id;
-          setSelectedFloorId(singleFloorId);
-          setShowFloorModal(false);
-          useNavigationStore.getState().setIndoorContext(bld.id, singleFloorId, "INDOOR_GRAPH_CONTEXT", "HIGH");
-        }
       }
     } else {
-      // User is outdoors
       if (lastPromptedBuildingIdRef.current !== null) {
         lastPromptedBuildingIdRef.current = null;
         setDetectedBuilding(null);
-        setSelectedFloorId("f-out");
-        setShowFloorModal(false);
-        useNavigationStore.getState().setIndoorContext(null, "f-out", "OUTDOOR_GPS", "HIGH");
       }
     }
-  }, [mounted, gps.lat, gps.lng, gps.isGpsActive, fromSelected?.id, live, publishedData.buildings, publishedData.floors]);
+  }, [mounted, gps.lat, gps.lng, gps.isGpsActive, fromSelected?.id, live, publishedData.buildings]);
+
+  // Automatically sync map floor & update user location when user arrives at destination via Live GPS
+  useEffect(() => {
+    if (navSession.status === "ARRIVED" && toSelected) {
+      if (toSelected.floorId && toSelected.floorId !== selectedFloorId) {
+        setSelectedFloorId(toSelected.floorId);
+      }
+      setFromSelected(toSelected);
+      setFromQuery(toSelected.name);
+      toast({
+        type: "success",
+        title: "🎉 Destination Reached!",
+        description: `You have arrived at ${toSelected.name}. Your location has been updated.`,
+      });
+    }
+  }, [navSession.status]);
 
   // Suggestions for FROM (Always place "📍 Your Location" as the VERY FIRST option)
   const fromSuggestions = useMemo(() => {
@@ -1122,6 +1115,12 @@ export function NavigateShell() {
             }}
             onRecalculate={() => {
               if (fromSelected && toSelected) calculateRoute(fromSelected, toSelected);
+            }}
+            onNextStep={() => {
+              navSession.advanceToNextStep();
+            }}
+            onPrevStep={() => {
+              navSession.advanceToPrevStep();
             }}
           />
         )}

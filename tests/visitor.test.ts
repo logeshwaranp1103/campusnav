@@ -91,7 +91,7 @@ describe("Visitor Navigation Engine & Services", () => {
 
     expect(steps.length).toBe(4); // 3 edges + 1 arrival step
     expect(steps[1].icon).toBe("stairs-up");
-    expect(steps[1].text).toContain("Take the stairs to Floor 2");
+    expect(steps[1].text).toContain("Take stairs to Floor 2");
     expect(steps[3].icon).toBe("arrive");
   });
 });
