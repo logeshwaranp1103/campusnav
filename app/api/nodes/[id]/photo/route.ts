@@ -227,87 +227,94 @@ export async function POST(
 
     // 2. Persist ONLY the lightweight URL and path in PostgreSQL database (ZERO base64, ZERO binary)
     if (prisma) {
-      const updatedMeta: Record<string, any> = {
-        photoUrl: persistentUrl,
-        storagePath,
-        photoUploadedAt: uploadedAt,
-        physicalVerified: true,
-      };
+      try {
+        const updatedMeta: Record<string, any> = {
+          photoUrl: persistentUrl,
+          storagePath,
+          photoUploadedAt: uploadedAt,
+          physicalVerified: true,
+        };
 
-      const existingNode = await prisma.node.findUnique({
-        where: { id },
-        select: { metadata: true },
-      }).catch(() => null);
-
-      const existingMeta = (existingNode?.metadata && typeof existingNode?.metadata === "object")
-        ? (existingNode.metadata as Record<string, any>)
-        : {};
-
-      const mergedMeta = { ...existingMeta, ...updatedMeta };
-      delete (mergedMeta as any).photoData;
-
-      if (existingNode) {
-        await prisma.node.update({
+        const existingNode = await prisma.node.findUnique({
           where: { id },
-          data: { metadata: mergedMeta },
-        });
-      } else {
-        await prisma.node.upsert({
-          where: { id },
-          update: { metadata: mergedMeta },
-          create: {
-            id,
-            campusId: "c1",
-            type: "CORRIDOR",
-            metadata: mergedMeta,
-          },
-        });
+          select: { metadata: true, campusId: true },
+        }).catch(() => null);
+
+        const existingMeta = (existingNode?.metadata && typeof existingNode?.metadata === "object")
+          ? (existingNode.metadata as Record<string, any>)
+          : {};
+
+        const mergedMeta = { ...existingMeta, ...updatedMeta };
+        delete (mergedMeta as any).photoData;
+
+        if (existingNode) {
+          await prisma.node.update({
+            where: { id },
+            data: { metadata: mergedMeta },
+          }).catch((e) => console.warn(`[OBJECT-STORAGE] Node update notice:`, e?.message));
+        } else {
+          const defaultCampus = await prisma.campus.findFirst({ select: { id: true } }).catch(() => null);
+          const campusId = existingNode?.campusId || defaultCampus?.id || "c1";
+
+          await prisma.node.upsert({
+            where: { id },
+            update: { metadata: mergedMeta },
+            create: {
+              id,
+              campusId,
+              type: "CORRIDOR",
+              metadata: mergedMeta,
+            },
+          }).catch((e) => console.warn(`[OBJECT-STORAGE] Node upsert notice:`, e?.message));
+        }
+
+        // 3. Update Draft and Published Snapshots in background
+        setTimeout(async () => {
+          if (!prisma) return;
+          try {
+            const [draftRec, pubRec] = await Promise.all([
+              prisma.draftGraph.findUnique({ where: { id: "active-draft" } }).catch(() => null),
+              prisma.publishedGraph.findUnique({ where: { id: "active-published" } }).catch(() => null),
+            ]);
+
+            if (draftRec?.snapshot && typeof draftRec.snapshot === "object") {
+              const snap = draftRec.snapshot as any;
+              if (Array.isArray(snap.nodes)) {
+                const nd = snap.nodes.find((n: any) => n.id === id);
+                if (nd) {
+                  nd.photoUrl = persistentUrl;
+                  nd.photoUploadedAt = uploadedAt;
+                  nd.physicalVerified = true;
+                  delete nd.photoData;
+                  await prisma.draftGraph.update({
+                    where: { id: "active-draft" },
+                    data: { snapshot: snap },
+                  }).catch(() => {});
+                }
+              }
+            }
+
+            if (pubRec?.snapshot && typeof pubRec.snapshot === "object") {
+              const snap = pubRec.snapshot as any;
+              if (Array.isArray(snap.nodes)) {
+                const nd = snap.nodes.find((n: any) => n.id === id);
+                if (nd) {
+                  nd.photoUrl = persistentUrl;
+                  nd.photoUploadedAt = uploadedAt;
+                  nd.physicalVerified = true;
+                  delete nd.photoData;
+                  await prisma.publishedGraph.update({
+                    where: { id: "active-published" },
+                    data: { snapshot: snap },
+                  }).catch(() => {});
+                }
+              }
+            }
+          } catch {}
+        }, 0);
+      } catch (dbErr: any) {
+        console.warn(`[OBJECT-STORAGE] Database metadata update warning for ${id}:`, dbErr?.message);
       }
-
-      // 3. Update Draft and Published Snapshots in background
-      setTimeout(async () => {
-        if (!prisma) return;
-        try {
-          const [draftRec, pubRec] = await Promise.all([
-            prisma.draftGraph.findUnique({ where: { id: "active-draft" } }).catch(() => null),
-            prisma.publishedGraph.findUnique({ where: { id: "active-published" } }).catch(() => null),
-          ]);
-
-          if (draftRec?.snapshot && typeof draftRec.snapshot === "object") {
-            const snap = draftRec.snapshot as any;
-            if (Array.isArray(snap.nodes)) {
-              const nd = snap.nodes.find((n: any) => n.id === id);
-              if (nd) {
-                nd.photoUrl = persistentUrl;
-                nd.photoUploadedAt = uploadedAt;
-                nd.physicalVerified = true;
-                delete nd.photoData;
-                await prisma.draftGraph.update({
-                  where: { id: "active-draft" },
-                  data: { snapshot: snap },
-                }).catch(() => {});
-              }
-            }
-          }
-
-          if (pubRec?.snapshot && typeof pubRec.snapshot === "object") {
-            const snap = pubRec.snapshot as any;
-            if (Array.isArray(snap.nodes)) {
-              const nd = snap.nodes.find((n: any) => n.id === id);
-              if (nd) {
-                nd.photoUrl = persistentUrl;
-                nd.photoUploadedAt = uploadedAt;
-                nd.physicalVerified = true;
-                delete nd.photoData;
-                await prisma.publishedGraph.update({
-                  where: { id: "active-published" },
-                  data: { snapshot: snap },
-                }).catch(() => {});
-              }
-            }
-          }
-        } catch {}
-      }, 0);
     }
 
     return NextResponse.json({
@@ -319,7 +326,9 @@ export async function POST(
     });
   } catch (err: unknown) {
     console.error(`[OBJECT-STORAGE] Error uploading photo for node ${id}:`, err);
-    return NextResponse.json({ error: "Failed to upload reference photo." }, { status: 500 });
+    return NextResponse.json({
+      error: err instanceof Error ? err.message : "Failed to upload reference photo."
+    }, { status: 500 });
   }
 }
 
