@@ -54,7 +54,7 @@ export default function Page() {
         title="Nodes"
         description="Every walkable location is a node. Connect and edit them interactively on the CAD canvas."
         action={
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
             <Button
               size="sm"
               variant="outline"

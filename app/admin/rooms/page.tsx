@@ -53,7 +53,7 @@ export default function Page() {
         title="Rooms & Destinations"
         description="Rooms resolve to destination nodes — never routed to directly."
         action={
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
             <Button
               size="sm"
               variant="outline"

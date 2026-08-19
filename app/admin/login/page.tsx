@@ -67,7 +67,7 @@ function AdminLoginForm() {
     <div className="mesh-bg relative flex min-h-screen flex-col items-center justify-center p-4 md:p-6 bg-[rgb(var(--bg))]">
       <div aria-hidden className="grid-pattern pointer-events-none absolute inset-0 opacity-40" />
 
-      <div className="absolute top-6 left-6">
+      <div className="mb-6 sm:absolute sm:top-6 sm:left-6 sm:mb-0">
         <Link href="/" className="flex items-center gap-2.5">
           <div className="flex h-9 w-9 items-center justify-center rounded-xl gradient-primary text-white shadow-[var(--shadow-sm)]">
             <Compass className="h-4.5 w-4.5" />

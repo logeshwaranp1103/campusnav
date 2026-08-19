@@ -71,7 +71,7 @@ export default function Page() {
         title="Stairs & Vertical Connections"
         description="Manage multi-floor staircases, vertical stair nodes, and inter-floor connections across campus buildings."
         action={
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
             <Button
               size="sm"
               variant="outline"

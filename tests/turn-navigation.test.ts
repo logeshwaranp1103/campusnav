@@ -4,6 +4,9 @@ import {
   calculateTurnAngle,
   turnIconFromAngle,
   getNodeVector,
+  cleanLandmarkName,
+  isTechnicalOrWaypointName,
+  formatInstructionText,
 } from "../lib/routing/directions";
 import { buildAdjacencyGraph } from "../lib/routing/graph";
 import { findShortestPath } from "../lib/routing/dijkstra";
@@ -77,7 +80,7 @@ describe("Turn Direction Classification & Vector Mathematics", () => {
     expect(turnIconFromAngle(angle)).toBe("u-turn");
   });
 
-  it("User problem scenario: approaching intersection heading South and turning West/Left", () => {
+  it("User problem scenario: approaching intersection heading South and turning West/Right", () => {
     // Node A (100, 0) -> Node B (100, 100) [heading South] -> Node C (50, 100) [turning West]
     const nA: Node = { id: "nA", type: "CORRIDOR", floorId: "f-out", x: 100, y: 0, name: "Start Point" };
     const nB: Node = { id: "nB", type: "JUNCTION", floorId: "f-out", x: 100, y: 100, name: "Intersection" };
@@ -112,6 +115,136 @@ describe("Turn Direction Classification & Vector Mathematics", () => {
   });
 });
 
+describe("Technical ID & Waypoint Filtering (No RP 1 / node_14 in User UI)", () => {
+  it("filters out technical node IDs, waypoint tags, and temporary markers", () => {
+    const technicalNames = [
+      "RP 1",
+      "RP 2",
+      "RP 3",
+      "RP-1",
+      "RP_1",
+      "RP10",
+      "node_14",
+      "node-14",
+      "node 14",
+      "n102",
+      "n1",
+      "wp_1",
+      "waypoint 1",
+      "junction_3",
+      "junction 3",
+      "jct 1",
+      "corridor_2",
+      "corridor 2",
+      "stair_1",
+      "lift_2",
+      "door_1",
+      "point_5",
+      "pt 1",
+      "seg_1",
+      "segment 2",
+      "123e4567-e89b-12d3-a456-426614174000",
+      "n-17294827-abc",
+    ];
+
+    technicalNames.forEach((name) => {
+      expect(isTechnicalOrWaypointName(name)).toBe(true);
+      expect(cleanLandmarkName(name)).toBeNull();
+    });
+  });
+
+  it("preserves genuine physical human landmarks", () => {
+    const realLandmarks = [
+      "Library",
+      "Main Gate",
+      "Reception",
+      "RP Block",
+      "Chemistry Lab",
+      "Administrative Office",
+      "Cafeteria",
+      "Auditorium",
+      "SF Entrance",
+      "North Gate",
+      "Physics Department",
+      "Seminar Hall A",
+    ];
+
+    realLandmarks.forEach((name) => {
+      expect(isTechnicalOrWaypointName(name)).toBe(false);
+      expect(cleanLandmarkName(name)).toBe(name);
+    });
+  });
+
+  it("generates clean natural walking instructions without RP 1 or node IDs", () => {
+    const n1: Node = { id: "n1", type: "OUTDOOR", floorId: "f-out", x: 0, y: 0, name: "RP 1" };
+    const n2: Node = { id: "n2", type: "OUTDOOR", floorId: "f-out", x: 50, y: 0, name: "RP 2" };
+    const n3: Node = { id: "n3", type: "OUTDOOR", floorId: "f-out", x: 50, y: 50, name: "RP 3" };
+
+    const edges: AdjacencyEdge[] = [
+      { edgeId: "e1", from: "n1", to: "n2", distance: 50, type: "WALK", bidirectional: true, weight: 50 },
+      { edgeId: "e2", from: "n2", to: "n3", distance: 50, type: "WALK", bidirectional: true, weight: 50 },
+    ];
+
+    const steps = generateDirections([n1, n2, n3], edges);
+
+    // Step 1: Going from n1 to n2 -> "Go straight" (NOT "Go straight to RP 2")
+    expect(steps[0].text).toBe("Go straight");
+    expect(steps[0].text).not.toContain("RP");
+    expect(steps[0].text).not.toContain("n2");
+
+    // Step 2: Turning from East to South -> "Turn right" (NOT "Turn right at RP 3")
+    expect(steps[1].text).toBe("Turn right");
+    expect(steps[1].text).not.toContain("RP");
+    expect(steps[1].text).not.toContain("n3");
+
+    // Arrival Step -> "You have arrived" (NOT "Arrived at RP 3")
+    expect(steps[2].text).toBe("You have arrived");
+  });
+
+  it("incorporates genuine physical landmarks when available", () => {
+    const n1: Node = { id: "n1", type: "OUTDOOR", floorId: "f-out", x: 0, y: 0, name: "Main Gate" };
+    const n2: Node = { id: "n2", type: "OUTDOOR", floorId: "f-out", x: 50, y: 0, name: "Reception" };
+    const n3: Node = { id: "n3", type: "ROOM", floorId: "f-out", x: 50, y: 50, name: "Central Library" };
+
+    const edges: AdjacencyEdge[] = [
+      { edgeId: "e1", from: "n1", to: "n2", distance: 50, type: "WALK", bidirectional: true, weight: 50 },
+      { edgeId: "e2", from: "n2", to: "n3", distance: 50, type: "WALK", bidirectional: true, weight: 50 },
+    ];
+
+    const steps = generateDirections([n1, n2, n3], edges);
+
+    expect(steps[0].text).toBe("Continue straight toward Reception");
+    expect(steps[1].text).toBe("Turn right at Central Library");
+    expect(steps[2].text).toBe("You have arrived at Central Library");
+  });
+});
+
+describe("Command Grammar & Transitions", () => {
+  it("formats gentle, sharp, and u-turn commands accurately", () => {
+    expect(formatInstructionText("slight-left")).toBe("Keep left");
+    expect(formatInstructionText("slight-right")).toBe("Keep right");
+    expect(formatInstructionText("left")).toBe("Turn left");
+    expect(formatInstructionText("right")).toBe("Turn right");
+    expect(formatInstructionText("sharp-left")).toBe("Turn sharply left");
+    expect(formatInstructionText("sharp-right")).toBe("Turn sharply right");
+    expect(formatInstructionText("u-turn")).toBe("Turn around");
+    expect(formatInstructionText("arrive")).toBe("You have arrived");
+  });
+
+  it("formats vertical stair and lift transitions accurately", () => {
+    expect(formatInstructionText("stairs-up", undefined, { from: "f-1", to: "f-2", toFloorName: "2nd Floor" })).toBe("Take stairs to 2nd Floor");
+    expect(formatInstructionText("stairs-up")).toBe("Take the stairs");
+    expect(formatInstructionText("lift", undefined, { from: "f-1", to: "f-3", toFloorName: "3rd Floor" })).toBe("Take lift to 3rd Floor");
+    expect(formatInstructionText("lift")).toBe("Take the lift");
+  });
+
+  it("formats building entrance and exit transitions accurately", () => {
+    expect(formatInstructionText("straight", undefined, undefined, true, "RP Block")).toBe("Enter RP Block");
+    expect(formatInstructionText("straight", undefined, undefined, true, undefined)).toBe("Enter the building");
+    expect(formatInstructionText("straight", undefined, undefined, false, undefined, true)).toBe("Exit the building");
+  });
+});
+
 describe("Node Visibility Separation from Routing", () => {
   it("allows routing through hidden nodes without breaking shortest path", () => {
     // Route: A (visible) -> B (hidden, visibleToUser: false) -> C (visible)
@@ -138,3 +271,29 @@ describe("Node Visibility Separation from Routing", () => {
     expect(renderedNodes.some((n) => n.id === "nB")).toBe(false);
   });
 });
+
+describe("Reference Photo Navigation & Preloading Engine", () => {
+  it("attaches photoUrl and targetNodeName to DirectionStep without base64 bloat", () => {
+    const n1: Node = { id: "n1", type: "CORRIDOR", floorId: "f-1", x: 0, y: 0, name: "Start Point" };
+    const n2: Node = {
+      id: "n2",
+      type: "ROOM",
+      floorId: "f-1",
+      x: 50,
+      y: 0,
+      name: "RP Block",
+      photoUrl: "/api/nodes/n2/photo",
+    };
+
+    const edges: AdjacencyEdge[] = [
+      { edgeId: "e1", from: "n1", to: "n2", distance: 50, type: "WALK", bidirectional: true, weight: 50 },
+    ];
+
+    const steps = generateDirections([n1, n2], edges);
+    expect(steps.length).toBe(2); // 1 step + 1 arrival
+    expect(steps[0].photoUrl).toBe("/api/nodes/n2/photo");
+    expect(steps[0].targetNodeName).toBe("RP Block");
+    expect(steps[1].photoUrl).toBe("/api/nodes/n2/photo");
+  });
+});
+

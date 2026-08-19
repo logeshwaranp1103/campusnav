@@ -19,6 +19,10 @@ import {
   Building2,
   Layers,
   Check,
+  Camera,
+  CheckCircle2,
+  Eye,
+  ImageIcon,
 } from "lucide-react";
 import { Button } from "@/shared/components/ui/button";
 import { Input } from "@/shared/components/ui/input";
@@ -37,6 +41,7 @@ import { detectBuildingAtGps } from "@/lib/geo/containment";
 import { isPointInsideBuilding } from "@/lib/geo/building-geometry";
 import { useVisitorGps } from "@/shared/hooks/use-visitor-gps";
 import { useNavigationStore } from "@/features/navigation/navigation-store";
+import { prefetchUpcomingRouteImages } from "@/lib/navigation/image-prefetch";
 
 type StopEntry = {
   dest: Destination | null;
@@ -84,6 +89,7 @@ export function NavigateShell() {
   const [live, setLive] = useState(false);
   const [livePos, setLivePos] = useState<{ node: CampusNode; progress: number } | null>(null);
   const [mobileView, setMobileView] = useState<"panel" | "map">("panel");
+  const [previewingPhoto, setPreviewingPhoto] = useState<{ url: string; title: string; nodeId?: string } | null>(null);
   // Fix #11: Multi-stop state
   const [stops, setStops] = useState<StopEntry[]>([]);
   const { toast } = useToast();
@@ -209,6 +215,13 @@ export function NavigateShell() {
       });
     }
   }, [navSession.status]);
+
+  // Decoupled Prefetching of upcoming reference photos on active route within 50m
+  useEffect(() => {
+    if (gps?.lat && gps?.lng && route?.nodes && route.nodes.length > 0) {
+      prefetchUpcomingRouteImages(gps.lat, gps.lng, route.nodes, navSession.currentSegmentIndex, 50);
+    }
+  }, [gps?.lat, gps?.lng, route?.nodes, navSession.currentSegmentIndex]);
 
   // Suggestions for FROM (Always place "📍 Your Location" as the VERY FIRST option)
   const fromSuggestions = useMemo(() => {
@@ -630,7 +643,7 @@ export function NavigateShell() {
       {/* Left panel */}
       <div
         className={cn(
-          "z-10 w-full shrink-0 flex-col border-r bg-[rgb(var(--card))] md:flex md:w-80 lg:w-[320px]",
+          "z-10 w-full shrink-0 flex-col border-r bg-[rgb(var(--card))] md:flex md:w-80 lg:w-[320px] overflow-y-auto scrollbar-thin pb-24 md:pb-4",
           mobileView === "panel" ? "flex" : "hidden",
         )}
       >
@@ -722,26 +735,26 @@ export function NavigateShell() {
 
             {/* Contextual Live Location Info & Floor Switcher */}
             {fromSelected?.id === YOUR_LOCATION_ID && (
-              <div className="mt-1.5 flex items-center justify-between rounded-lg border border-emerald-600/30 bg-emerald-50 dark:bg-emerald-950/60 dark:border-emerald-500/40 px-2.5 py-1.5 text-xs shadow-xs">
+              <div className="mt-1.5 flex items-center justify-between rounded-lg border border-[rgb(var(--primary)/0.2)] bg-[rgb(var(--primary)/0.06)] px-2.5 py-1.5 text-xs shadow-xs">
                 <div className="flex items-center gap-1.5 min-w-0">
                   {detectedBuilding ? (
                     <>
-                      <Building2 className="h-3.5 w-3.5 shrink-0 text-emerald-800 dark:text-emerald-300" />
-                      <span className="truncate font-bold text-[11px] text-emerald-950 dark:text-emerald-100">
+                      <Building2 className="h-3.5 w-3.5 shrink-0 text-[rgb(var(--primary))]" />
+                      <span className="truncate font-semibold text-[11px] text-[rgb(var(--fg))]">
                         Inside {detectedBuilding.name} · {publishedData.floors.find((f) => f.id === selectedFloorId)?.name || "Ground Floor"}
                       </span>
                     </>
                   ) : (
                     <>
-                      <Navigation2 className="h-3.5 w-3.5 shrink-0 text-emerald-800 dark:text-emerald-300 animate-pulse" />
-                      <span className="truncate font-bold text-[11px] text-emerald-950 dark:text-emerald-100">Outdoor Campus Location</span>
+                      <Navigation2 className="h-3.5 w-3.5 shrink-0 text-[rgb(var(--primary))] animate-pulse" />
+                      <span className="truncate font-semibold text-[11px] text-[rgb(var(--primary))]">Outdoor Campus Location</span>
                     </>
                   )}
                 </div>
                 {detectedBuilding && publishedData.floors.filter((f) => f.buildingId === detectedBuilding.id).length > 1 && (
                   <button
                     onClick={() => setShowFloorModal(true)}
-                    className="ml-2 shrink-0 rounded px-2 py-0.5 bg-emerald-700 hover:bg-emerald-800 dark:bg-emerald-600 dark:hover:bg-emerald-500 text-white text-[10px] font-bold transition-colors cursor-pointer shadow-xs"
+                    className="ml-2 shrink-0 rounded-md px-2 py-0.5 bg-[rgb(var(--primary))] hover:bg-[rgb(var(--primary)/0.85)] text-white text-[10px] font-bold transition-colors cursor-pointer shadow-xs"
                   >
                     Change Floor
                   </button>
@@ -960,6 +973,28 @@ export function NavigateShell() {
                     </div>
                     <Badge variant="primary" className="shrink-0 text-[10px]">{toSelected.category}</Badge>
                   </div>
+
+                  {/* Destination Reference Photo Button if attached */}
+                  {(() => {
+                    const destPhotoUrl = toSelected.photoUrl || (toSelected.nodeId ? publishedData.nodes.find((n) => n.id === toSelected.nodeId)?.photoUrl : undefined);
+                    if (!destPhotoUrl) return null;
+                    return (
+                      <div className="pt-1">
+                        <button
+                          type="button"
+                          onClick={() => setPreviewingPhoto({
+                            url: destPhotoUrl,
+                            title: toSelected.name,
+                            nodeId: toSelected.nodeId,
+                          })}
+                          className="flex w-full items-center justify-center gap-2 rounded-xl border border-[rgb(var(--primary)/0.3)] bg-[rgb(var(--primary)/0.06)] py-1.5 text-xs font-bold text-[rgb(var(--primary))] hover:bg-[rgb(var(--primary)/0.12)] transition-all cursor-pointer shadow-xs active:scale-98"
+                        >
+                          <Camera className="h-4 w-4" />
+                          <span>View Destination Reference Photo</span>
+                        </button>
+                      </div>
+                    );
+                  })()}
                 </div>
 
                 <div className="grid grid-cols-2 gap-2">
@@ -1001,6 +1036,8 @@ export function NavigateShell() {
                     {route.instructions.map((inst, idx) => {
                       const isLast = idx === route.instructions.length - 1;
                       const stepNum = idx + 1;
+                      const stepPhotoUrl = inst.photoUrl || (inst.targetNodeId ? publishedData.nodes.find((n) => n.id === inst.targetNodeId)?.photoUrl : undefined);
+
                       return (
                         <div key={idx} className="relative flex items-start gap-3">
                           {!isLast && (
@@ -1032,6 +1069,22 @@ export function NavigateShell() {
                               <div className="mt-0.5 text-[11px] font-medium text-[rgb(var(--primary))]">
                                 Destination reached
                               </div>
+                            )}
+
+                            {/* Reference Photo Button on Step */}
+                            {stepPhotoUrl && (
+                              <button
+                                type="button"
+                                onClick={() => setPreviewingPhoto({
+                                  url: stepPhotoUrl,
+                                  title: inst.targetNodeName || inst.text,
+                                  nodeId: inst.targetNodeId,
+                                })}
+                                className="mt-1.5 inline-flex items-center gap-1.5 rounded-lg border border-[rgb(var(--primary)/0.3)] bg-[rgb(var(--primary)/0.08)] px-2.5 py-1 text-[11px] font-semibold text-[rgb(var(--primary))] hover:bg-[rgb(var(--primary)/0.15)] transition-all cursor-pointer shadow-xs active:scale-95"
+                              >
+                                <Camera className="h-3.5 w-3.5" />
+                                <span>📷 View Reference Photo</span>
+                              </button>
                             )}
                           </div>
                         </div>
@@ -1076,14 +1129,18 @@ export function NavigateShell() {
                     text: navSession.currentInstruction.text,
                     distanceMeters: Math.round(navSession.currentInstruction.distance),
                     icon: navSession.currentInstruction.transition === "arrive" ? "arrive" : "straight",
-                    targetNodeId: "",
+                    targetNodeId: navSession.currentInstruction.targetNodeId ?? "",
+                    targetNodeName: navSession.currentInstruction.targetNodeName,
+                    photoUrl: navSession.currentInstruction.photoUrl,
                   }
                 : (route?.instructions[0]
                     ? {
                         text: route.instructions[0].text,
                         distanceMeters: Math.round(route.instructions[0].distance),
                         icon: "straight",
-                        targetNodeId: route.nodes[0]?.id ?? "",
+                        targetNodeId: route.instructions[0].targetNodeId ?? route.nodes[0]?.id ?? "",
+                        targetNodeName: route.instructions[0].targetNodeName ?? route.nodes[0]?.name,
+                        photoUrl: route.instructions[0].photoUrl ?? route.nodes[0]?.photoUrl,
                       }
                     : null)
             }
@@ -1093,14 +1150,18 @@ export function NavigateShell() {
                     text: navSession.nextInstruction.text,
                     distanceMeters: Math.round(navSession.nextInstruction.distance),
                     icon: "straight",
-                    targetNodeId: "",
+                    targetNodeId: navSession.nextInstruction.targetNodeId ?? "",
+                    targetNodeName: navSession.nextInstruction.targetNodeName,
+                    photoUrl: navSession.nextInstruction.photoUrl,
                   }
                 : (route?.instructions[1]
                     ? {
                         text: route.instructions[1].text,
                         distanceMeters: Math.round(route.instructions[1].distance),
                         icon: "straight",
-                        targetNodeId: route.nodes[1]?.id ?? "",
+                        targetNodeId: route.instructions[1].targetNodeId ?? route.nodes[1]?.id ?? "",
+                        targetNodeName: route.instructions[1].targetNodeName ?? route.nodes[1]?.name,
+                        photoUrl: route.instructions[1].photoUrl ?? route.nodes[1]?.photoUrl,
                       }
                     : null)
             }
@@ -1141,7 +1202,12 @@ export function NavigateShell() {
           <span>Route Planner</span>
         </button>
         <button
-          onClick={() => setMobileView("map")}
+          onClick={() => {
+            setMobileView("map");
+            if (gps && !gps.isTracking) {
+              gps.startTracking();
+            }
+          }}
           className={cn(
             "flex flex-1 items-center justify-center gap-1.5 rounded-lg py-2 text-xs font-semibold transition-all cursor-pointer",
             mobileView === "map"
@@ -1225,6 +1291,54 @@ export function NavigateShell() {
                       </button>
                     );
                   })}
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Reference Photo Preview Modal */}
+      <AnimatePresence>
+        {previewingPhoto && (
+          <div className="fixed inset-0 w-screen h-screen min-w-full min-h-full z-[100000] flex items-center justify-center bg-black/70 p-4 backdrop-blur-xs animate-in fade-in duration-200 overflow-hidden select-none">
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              className="relative w-full max-w-lg rounded-2xl border border-[rgb(var(--border))] bg-[rgb(var(--card))] p-5 shadow-2xl space-y-4"
+            >
+              <div className="flex items-center justify-between border-b pb-3">
+                <div className="flex items-center gap-2">
+                  <Camera className="h-5 w-5 text-[rgb(var(--primary))]" />
+                  <div>
+                    <h3 className="font-bold text-base text-[rgb(var(--fg))]">{previewingPhoto.title}</h3>
+                    <p className="text-[11px] text-[rgb(var(--muted-fg))]">Reference Location Photo</p>
+                  </div>
+                </div>
+                <Button size="sm" variant="ghost" onClick={() => setPreviewingPhoto(null)} className="h-8 w-8 p-0">
+                  <X className="h-4 w-4" />
+                </Button>
+              </div>
+
+              <div className="relative w-full overflow-hidden rounded-xl border border-[rgb(var(--border))] bg-transparent flex items-center justify-center">
+                <img
+                  src={previewingPhoto.url}
+                  alt={`Reference for ${previewingPhoto.title}`}
+                  className="w-full h-auto max-h-[70vh] object-contain rounded-xl"
+                  onError={(e) => {
+                    const targetNode = publishedData.nodes.find((n) => n.id === previewingPhoto.nodeId);
+                    if (targetNode?.photoUrl && targetNode.photoUrl !== previewingPhoto.url) {
+                      (e.target as HTMLImageElement).src = targetNode.photoUrl;
+                    }
+                  }}
+                />
+              </div>
+
+              <div className="flex items-center justify-between pt-1">
+                <span className="text-xs text-[rgb(var(--muted-fg))]">Visual Landmark Guidance</span>
+                <Button size="sm" onClick={() => setPreviewingPhoto(null)} className="bg-[rgb(var(--primary))] text-white px-5">
+                  Close
+                </Button>
               </div>
             </motion.div>
           </div>

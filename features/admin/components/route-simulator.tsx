@@ -222,7 +222,7 @@ export function RouteSimulator() {
         )}
       </div>
 
-      <div className="card min-h-[500px] p-0 overflow-hidden">
+      <div className="card min-h-[380px] sm:min-h-[500px] h-[55dvh] lg:h-auto p-0 overflow-hidden">
         <CampusMap route={route} />
       </div>
     </div>

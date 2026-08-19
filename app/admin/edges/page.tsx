@@ -75,7 +75,7 @@ export default function Page() {
         title="Edges"
         description="Edges connect two nodes with live path preview lines and dynamic distance calculations."
         action={
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
             <Button
               size="sm"
               variant="outline"

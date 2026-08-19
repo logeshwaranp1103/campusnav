@@ -55,13 +55,13 @@ export function AdminTopbar() {
   return (
     <>
       <header className="glass-strong sticky top-0 z-40 border-b">
-        <div className="flex h-16 items-center justify-between gap-3 px-4 md:px-6">
-          <div className="flex min-w-0 items-center gap-3">
+        <div className="flex h-16 items-center justify-between gap-2 sm:gap-3 px-3 sm:px-4 md:px-6">
+          <div className="flex min-w-0 items-center gap-2 sm:gap-3">
             {/* Mobile menu */}
             <Button
               variant="ghost"
               size="icon"
-              className="lg:hidden"
+              className="lg:hidden shrink-0 h-8 w-8 sm:h-9 sm:w-9"
               onClick={() => setOpen(true)}
               aria-label="Open menu"
             >
@@ -69,11 +69,11 @@ export function AdminTopbar() {
             </Button>
 
             {/* Breadcrumb */}
-            <nav aria-label="Breadcrumb" className="flex min-w-0 items-center gap-1.5 text-sm">
+            <nav aria-label="Breadcrumb" className="flex min-w-0 items-center gap-1 sm:gap-1.5 text-xs sm:text-sm">
               {crumbs.map((c) => (
-                <span key={c.href} className="flex min-w-0 items-center gap-1.5">
+                <span key={c.href} className="flex min-w-0 items-center gap-1 sm:gap-1.5">
                   {c.href !== "/admin" && (
-                    <ChevronRight className="h-3.5 w-3.5 shrink-0 text-[rgb(var(--muted-fg))]" />
+                    <ChevronRight className="h-3 w-3 sm:h-3.5 sm:w-3.5 shrink-0 text-[rgb(var(--muted-fg))]" />
                   )}
                   {c.last ? (
                     <span className="truncate font-semibold">{c.label}</span>
@@ -90,7 +90,7 @@ export function AdminTopbar() {
             </nav>
           </div>
 
-          <div className="flex shrink-0 items-center gap-2">
+          <div className="flex shrink-0 items-center gap-1.5 sm:gap-2">
             <Link href="/navigate" target="_blank" className="hidden md:block">
               <Button size="sm" variant="ghost">
                 <ExternalLink className="h-3.5 w-3.5" />

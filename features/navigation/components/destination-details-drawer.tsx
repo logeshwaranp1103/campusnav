@@ -57,6 +57,17 @@ export function DestinationDetailsDrawer({
           </button>
         </div>
 
+        {/* Reference Photo Preview if available */}
+        {destination.photoUrl && (
+          <div className="relative w-full overflow-hidden rounded-xl border border-[rgb(var(--border))] mb-4 shadow-sm flex items-center justify-center bg-transparent">
+            <img
+              src={destination.photoUrl}
+              alt={`Reference photo for ${destination.name}`}
+              className="w-full h-auto max-h-56 object-contain rounded-xl"
+            />
+          </div>
+        )}
+
         <div className="space-y-2 text-xs text-[rgb(var(--muted-fg))] mb-5">
           {building && (
             <div className="flex items-center gap-2">

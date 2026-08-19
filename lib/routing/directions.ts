@@ -22,6 +22,8 @@ export interface DirectionStep {
   bearingDelta?: number;
   floorChange?: { from: string; to: string };
   targetNodeId: string;
+  targetNodeName?: string;
+  photoUrl?: string;
 }
 
 export function getNodeVector(n1: Node, n2: Node): { dx: number; dy: number } {
@@ -84,11 +86,45 @@ export function turnIconFromAngle(angleDeg: number): DirectionIcon {
   return "u-turn";
 }
 
+export function isTechnicalOrWaypointName(name?: string): boolean {
+  if (!name) return true;
+  const trimmed = name.trim();
+  if (!trimmed) return true;
+
+  // 1. Technical waypoint / route point patterns:
+  // e.g. "RP 1", "RP 2", "RP 3", "RP-1", "RP_1", "RP1", "RP 10", "RP-OUT-1"
+  if (/^rp[\s_\-]*\d+$/i.test(trimmed) || /^rp[\s_\-]+(?:out|indoor|node|wp|pt|seg|point)[\s_\-]*\d*$/i.test(trimmed)) {
+    return true;
+  }
+
+  // 2. Node IDs: "n1", "n102", "node_14", "node 14", "node-14", "node14", "n-1", "n_1"
+  if (/^n[\s_\-]*\d+$/i.test(trimmed) || /^node[\s_\-]*\d+$/i.test(trimmed)) {
+    return true;
+  }
+
+  // 3. Waypoint / Point / Route / Segment IDs: "wp 1", "wp_1", "waypoint 1", "pt 1", "point 1", "segment 1", "edge 1"
+  if (/^(wp|waypoint|point|pt|seg|segment|edge|path|coord|loc|pos)[\s_\-]*\d+$/i.test(trimmed)) {
+    return true;
+  }
+
+  // 4. Infrastructure IDs: "junction 1", "jct 2", "corridor 1", "corr 2", "stair 1", "lift 1", "door 1"
+  if (/^(junction|jct|junc|corridor|corr|stair|staircase|lift|elevator|door|gate)[\s_\-]*\d+$/i.test(trimmed)) {
+    return true;
+  }
+
+  // 5. Raw UUIDs or Alphanumeric IDs (e.g. "n-17294827-abc", "f-out", "bld-rp", "dest-123")
+  if (/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(trimmed) || /^[a-z]+-[0-9]+-[a-z0-9]+$/i.test(trimmed)) {
+    return true;
+  }
+
+  return false;
+}
+
 export function cleanLandmarkName(name?: string): string | null {
   if (!name) return null;
   const trimmed = name.trim();
   if (!trimmed) return null;
-  if (/^(n\d+|node[_\-\s]*\d+|wp[_\-\s]*\d+|point[_\-\s]*\d+|corridor[_\-\s]*\d+|junction[_\-\s]*\d+|stair[_\-\s]*\d+|lift[_\-\s]*\d+)$/i.test(trimmed)) {
+  if (isTechnicalOrWaypointName(trimmed)) {
     return null;
   }
   return trimmed;
@@ -99,9 +135,14 @@ export function formatInstructionText(
   targetName?: string,
   floorChange?: { from: string; to: string; toFloorName?: string },
   isEntrance?: boolean,
-  bldName?: string
+  bldName?: string,
+  isExit?: boolean
 ): string {
   const landmark = cleanLandmarkName(targetName);
+
+  if (isExit) {
+    return "Exit the building";
+  }
 
   if (icon === "lift") {
     return floorChange?.toFloorName ? `Take lift to ${floorChange.toFloorName}` : "Take the lift";
@@ -110,26 +151,28 @@ export function formatInstructionText(
     return floorChange?.toFloorName ? `Take stairs to ${floorChange.toFloorName}` : "Take the stairs";
   }
   if (isEntrance) {
-    return bldName ? `Enter ${bldName}` : "Enter building";
+    return bldName ? `Enter ${bldName}` : "Enter the building";
   }
 
   switch (icon) {
     case "straight":
-      return landmark ? `Go straight to ${landmark}` : "Go straight";
+      return landmark ? `Continue straight toward ${landmark}` : "Go straight";
     case "slight-left":
       return landmark ? `Keep left at ${landmark}` : "Keep left";
     case "left":
-    case "sharp-left":
       return landmark ? `Turn left at ${landmark}` : "Turn left";
+    case "sharp-left":
+      return landmark ? `Turn sharply left at ${landmark}` : "Turn sharply left";
     case "slight-right":
       return landmark ? `Keep right at ${landmark}` : "Keep right";
     case "right":
-    case "sharp-right":
       return landmark ? `Turn right at ${landmark}` : "Turn right";
+    case "sharp-right":
+      return landmark ? `Turn sharply right at ${landmark}` : "Turn sharply right";
     case "u-turn":
-      return landmark ? `U-turn at ${landmark}` : "U-turn";
+      return landmark ? `Turn around at ${landmark}` : "Turn around";
     case "arrive":
-      return landmark ? `Arrived at ${landmark}` : "Arrived";
+      return landmark ? `You have arrived at ${landmark}` : "You have arrived";
     default:
       return "Go straight";
   }
@@ -138,17 +181,20 @@ export function formatInstructionText(
 export function generateDirections(
   nodes: Node[],
   edges: AdjacencyEdge[],
-  floorNames: Map<string, string> = new Map()
+  floorNames: Map<string, string> = new Map(),
+  buildingNames: Map<string, string> = new Map()
 ): DirectionStep[] {
   if (nodes.length < 2 || edges.length === 0) {
     if (nodes.length === 1) {
       const landmark = cleanLandmarkName(nodes[0].name);
       return [
         {
-          text: landmark ? `Arrived at ${landmark}` : "Arrived",
+          text: landmark ? `You have arrived at ${landmark}` : "You have arrived",
           distanceMeters: 0,
           icon: "arrive",
           targetNodeId: nodes[0].id,
+          targetNodeName: nodes[0].name,
+          photoUrl: nodes[0].photoUrl,
         },
       ];
     }
@@ -169,6 +215,13 @@ export function generateDirections(
     const isFloorTransition = fromFloor !== toFloor;
 
     const toFloorName = floorNames.get(toFloor) ?? toFloor;
+    const toBldName = buildingNames.get(toFloor);
+
+    const isFromOutdoor = fromFloor === "f-out" || fromFloor === "outdoor";
+    const isToOutdoor = toFloor === "f-out" || toFloor === "outdoor";
+
+    const isOutdoorToIndoor = isFromOutdoor && !isToOutdoor;
+    const isIndoorToOutdoor = !isFromOutdoor && isToOutdoor;
 
     if (edge.type === "LIFT") {
       steps.push({
@@ -177,6 +230,8 @@ export function generateDirections(
         icon: "lift",
         floorChange: { from: fromFloor, to: toFloor },
         targetNodeId: toNode.id,
+        targetNodeName: toNode.name,
+        photoUrl: toNode.photoUrl,
       });
       prevVector = null;
       continue;
@@ -202,6 +257,8 @@ export function generateDirections(
         icon: isUp ? "stairs-up" : "stairs-down",
         floorChange: isFloorTransition ? { from: fromFloor, to: toFloor } : undefined,
         targetNodeId: toNode.id,
+        targetNodeName: toNode.name,
+        photoUrl: toNode.photoUrl,
       });
       prevVector = null;
       continue;
@@ -217,12 +274,14 @@ export function generateDirections(
     }
     prevVector = currentVector;
 
-    const isEntrance = toNode.type === "ENTRANCE" || toNode.type === "BUILDING_ENTRANCE" || toNode.isEntranceNode;
+    const isEntrance = (toNode.type === "ENTRANCE" || toNode.type === "BUILDING_ENTRANCE" || toNode.isEntranceNode) && isOutdoorToIndoor;
     const text = formatInstructionText(
       icon,
       toNode.name,
       isFloorTransition ? { from: fromFloor, to: toFloor, toFloorName } : undefined,
-      isEntrance && isFloorTransition
+      isEntrance,
+      toBldName,
+      isIndoorToOutdoor
     );
 
     steps.push({
@@ -232,16 +291,20 @@ export function generateDirections(
       bearingDelta: delta,
       floorChange: isFloorTransition ? { from: fromFloor, to: toFloor } : undefined,
       targetNodeId: toNode.id,
+      targetNodeName: toNode.name,
+      photoUrl: toNode.photoUrl,
     });
   }
 
   const lastNode = nodes[nodes.length - 1];
   const lastLandmark = cleanLandmarkName(lastNode.name);
   steps.push({
-    text: lastLandmark ? `Arrived at ${lastLandmark}` : "Arrived",
+    text: lastLandmark ? `You have arrived at ${lastLandmark}` : "You have arrived",
     distanceMeters: 0,
     icon: "arrive",
     targetNodeId: lastNode.id,
+    targetNodeName: lastNode.name,
+    photoUrl: lastNode.photoUrl,
   });
 
   return steps;

@@ -38,7 +38,7 @@ export function Navbar() {
         scrolled ? "shadow-[var(--shadow-sm)]" : "",
       )}
     >
-      <div className="mx-auto flex h-16 max-w-7xl items-center justify-between px-4 md:px-6">
+      <div className="mx-auto flex h-16 max-w-7xl items-center justify-between px-3 sm:px-4 md:px-6">
         <Link href="/" className="group flex items-center gap-2.5">
           <div className="relative">
             <div className="absolute inset-0 rounded-xl bg-[rgb(var(--primary))] opacity-30 blur-md group-hover:opacity-60 transition-opacity" />
@@ -84,7 +84,7 @@ export function Navbar() {
           })}
         </nav>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1.5 sm:gap-2">
           <ThemeToggle />
           <Link href="/navigate" className="hidden sm:block">
             <Button size="sm" variant="gradient">

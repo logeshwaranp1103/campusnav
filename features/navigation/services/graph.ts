@@ -9,7 +9,10 @@ export type RouteInstruction = {
   distance: number;
   floor?: string;
   building?: string;
-  transition?: "outdoor->indoor" | "floor" | "arrive";
+  transition?: "outdoor->indoor" | "indoor->outdoor" | "floor" | "arrive";
+  targetNodeId?: string;
+  targetNodeName?: string;
+  photoUrl?: string;
 };
 
 export type Route = {
@@ -380,6 +383,11 @@ function buildInstructions(
     let text = "";
     let transitionType: RouteInstruction["transition"] = undefined;
 
+    const isFromOutdoor = fromNode.floorId === "f-out" || fromNode.floorId === "outdoor";
+    const isToOutdoor = to.floorId === "f-out" || to.floorId === "outdoor";
+    const isOutdoorToIndoor = isFromOutdoor && !isToOutdoor;
+    const isIndoorToOutdoor = !isFromOutdoor && isToOutdoor;
+
     if (edge.type === "LIFT") {
       text = `Take lift to ${floor?.name ?? "next floor"}`;
       transitionType = "floor";
@@ -392,9 +400,13 @@ function buildInstructions(
       text = `Take ramp to ${floor?.name ?? "next floor"}`;
       transitionType = "floor";
       prevVector = currentVector;
-    } else if ((to.type === "ENTRANCE" || to.type === "BUILDING_ENTRANCE" || to.isEntranceNode) && isFloorTransition) {
-      text = `Enter ${bld?.name ?? "building"}`;
+    } else if ((to.type === "ENTRANCE" || to.type === "BUILDING_ENTRANCE" || to.isEntranceNode) && isOutdoorToIndoor) {
+      text = `Enter ${bld?.name ?? "the building"}`;
       transitionType = "outdoor->indoor";
+      prevVector = currentVector;
+    } else if (isIndoorToOutdoor) {
+      text = "Exit the building";
+      transitionType = "indoor->outdoor";
       prevVector = currentVector;
     } else if (isFloorTransition) {
       text = `Go to ${floor?.name ?? "next floor"}`;
@@ -411,6 +423,9 @@ function buildInstructions(
       floor: floor?.name,
       building: bld?.name,
       transition: transitionType,
+      targetNodeId: to.id,
+      targetNodeName: to.name,
+      photoUrl: to.photoUrl,
     });
     lastFloor = to.floorId;
   }
@@ -418,9 +433,12 @@ function buildInstructions(
   const last = ns[ns.length - 1];
   const lastLandmark = cleanLandmarkName(last?.name);
   out.push({
-    text: lastLandmark ? `Arrived at ${lastLandmark}` : "Arrived",
+    text: lastLandmark ? `You have arrived at ${lastLandmark}` : "You have arrived",
     distance: 0,
     transition: "arrive",
+    targetNodeId: last?.id,
+    targetNodeName: last?.name,
+    photoUrl: last?.photoUrl,
   });
   return out;
 }

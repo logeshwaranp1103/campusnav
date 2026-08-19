@@ -41,7 +41,7 @@ export default function Page() {
         title="Floors"
         description="Every floor is its own graph layer. Switch and configure floors on the CAD editor canvas."
         action={
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
             <Button
               size="sm"
               variant="outline"

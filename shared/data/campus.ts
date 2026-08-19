@@ -194,6 +194,7 @@ export type Destination = {
   floorId?: string;
   doorId?: string;
   buildingId?: string;
+  photoUrl?: string;
 };
 
 export type Obstacle = {

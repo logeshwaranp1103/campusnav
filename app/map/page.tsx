@@ -499,19 +499,19 @@ export default function VisitorPage() {
   return (
     <div className="relative flex h-screen w-screen flex-col overflow-hidden bg-[rgb(var(--bg))] text-[rgb(var(--fg))]">
       {/* ── Top Floating Header ───────────────────────────────────────── */}
-      <div className="absolute top-4 left-4 right-4 z-20 flex items-center justify-between gap-3 rounded-2xl border bg-[rgb(var(--card))]/85 px-4 py-2.5 shadow-lg backdrop-blur-md">
+      <div className="absolute top-3 sm:top-4 left-3 sm:left-4 right-3 sm:right-4 z-20 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2.5 rounded-2xl border bg-[rgb(var(--card))]/90 px-3 sm:px-4 py-2.5 shadow-lg backdrop-blur-md">
         <div className="flex items-center gap-2">
-          <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-gradient-to-tr from-[rgb(var(--primary))] to-indigo-500 text-white shadow-sm">
+          <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-gradient-to-tr from-[rgb(var(--primary))] to-indigo-500 text-white shadow-sm shrink-0">
             <Navigation2 className="h-4 w-4" />
           </div>
-          <div>
-            <h1 className="text-xs font-bold tracking-tight">CampusNav Pro</h1>
-            <div className="flex items-center gap-1.5 text-[10px] text-[rgb(var(--muted-fg))]">
-              <span className="flex h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
+          <div className="min-w-0">
+            <h1 className="text-xs font-bold tracking-tight truncate">CampusNav Pro</h1>
+            <div className="flex flex-wrap items-center gap-1.5 text-[10px] text-[rgb(var(--muted-fg))]">
+              <span className="flex h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse shrink-0" />
               <span>Live · {version}</span>
               <GpsStatusIndicator status={gps.status} />
               {gps.isGpsActive && gps.lat !== 0 && (
-                <span className="font-mono text-[10px] text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/20 font-semibold" title="9-Decimal High-Precision GPS Coordinates">
+                <span className="font-mono text-[10px] text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/20 font-semibold truncate" title="9-Decimal High-Precision GPS Coordinates">
                   {gps.lat.toFixed(9)}, {gps.lng.toFixed(9)}
                 </span>
               )}
@@ -520,7 +520,7 @@ export default function VisitorPage() {
         </div>
 
         {/* Floor Layer Selector */}
-        <div className="flex items-center gap-1 overflow-x-auto rounded-lg border bg-[rgb(var(--muted))]/50 p-1 text-[11px] scrollbar-none">
+        <div className="flex items-center gap-1 overflow-x-auto rounded-lg border bg-[rgb(var(--muted))]/50 p-1 text-[11px] scrollbar-none max-w-full">
           <button
             onClick={() => setActiveFloorId("f-out")}
             className={`rounded px-2.5 py-1 font-medium transition-all ${

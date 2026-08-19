@@ -731,9 +731,12 @@ export function EntityManager() {
     reader.readAsDataURL(file);
   };
 
-  const handleDedicatedRemovePhoto = () => {
+  const handleDedicatedRemovePhoto = async () => {
     if (!selectedPhotoNode) return;
     if (window.confirm(`Are you sure you want to remove the reference photo from node "${selectedPhotoNode.name || selectedPhotoNode.id}"? The node and GPS coordinates will be preserved.`)) {
+      try {
+        await fetch(`/api/nodes/${selectedPhotoNode.id}/photo`, { method: "DELETE" }).catch(() => {});
+      } catch {}
       campusStore.updateNode(selectedPhotoNode.id, {
         photoUrl: undefined,
         photoUploadedAt: undefined,
@@ -845,7 +848,7 @@ export function EntityManager() {
     });
   };
 
-  const handleCreateEntity = () => {
+  const handleCreateEntity = async () => {
     switch (selectedType) {
       case "BUILDING": {
         if (!buildingForm.name.trim()) {
@@ -1114,11 +1117,16 @@ export function EntityManager() {
           return;
         }
 
+        const stableUrl = `/api/nodes/${targetNode.id}/photo`;
+
+        // 1. Instant Optimistic Store Update (0ms delay)
         campusStore.updateNode(targetNode.id, {
-          photoUrl: photoManagerFile,
+          photoUrl: stableUrl,
           photoUploadedAt: new Date().toISOString(),
           physicalVerified: photoManagerPhysicalVerified,
         });
+
+        setStoreData({ ...campusStore.getWorkingData() });
 
         toast({
           type: "success",
@@ -1126,7 +1134,23 @@ export function EntityManager() {
           description: `Reference photo linked to node "${targetNode.name || targetNode.id}"!`,
         });
 
-        setStoreData({ ...campusStore.getWorkingData() });
+        // 2. Non-blocking Asynchronous Persistence
+        if (photoManagerFile.startsWith("data:")) {
+          fetch(`/api/nodes/${targetNode.id}/photo`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ photoData: photoManagerFile }),
+          }).catch((e) => console.warn("Notice: Background photo sync:", e?.message));
+        }
+
+        // 3. Clear Select Node Box and File Selection
+        setPhotoManagerNodeId("");
+        setPhotoNodeSearchQuery("");
+        setPhotoManagerFile("");
+        setPhotoManagerPhysicalVerified(false);
+        if (dedicatedPhotoInputRef.current) {
+          dedicatedPhotoInputRef.current.value = "";
+        }
         break;
       }
 
@@ -3478,11 +3502,11 @@ export function EntityManager() {
 
                     {photoManagerFile ? (
                       <div className="rounded-xl border border-[rgb(var(--border))] bg-[rgb(var(--card))] p-4 space-y-3">
-                        <div className="relative aspect-video max-h-64 w-full overflow-hidden rounded-xl border bg-black/90 flex items-center justify-center">
+                        <div className="relative w-full overflow-hidden rounded-xl border border-[rgb(var(--border))] bg-transparent flex items-center justify-center">
                           <img
                             src={photoManagerFile}
                             alt="Selected Reference Preview"
-                            className="max-h-60 w-full object-contain"
+                            className="w-full h-auto max-h-64 object-contain rounded-xl"
                           />
                           <button
                             type="button"
@@ -4250,11 +4274,11 @@ export function EntityManager() {
 
                     {editForm.photoUrl ? (
                       <div className="space-y-2">
-                        <div className="relative aspect-video w-full overflow-hidden rounded-lg border bg-black/90 flex items-center justify-center">
+                        <div className="relative w-full overflow-hidden rounded-lg border border-[rgb(var(--border))] bg-transparent flex items-center justify-center">
                           <img
                             src={editForm.photoUrl}
                             alt="Node Reference"
-                            className="max-h-48 w-full object-contain"
+                            className="w-full h-auto max-h-52 object-contain rounded-lg"
                           />
                           <button
                             type="button"
@@ -4541,11 +4565,11 @@ export function EntityManager() {
               </Button>
             </div>
 
-            <div className="relative aspect-video w-full overflow-hidden rounded-xl border bg-black/90 flex items-center justify-center">
+            <div className="relative w-full overflow-hidden rounded-xl border border-[rgb(var(--border))] bg-transparent flex items-center justify-center">
               <img
                 src={viewingPhotoNode.photoUrl}
                 alt={`Reference for ${viewingPhotoNode.name}`}
-                className="max-h-72 w-full object-contain"
+                className="w-full h-auto max-h-[70vh] object-contain rounded-xl"
               />
             </div>
 

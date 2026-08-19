@@ -1965,8 +1965,8 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
       }
     >
       {/* Top Header Toolbar - Compacted to extend Graph Map to top */}
-      <div className="flex flex-wrap items-center justify-between gap-2 border-b bg-[rgb(var(--card))]/95 px-3 py-1 backdrop-blur-md z-10 shrink-0">
-        <div className="flex items-center gap-1 shrink-0 overflow-x-auto scrollbar-none py-0.5">
+      <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-1.5 sm:gap-2 border-b bg-[rgb(var(--card))]/95 px-2.5 sm:px-3 py-1 backdrop-blur-md z-10 shrink-0">
+        <div className="flex items-center gap-1 overflow-x-auto scrollbar-none py-0.5 max-w-full">
           <ToolButton
             active={activeTool === "SELECT"}
             onClick={() => {
@@ -2055,12 +2055,12 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
         </div>
 
         {/* Actions: Floor View Selector, Draft Status, Fullscreen & Publish at top right */}
-        <div className="flex items-center gap-2 shrink-0 ml-auto py-0.5">
+        <div className="flex items-center gap-1.5 sm:gap-2 shrink-0 justify-between sm:justify-end sm:ml-auto py-0.5 overflow-x-auto scrollbar-none">
           {/* Floor View Selector Dropdown */}
           <select
             value={activeFloorId}
             onChange={(e) => setActiveFloorId(e.target.value)}
-            className="h-7 rounded-md border border-[rgb(var(--border))] bg-[rgb(var(--card))] px-2.5 text-xs font-semibold focus:outline-none focus:ring-1 focus:ring-[rgb(var(--primary))] shadow-2xs cursor-pointer"
+            className="h-7 rounded-md border border-[rgb(var(--border))] bg-[rgb(var(--card))] px-2 text-xs font-semibold focus:outline-none focus:ring-1 focus:ring-[rgb(var(--primary))] shadow-2xs cursor-pointer max-w-[180px] sm:max-w-none truncate"
           >
             <option value="f-out">Outdoor & Ground Floor</option>
             <option value="f-all-1">All 1st Floors</option>
@@ -4726,8 +4726,8 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
                 </div>
                 {selectedNode.photoUrl ? (
                   <div className="space-y-1.5">
-                    <div className="relative aspect-video w-full overflow-hidden rounded-md border bg-black/90 flex items-center justify-center">
-                      <img src={selectedNode.photoUrl} alt="Reference" className="max-h-28 w-full object-contain" />
+                    <div className="relative w-full overflow-hidden rounded-md border border-[rgb(var(--border))] bg-transparent flex items-center justify-center">
+                      <img src={selectedNode.photoUrl} alt="Reference" className="w-full h-auto max-h-36 object-contain rounded-md" />
                     </div>
                     <Button
                       size="sm"
@@ -5734,11 +5734,11 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
               </Button>
             </div>
 
-            <div className="relative aspect-video w-full overflow-hidden rounded-xl border bg-black/90 flex items-center justify-center">
+            <div className="relative w-full overflow-hidden rounded-xl border border-[rgb(var(--border))] bg-transparent flex items-center justify-center">
               <img
                 src={viewingPhotoNode.photoUrl}
                 alt={`Reference for ${viewingPhotoNode.name}`}
-                className="max-h-72 w-full object-contain"
+                className="w-full h-auto max-h-[70vh] object-contain rounded-xl"
               />
             </div>
 

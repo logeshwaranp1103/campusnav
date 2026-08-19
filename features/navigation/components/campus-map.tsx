@@ -433,24 +433,37 @@ function MapCanvas({
 
   const currentZoom = externalZoom * internalZoom;
 
-  // Reset pan & internal zoom when floorId changes or resetTrigger fires
+  // Reset pan & internal zoom when floorId changes, GPS activates, or resetTrigger fires
   useEffect(() => {
     if (animFrameRef.current !== null) {
       cancelAnimationFrame(animFrameRef.current);
       animFrameRef.current = null;
     }
-    const hasLiveGps = gps?.isGpsActive && (gps.lat !== 0 || (gps.canvasPos && (gps.canvasPos.x !== 400 || gps.canvasPos.y !== 300)));
+    const hasLiveGps = gps && (gps.isGpsActive || gps.isTracking) && (gps.lat !== 0 || (gps.canvasPos && (gps.canvasPos.x !== 400 || gps.canvasPos.y !== 300)));
     if (hasLiveGps) {
       const targetCanvas = (gps.lat && gps.lng) ? gpsToCanvas(gps.lat, gps.lng) : gps.canvasPos;
       const centerX = bounds.x + bounds.w / 2;
       const centerY = bounds.y + bounds.h / 2;
       setPan({ x: centerX - targetCanvas.x, y: centerY - targetCanvas.y });
       setInternalZoom(0.85);
+    } else if (livePosition) {
+      const centerX = bounds.x + bounds.w / 2;
+      const centerY = bounds.y + bounds.h / 2;
+      setPan({ x: centerX - livePosition.x, y: centerY - livePosition.y });
+      setInternalZoom(0.85);
+    } else if (fromSelected && fromSelected.nodeId) {
+      const startNode = allNodes.find((n) => n.id === fromSelected.nodeId);
+      if (startNode) {
+        const centerX = bounds.x + bounds.w / 2;
+        const centerY = bounds.y + bounds.h / 2;
+        setPan({ x: centerX - startNode.x, y: centerY - startNode.y });
+        setInternalZoom(0.85);
+      }
     } else {
       setInternalZoom(1);
       setPan({ x: 0, y: 0 });
     }
-  }, [floorId, resetTrigger]);
+  }, [floorId, resetTrigger, fromSelected?.id, gps?.isGpsActive, gps?.isTracking, gps?.lat, gps?.lng, gps?.canvasPos?.x, gps?.canvasPos?.y]);
 
   const nodeLookupMap = useMemo(() => {
     const map = new Map<string, Node>();
@@ -574,9 +587,8 @@ function MapCanvas({
   const destination = route?.nodes[route.nodes.length - 1];
   const showLiveHere = livePosition && isNodeOnActiveFloor(livePosition);
 
-  // Calculate dynamic SVG bounding box so all published buildings are visible
+  // Calculate dynamic SVG bounding box so all published buildings and nodes are visible
   const bounds = useMemo(() => {
-    if (buildings.length === 0) return { x: 0, y: 0, w: 900, h: 650 };
     let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
     buildings.forEach((b) => {
       const bx = b.x ?? 100;
@@ -588,13 +600,26 @@ function MapCanvas({
       maxX = Math.max(maxX, bx + bw + 50);
       maxY = Math.max(maxY, by + bh + 50);
     });
+    allNodes.forEach((n) => {
+      if (n.x !== undefined && n.y !== undefined) {
+        minX = Math.min(minX, n.x - 60);
+        minY = Math.min(minY, n.y - 60);
+        maxX = Math.max(maxX, n.x + 60);
+        maxY = Math.max(maxY, n.y + 60);
+      }
+    });
+    if (!isFinite(minX) || !isFinite(minY)) {
+      return { x: 0, y: 0, w: 1000, h: 700 };
+    }
+    const bX = Math.max(0, Math.floor(minX));
+    const bY = Math.max(0, Math.floor(minY));
     return {
-      x: Math.max(0, Math.floor(minX)),
-      y: Math.max(0, Math.floor(minY)),
-      w: Math.max(800, Math.ceil(maxX - Math.max(0, Math.floor(minX)))),
-      h: Math.max(600, Math.ceil(maxY - Math.max(0, Math.floor(minX)))),
+      x: bX,
+      y: bY,
+      w: Math.max(800, Math.ceil(maxX - bX)),
+      h: Math.max(600, Math.ceil(maxY - bY)),
     };
-  }, [buildings]);
+  }, [buildings, allNodes]);
 
   // Calculate viewBox with current pan and zoom
   const effectiveW = bounds.w / currentZoom;
@@ -1202,8 +1227,8 @@ function MapCanvas({
         const nodeRadius = isDest ? 9 : isStairOrLift ? 7 : onRoute ? 6.5 : 4.5;
 
         const rawName = n.name || "";
-        const displayName = isStair ? `𓊍 ${rawName}` : isLift ? `🛗 ${rawName}` : rawName;
-        const labelWidth = Math.max(70, displayName.length * 7 + (isStair ? 20 : 16));
+        const displayName = (n.photoUrl ? "📷 " : "") + (isStair ? `𓊍 ${rawName}` : isLift ? `🛗 ${rawName}` : rawName);
+        const labelWidth = Math.max(70, displayName.length * 7 + (isStair ? 20 : n.photoUrl ? 20 : 16));
         const badgeHeight = isStairOrLift ? 22 : 19;
 
         // Position Stair & Lift badges ABOVE the node (n.y - 20) so they never overlap corridor nodes below
@@ -1341,12 +1366,12 @@ function MapCanvas({
         );
       })}
 
-      {/* Device GPS Live Marker with Accuracy Circle & Heading Cone (Rendered ONLY when starting from 'Your Location') */}
-      {gps && gps.isGpsActive && fromSelected?.id === "dest-live-user-location" && (
+      {/* Device GPS Live Marker with Accuracy Circle, Heading Cone & YOU ARE HERE Beacon */}
+      {gps && (gps.isGpsActive || gps.isTracking || fromSelected?.id === "dest-live-user-location") && gps.canvasPos && (
         <g transform={`translate(${gps.canvasPos.x}, ${gps.canvasPos.y})`}>
           {/* Accuracy Ring */}
           <circle
-            r={gps.accuracy * PIXELS_PER_METER}
+            r={Math.max(14, (gps.accuracy || 8) * PIXELS_PER_METER)}
             fill="rgba(59, 130, 246, 0.15)"
             stroke="#3b82f6"
             strokeWidth="1.5"
@@ -1356,11 +1381,40 @@ function MapCanvas({
           {/* Directional Cone Pointer */}
           <path
             d="M 0 -18 L 8 4 L 0 0 L -8 4 Z"
-            fill="#3b82f6"
-            transform={`rotate(${gps.heading})`}
+            fill="#2563eb"
+            transform={`rotate(${gps.heading || 0})`}
           />
-          {/* Pulsing Blue GPS Marker Dot */}
-          <circle r="8" fill="#3b82f6" stroke="#ffffff" strokeWidth="2.5" className="shadow-md" />
+          {/* Pulsing Outer Ring */}
+          <circle r="13" fill="rgba(37, 99, 235, 0.25)" className="animate-ping" />
+          {/* Solid Blue Core GPS Dot */}
+          <circle r="8.5" fill="#2563eb" stroke="#ffffff" strokeWidth="2.5" className="shadow-lg" />
+          <circle r="3.5" fill="#ffffff" />
+
+          {/* YOU ARE HERE Pill Badge */}
+          <g transform="translate(0, 22)">
+            <rect
+              x="-44"
+              y="-10"
+              width="88"
+              height="20"
+              rx="10"
+              fill="#1d4ed8"
+              stroke="#ffffff"
+              strokeWidth="1.5"
+              className="shadow-lg"
+            />
+            <text
+              x="0"
+              y="3.5"
+              textAnchor="middle"
+              fill="#ffffff"
+              fontSize="9"
+              fontWeight="800"
+              letterSpacing="0.03em"
+            >
+              YOU ARE HERE
+            </text>
+          </g>
         </g>
       )}
 
