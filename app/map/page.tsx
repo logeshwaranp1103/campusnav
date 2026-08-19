@@ -720,7 +720,7 @@ export default function VisitorPage() {
           )}
 
           {/* Nodes */}
-          {currentFloorNodes.filter((n) => n.visibleToUser === true).map((n) => {
+          {currentFloorNodes.filter((n) => n.visibleToUser === true || Boolean(n.photoUrl)).map((n) => {
             const isRouteNode = routeNodes.some((rn) => rn.id === n.id);
             return (
               <g key={n.id} transform={`translate(${n.x}, ${n.y})`}>

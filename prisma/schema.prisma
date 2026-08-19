@@ -375,3 +375,15 @@ enum PathType {
   EV
   WALK
 }
+
+model NodePhoto {
+  id        String   @id @default(uuid())
+  nodeId    String   @unique
+  mimeType  String   @default("image/jpeg")
+  data      Bytes
+  size      Int
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([nodeId])
+}

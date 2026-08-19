@@ -231,7 +231,16 @@ export function TurnByTurnBar({
                   <img
                     src={activePhotoUrl}
                     alt={photoNodeName}
-                    onError={() => setImageError(true)}
+                    onError={(e) => {
+                      const targetId = currentStep.targetNodeId || nextStep?.targetNodeId;
+                      const apiFallback = targetId ? `/api/nodes/${targetId}/photo` : null;
+                      const imgEl = e.target as HTMLImageElement;
+                      if (apiFallback && !imgEl.src.endsWith(apiFallback)) {
+                        imgEl.src = apiFallback;
+                      } else {
+                        setImageError(true);
+                      }
+                    }}
                     className="w-full h-auto max-h-[65vh] object-contain rounded-xl"
                     loading="eager"
                   />

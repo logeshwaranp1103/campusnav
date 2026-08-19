@@ -425,13 +425,26 @@ export async function publishDraftGraph(
     notes: notes || "Published campus graph update",
   };
 
-  await logAuditEvent({
-    userId,
-    action: "GRAPH_PUBLISHED",
-    resource: "campus-graph",
-    resourceId: `v${versionNum}`,
-    after: { version: versionNum, notes },
-  });
+  // 5. Invalidate in-memory cache so subsequent requests get fresh data
+  activePublishedSnapshot = null;
+
+  // 6. Record Audit Log for Publish action
+  if (prisma) {
+    let validUserId: string | null = null;
+    if (userId) {
+      const userExists = await prisma.user.findUnique({ where: { id: userId }, select: { id: true } }).catch(() => null);
+      if (userExists) validUserId = userId;
+    }
+    await prisma.auditLog.create({
+      data: {
+        userId: validUserId,
+        action: "GRAPH_PUBLISHED",
+        resource: "campus-graph",
+        resourceId: `v${versionNum}`,
+        after: { version: versionNum, notes },
+      },
+    }).catch(() => {});
+  }
 
   return {
     success: true,
@@ -444,17 +457,31 @@ export async function publishDraftGraph(
 export async function getRelationalGraphFromDatabase(): Promise<DraftSnapshot | null> {
   if (!prisma) return null;
   try {
-    const rawBuildings = await prisma.building.findMany().catch(() => []);
-    const rawFloors = await prisma.floor.findMany().catch(() => []);
-    const rawNodes = await prisma.node.findMany().catch(() => []);
-    const rawEdges = await prisma.edge.findMany().catch(() => []);
-    const rawDestinations = await prisma.destination.findMany().catch(() => []);
-    const rawObstacles = await prisma.obstacle.findMany().catch(() => []);
-    const rawDoors = await prisma.door.findMany().catch(() => []);
+    const [
+      rawBuildings,
+      rawFloors,
+      rawNodes,
+      rawEdges,
+      rawDestinations,
+      rawObstacles,
+      rawDoors,
+      rawPhotos,
+    ] = await Promise.all([
+      prisma.building.findMany().catch(() => []),
+      prisma.floor.findMany().catch(() => []),
+      prisma.node.findMany().catch(() => []),
+      prisma.edge.findMany().catch(() => []),
+      prisma.destination.findMany().catch(() => []),
+      prisma.obstacle.findMany().catch(() => []),
+      prisma.door.findMany().catch(() => []),
+      prisma.nodePhoto.findMany({ select: { nodeId: true } }).catch(() => []),
+    ]);
 
     if (rawNodes.length === 0 && rawBuildings.length === 0) {
       return null;
     }
+
+    const photoNodeIds = new Set(rawPhotos.map((p) => p.nodeId));
 
     const buildings: Building[] = rawBuildings.map((b: any) => ({
       id: b.id,
@@ -492,6 +519,7 @@ export async function getRelationalGraphFromDatabase(): Promise<DraftSnapshot | 
 
     const nodes: Node[] = rawNodes.map((n: any) => {
       const meta = (n.metadata && typeof n.metadata === "object") ? n.metadata : {};
+      const hasDbPhoto = photoNodeIds.has(n.id);
       return {
         id: n.id,
         type: n.type as any,
@@ -503,7 +531,8 @@ export async function getRelationalGraphFromDatabase(): Promise<DraftSnapshot | 
         lng: n.longitude !== undefined ? n.longitude : (n.lng !== undefined ? n.lng : undefined),
         searchable: n.searchable ?? true,
         visibleToUser: n.visibleToUser !== undefined ? n.visibleToUser : (meta.visibleToUser !== undefined ? meta.visibleToUser : false),
-        photoUrl: n.photoUrl || meta.photoUrl || (meta.photoData ? `/api/nodes/${n.id}/photo` : undefined),
+        photoUrl: meta.photoUrl || (hasDbPhoto ? `/api/nodes/${n.id}/photo` : (n.photoUrl || undefined)),
+        storagePath: meta.storagePath || (n as any).storagePath || undefined,
         photoUploadedAt: n.photoUploadedAt || meta.photoUploadedAt || undefined,
         physicalVerified: n.physicalVerified !== undefined ? n.physicalVerified : meta.physicalVerified,
       };

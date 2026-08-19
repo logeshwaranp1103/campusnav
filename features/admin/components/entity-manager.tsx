@@ -88,6 +88,51 @@ const ENTITY_TYPES: { type: EntityCategory; label: string; icon: any; descriptio
   { type: "FLOOR", label: "Floor", icon: Layers, description: "Vertical building floor level & ordinal", badgeColor: "from-cyan-500 to-blue-600" },
 ];
 
+export function compressImageForUpload(file: File, maxDimension = 1280, quality = 0.82): Promise<string> {
+  return new Promise((resolve) => {
+    if (!file.type.startsWith("image/") || file.type === "image/svg+xml") {
+      const reader = new FileReader();
+      reader.onload = (evt) => resolve((evt.target?.result as string) || "");
+      reader.onerror = () => resolve("");
+      reader.readAsDataURL(file);
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onerror = () => resolve("");
+    reader.onload = (evt) => {
+      const img = new Image();
+      img.onerror = () => resolve((evt.target?.result as string) || "");
+      img.onload = () => {
+        let { width, height } = img;
+        if (width > maxDimension || height > maxDimension) {
+          if (width > height) {
+            height = Math.round((height * maxDimension) / width);
+            width = maxDimension;
+          } else {
+            width = Math.round((width * maxDimension) / height);
+            height = maxDimension;
+          }
+        }
+        const canvas = document.createElement("canvas");
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext("2d");
+        if (!ctx) {
+          resolve((evt.target?.result as string) || "");
+          return;
+        }
+        ctx.drawImage(img, 0, 0, width, height);
+        const format = file.type === "image/png" ? "image/jpeg" : (file.type || "image/jpeg");
+        const compressedDataUrl = canvas.toDataURL(format, quality);
+        resolve(compressedDataUrl);
+      };
+      img.src = (evt.target?.result as string) || "";
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
 export function EntityManager() {
   const { toast } = useToast();
   const containerRef = useRef<HTMLDivElement>(null);
@@ -204,7 +249,7 @@ export function EntityManager() {
     reader.readAsText(file);
   };
 
-  const handlePhotoFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handlePhotoFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
@@ -218,32 +263,27 @@ export function EntityManager() {
       return;
     }
 
-    if (file.size > 5 * 1024 * 1024) {
-      toast({
-        type: "error",
-        title: "File Too Large",
-        description: "Reference photo size must be less than 5MB.",
-      });
-      return;
-    }
-
-    const reader = new FileReader();
-    reader.onload = (evt) => {
-      const dataUrl = evt.target?.result as string;
-      if (dataUrl) {
+    try {
+      const compressedUrl = await compressImageForUpload(file);
+      if (compressedUrl) {
         setEditForm((prev) => ({
           ...prev,
-          photoUrl: dataUrl,
+          photoUrl: compressedUrl,
           photoUploadedAt: new Date().toISOString(),
         }));
         toast({
           type: "success",
           title: "Reference Photo Attached",
-          description: "Reference photo attached to node. Save changes to persist.",
+          description: "Reference photo optimized and attached. Save changes to persist.",
         });
       }
-    };
-    reader.readAsDataURL(file);
+    } catch {
+      toast({
+        type: "error",
+        title: "Image Processing Error",
+        description: "Could not process selected image.",
+      });
+    }
   };
 
   const handleConfirmRemovePhoto = () => {
@@ -693,7 +733,7 @@ export function EntityManager() {
     });
   }, [storeData.nodes, storeData.floors, photoNodeSearchQuery]);
 
-  const handleDedicatedPhotoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleDedicatedPhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
@@ -707,28 +747,23 @@ export function EntityManager() {
       return;
     }
 
-    if (file.size > 5 * 1024 * 1024) {
-      toast({
-        type: "error",
-        title: "File Too Large",
-        description: "Reference photo size must be less than 5MB.",
-      });
-      return;
-    }
-
-    const reader = new FileReader();
-    reader.onload = (evt) => {
-      const dataUrl = evt.target?.result as string;
-      if (dataUrl) {
-        setPhotoManagerFile(dataUrl);
+    try {
+      const compressedUrl = await compressImageForUpload(file);
+      if (compressedUrl) {
+        setPhotoManagerFile(compressedUrl);
         toast({
           type: "success",
-          title: "Image Selected",
+          title: "Image Selected & Optimized",
           description: "Click 'Save Photo to Node' below to link and persist.",
         });
       }
-    };
-    reader.readAsDataURL(file);
+    } catch {
+      toast({
+        type: "error",
+        title: "Image Processing Error",
+        description: "Could not process selected image.",
+      });
+    }
   };
 
   const handleDedicatedRemovePhoto = async () => {

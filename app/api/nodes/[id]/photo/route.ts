@@ -1,11 +1,18 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
-import { getActivePublishedGraph } from "@/lib/services/publish-service";
-import {
-  uploadNodePhotoToSupabase,
-  deleteNodePhotoFromSupabase,
-  extractStoragePathFromUrl,
-} from "@/lib/storage/supabase-storage";
+import fs from "fs";
+import path from "path";
+
+const OBJECT_STORAGE_ROOT = path.join(process.cwd(), "public", "uploads", "reference-photos", "nodes");
+
+function ensureStorageDir(nodeId: string): string {
+  const safeId = nodeId.replace(/[^a-zA-Z0-9_-]/g, "_");
+  const dir = path.join(OBJECT_STORAGE_ROOT, safeId);
+  if (!fs.existsSync(dir)) {
+    fs.mkdirSync(dir, { recursive: true });
+  }
+  return dir;
+}
 
 export async function GET(
   _req: Request,
@@ -14,10 +21,10 @@ export async function GET(
   const { id } = await params;
 
   try {
-    let photoUrl: string | null | undefined = null;
-    let photoData: string | null | undefined = null;
+    const safeId = id.replace(/[^a-zA-Z0-9_-]/g, "_");
+    const nodeDir = path.join(OBJECT_STORAGE_ROOT, safeId);
 
-    // 1. Fetch from Node metadata in database
+    // 1. Primary: Check Node metadata in PostgreSQL for exact registered photoUrl / storagePath
     if (prisma) {
       const node = await prisma.node
         .findUnique({
@@ -28,77 +35,110 @@ export async function GET(
 
       if (node?.metadata && typeof node.metadata === "object") {
         const meta = node.metadata as Record<string, any>;
-        if (typeof meta.photoUrl === "string" && meta.photoUrl.startsWith("http")) {
-          photoUrl = meta.photoUrl;
-        } else if (typeof meta.photoData === "string" && meta.photoData.startsWith("data:")) {
-          photoData = meta.photoData;
-        }
-      }
-    }
-
-    // 2. Fallback to active published graph snapshot
-    if (!photoUrl && !photoData) {
-      const activePub = await getActivePublishedGraph();
-      const nodeInSnapshot = activePub?.snapshot?.nodes?.find((n) => n.id === id);
-      if (nodeInSnapshot?.photoUrl && typeof nodeInSnapshot.photoUrl === "string" && nodeInSnapshot.photoUrl.startsWith("http")) {
-        photoUrl = nodeInSnapshot.photoUrl;
-      }
-    }
-
-    // 3. Fallback to active draft graph snapshot
-    if (!photoUrl && !photoData && prisma) {
-      const draftRecord = await prisma.draftGraph
-        .findUnique({ where: { id: "active-draft" } })
-        .catch(() => null);
-      if (draftRecord?.snapshot && typeof draftRecord.snapshot === "object") {
-        const nodeInDraft = (draftRecord.snapshot as any)?.nodes?.find((n: any) => n.id === id);
-        if (nodeInDraft?.photoUrl && typeof nodeInDraft.photoUrl === "string" && nodeInDraft.photoUrl.startsWith("http")) {
-          photoUrl = nodeInDraft.photoUrl;
-        }
-      }
-    }
-
-    // If a persistent cloud URL exists, redirect directly to Supabase CDN with strong caching
-    if (photoUrl && (photoUrl.startsWith("http://") || photoUrl.startsWith("https://")) && !photoUrl.includes(`/api/nodes/${id}/photo`)) {
-      return NextResponse.redirect(photoUrl, {
-        headers: {
-          "Cache-Control": "public, max-age=86400, stale-while-revalidate=604800",
-        },
-      });
-    }
-
-    // If legacy base64 data was found in database, migrate to Supabase Storage in background & stream
-    if (photoData && photoData.startsWith("data:")) {
-      const matches = photoData.match(/^data:([A-Za-z-+/0-9]+);base64,(.+)$/);
-      if (matches && matches.length === 3) {
-        const mimeType = matches[1];
-        const buffer = Buffer.from(matches[2], "base64");
-
-        // Upload to Supabase Storage asynchronously and update database
-        uploadNodePhotoToSupabase(id, buffer, mimeType).then(async (res) => {
-          if (res.success && res.publicUrl && prisma) {
-            const existingNode = await prisma.node.findUnique({ where: { id }, select: { metadata: true } }).catch(() => null);
-            const meta = (existingNode?.metadata && typeof existingNode.metadata === "object") ? existingNode.metadata : {};
-            const cleanMeta = { ...meta, photoUrl: res.publicUrl, storagePath: res.storagePath, photoUploadedAt: new Date().toISOString() };
-            delete (cleanMeta as any).photoData;
-            await prisma.node.update({ where: { id }, data: { metadata: cleanMeta } }).catch(() => {});
+        if (typeof meta.photoUrl === "string") {
+          // If relative upload path: e.g. /uploads/reference-photos/nodes/...
+          if (meta.photoUrl.startsWith("/uploads/")) {
+            const relPath = meta.photoUrl.replace(/^\//, "");
+            const specificFile = path.join(process.cwd(), "public", relPath);
+            if (fs.existsSync(specificFile)) {
+              const fileBuffer = fs.readFileSync(specificFile);
+              const ext = path.extname(specificFile).toLowerCase().replace(".", "");
+              const mimeType = ext === "png" ? "image/png" : ext === "webp" ? "image/webp" : "image/jpeg";
+              return new NextResponse(fileBuffer, {
+                status: 200,
+                headers: {
+                  "Content-Type": mimeType,
+                  "Cache-Control": "public, max-age=31536000, immutable",
+                  "Content-Length": String(fileBuffer.length),
+                  "Access-Control-Allow-Origin": "*",
+                },
+              });
+            }
+          } else if (meta.photoUrl.startsWith("http") && !meta.photoUrl.includes(`/api/nodes/${id}/photo`)) {
+            return NextResponse.redirect(meta.photoUrl, {
+              headers: {
+                "Cache-Control": "public, max-age=31536000, immutable",
+                "Access-Control-Allow-Origin": "*",
+              },
+            });
           }
-        }).catch(() => {});
+        }
+      }
+    }
 
-        return new NextResponse(buffer, {
+    // 2. Secondary: Serve physical image file from Object Storage directory
+    if (fs.existsSync(nodeDir)) {
+      const files = fs.readdirSync(nodeDir).filter((f) => !f.endsWith(".json"));
+      if (files.length > 0) {
+        const newestFile = files.sort((a, b) => {
+          const statA = fs.statSync(path.join(nodeDir, a)).mtimeMs;
+          const statB = fs.statSync(path.join(nodeDir, b)).mtimeMs;
+          return statB - statA;
+        })[0];
+
+        const filePath = path.join(nodeDir, newestFile);
+        const fileBuffer = fs.readFileSync(filePath);
+        const ext = path.extname(newestFile).toLowerCase().replace(".", "");
+        const mimeType = ext === "png" ? "image/png" : ext === "webp" ? "image/webp" : "image/jpeg";
+
+        return new NextResponse(fileBuffer, {
+          status: 200,
           headers: {
             "Content-Type": mimeType,
-            "Cache-Control": "public, max-age=86400, stale-while-revalidate=604800",
-            "Content-Length": String(buffer.length),
+            "Cache-Control": "public, max-age=31536000, immutable",
+            "Content-Length": String(fileBuffer.length),
+            "Access-Control-Allow-Origin": "*",
           },
         });
       }
     }
 
-    return new NextResponse(null, { status: 404 });
+    // 3. Fallback: Legacy migration from NodePhoto table if present
+    if (prisma && (prisma as any).nodePhoto) {
+      const dbPhoto = await (prisma as any).nodePhoto.findUnique({ where: { nodeId: id } }).catch(() => null);
+      if (dbPhoto?.data) {
+        const buffer = Buffer.from(dbPhoto.data);
+        const ext = (dbPhoto.mimeType || "image/jpeg").split("/")[1] || "jpg";
+        const dir = ensureStorageDir(id);
+        const uniqueToken = Math.random().toString(36).substring(2, 9);
+        const filename = `ref_${Date.now()}_${uniqueToken}.${ext}`;
+        const filePath = path.join(dir, filename);
+        fs.writeFileSync(filePath, buffer);
+
+        return new NextResponse(buffer, {
+          status: 200,
+          headers: {
+            "Content-Type": dbPhoto.mimeType || "image/jpeg",
+            "Cache-Control": "public, max-age=31536000, immutable",
+            "Content-Length": String(buffer.length),
+            "Access-Control-Allow-Origin": "*",
+          },
+        });
+      }
+    }
+
+    return new NextResponse(
+      JSON.stringify({ error: "Photo not found in object storage", nodeId: id }),
+      {
+        status: 404,
+        headers: {
+          "Content-Type": "application/json",
+          "Access-Control-Allow-Origin": "*",
+        },
+      }
+    );
   } catch (err: unknown) {
-    console.warn("Error serving node photo:", err instanceof Error ? err.message : String(err));
-    return new NextResponse(null, { status: 500 });
+    console.error(`[PHOTO-STORAGE] Error serving photo for node ${id}:`, err instanceof Error ? err.message : String(err));
+    return new NextResponse(
+      JSON.stringify({ error: "Internal server error serving photo", nodeId: id }),
+      {
+        status: 500,
+        headers: {
+          "Content-Type": "application/json",
+          "Access-Control-Allow-Origin": "*",
+        },
+      }
+    );
   }
 }
 
@@ -111,6 +151,7 @@ export async function POST(
   try {
     let rawBuffer: Buffer | null = null;
     let mimeType = "image/jpeg";
+    let ext = "jpg";
     const contentType = req.headers.get("content-type") || "";
 
     if (contentType.includes("multipart/form-data")) {
@@ -125,11 +166,12 @@ export async function POST(
         return NextResponse.json({ error: "Invalid image format. Allowed: JPG, PNG, WebP, GIF, SVG." }, { status: 415 });
       }
 
-      if (file.size > 5 * 1024 * 1024) {
-        return NextResponse.json({ error: "File size exceeds 5MB limit." }, { status: 413 });
+      if (file.size > 15 * 1024 * 1024) {
+        return NextResponse.json({ error: "File size exceeds 15MB limit." }, { status: 413 });
       }
 
       mimeType = file.type;
+      ext = mimeType.split("/")[1]?.replace("svg+xml", "svg") || "jpg";
       const bytes = await file.arrayBuffer();
       rawBuffer = Buffer.from(bytes);
     } else {
@@ -143,6 +185,7 @@ export async function POST(
       const matches = photoDataUri.match(/^data:([A-Za-z-+/0-9]+);base64,(.+)$/);
       if (matches && matches.length === 3) {
         mimeType = matches[1];
+        ext = mimeType.split("/")[1]?.replace("svg+xml", "svg") || "jpg";
         rawBuffer = Buffer.from(matches[2], "base64");
       }
     }
@@ -151,140 +194,131 @@ export async function POST(
       return NextResponse.json({ error: "Could not process image binary." }, { status: 400 });
     }
 
-    // 1. Upload to Supabase Storage Bucket (reference-photos/nodes/{nodeId}/...)
-    const uploadResult = await uploadNodePhotoToSupabase(id, rawBuffer, mimeType);
-    if (!uploadResult.success || !uploadResult.publicUrl) {
-      return NextResponse.json(
-        { error: uploadResult.error || "Failed to upload image to Supabase Storage." },
-        { status: 502 }
-      );
-    }
+    // 1. Write Real Image File into Persistent Object Storage
+    const safeNodeId = id.replace(/[^a-zA-Z0-9_-]/g, "_");
+    const nodeDir = ensureStorageDir(id);
 
-    const publicPhotoUrl = uploadResult.publicUrl;
-    const storagePath = uploadResult.storagePath;
-
-    console.log(`[PHOTO] Selected Node ID: ${id}`);
-    console.log(`[PHOTO] Storage Upload: success=${uploadResult.success}`);
-    console.log(`[PHOTO] Storage Path: ${storagePath}`);
-    console.log(`[PHOTO] Generated URL: ${publicPhotoUrl}`);
-    console.log(`[PHOTO] Database Write Started for Node: ${id}`);
-
-    // 2. Persist ONLY lightweight URL and metadata in PostgreSQL (ZERO base64 data)
-    if (prisma) {
-      try {
-        const existingNode = await prisma.node.findUnique({
-          where: { id },
-          select: { metadata: true },
-        }).catch(() => null);
-
-        const existingMeta = (existingNode?.metadata && typeof existingNode?.metadata === "object")
-          ? (existingNode.metadata as Record<string, any>)
-          : {};
-
-        // Safely clean up old storage object if replaced
-        if (existingMeta.storagePath && existingMeta.storagePath !== storagePath) {
-          deleteNodePhotoFromSupabase(existingMeta.storagePath).catch(() => {});
-        }
-
-        const updatedMeta: Record<string, any> = {
-          ...existingMeta,
-          photoUrl: publicPhotoUrl,
-          storagePath,
-          photoUploadedAt: new Date().toISOString(),
-        };
-        // Ensure no legacy base64 data is retained
-        delete updatedMeta.photoData;
-
-        if (existingNode) {
-          await prisma.node.update({
-            where: { id },
-            data: { metadata: updatedMeta },
-          }).catch((e) => console.warn(`Notice: Node ${id} metadata update:`, e?.message));
-        } else {
-          await prisma.node.upsert({
-            where: { id },
-            update: { metadata: updatedMeta },
-            create: {
-              id,
-              campusId: "c1",
-              type: "CORRIDOR",
-              metadata: updatedMeta,
-            },
-          }).catch(() => {});
-        }
-
-        console.log(`[PHOTO] Database Write Result: SUCCESS for Node ${id}`);
-
-        // 3. Synchronize active draft and published graph snapshots with cloud URL
-        const [draftRec, pubRec] = await Promise.all([
-          prisma.draftGraph.findUnique({ where: { id: "active-draft" } }).catch(() => null),
-          prisma.publishedGraph.findUnique({ where: { id: "active-published" } }).catch(() => null),
-        ]);
-
-        if (draftRec?.snapshot && typeof draftRec.snapshot === "object") {
-          const snap = draftRec.snapshot as any;
-          if (Array.isArray(snap.nodes)) {
-            const nd = snap.nodes.find((n: any) => n.id === id);
-            if (nd) {
-              nd.photoUrl = publicPhotoUrl;
-              delete nd.photoData;
-              await prisma.draftGraph.update({
-                where: { id: "active-draft" },
-                data: { snapshot: snap },
-              }).catch(() => {});
-            }
-          }
-        }
-
-        if (pubRec?.snapshot && typeof pubRec.snapshot === "object") {
-          const snap = pubRec.snapshot as any;
-          if (Array.isArray(snap.nodes)) {
-            const nd = snap.nodes.find((n: any) => n.id === id);
-            if (nd) {
-              nd.photoUrl = publicPhotoUrl;
-              delete nd.photoData;
-              await prisma.publishedGraph.update({
-                where: { id: "active-published" },
-                data: { snapshot: snap },
-              }).catch(() => {});
-            }
-          }
-        }
-      } catch (dbErr) {
-        console.warn("Notice: Database photo metadata persistence:", dbErr);
+    // Clean up old physical files in node directory before saving new one
+    try {
+      const oldFiles = fs.readdirSync(nodeDir);
+      for (const oldFile of oldFiles) {
+        fs.unlinkSync(path.join(nodeDir, oldFile));
       }
+    } catch {}
+
+    const uniqueToken = Math.random().toString(36).substring(2, 9);
+    const uniqueFilename = `ref_${Date.now()}_${uniqueToken}.${ext}`;
+    const targetFilePath = path.join(nodeDir, uniqueFilename);
+
+    // Save actual image file to disk
+    fs.writeFileSync(targetFilePath, rawBuffer);
+
+    const persistentUrl = `/uploads/reference-photos/nodes/${safeNodeId}/${uniqueFilename}`;
+    const storagePath = `nodes/${safeNodeId}/${uniqueFilename}`;
+    const uploadedAt = new Date().toISOString();
+
+    console.log(`[OBJECT-STORAGE] Real File Saved: ${targetFilePath} (${rawBuffer.length} bytes, ${mimeType})`);
+    console.log(`[OBJECT-STORAGE] Persistent URL: ${persistentUrl}`);
+
+    // Verify storage file exists and is readable
+    if (!fs.existsSync(targetFilePath) || fs.statSync(targetFilePath).size === 0) {
+      return NextResponse.json({ error: "Failed to persist image file to object storage." }, { status: 500 });
     }
 
-    // 4. Strict Database Verification Step (Requirement 4)
+    // 2. Persist ONLY the lightweight URL and path in PostgreSQL database (ZERO base64, ZERO binary)
     if (prisma) {
-      const verifiedNode = await prisma.node.findUnique({
-        where: { id },
-        select: { id: true, metadata: true },
-      });
+      const updatedMeta: Record<string, any> = {
+        photoUrl: persistentUrl,
+        storagePath,
+        photoUploadedAt: uploadedAt,
+        physicalVerified: true,
+      };
 
-      const verifiedMeta = (verifiedNode?.metadata && typeof verifiedNode?.metadata === "object")
-        ? (verifiedNode.metadata as Record<string, any>)
+      const existingNode = await prisma.node.findUnique({
+        where: { id },
+        select: { metadata: true },
+      }).catch(() => null);
+
+      const existingMeta = (existingNode?.metadata && typeof existingNode?.metadata === "object")
+        ? (existingNode.metadata as Record<string, any>)
         : {};
 
-      if (!verifiedNode || !verifiedMeta.photoUrl) {
-        console.error(`[PHOTO] Database Verification Result: FAILED for Node ${id}`);
-        return NextResponse.json(
-          { error: "Database verification failed: Photo reference could not be verified in PostgreSQL." },
-          { status: 500 }
-        );
+      const mergedMeta = { ...existingMeta, ...updatedMeta };
+      delete (mergedMeta as any).photoData;
+
+      if (existingNode) {
+        await prisma.node.update({
+          where: { id },
+          data: { metadata: mergedMeta },
+        });
+      } else {
+        await prisma.node.upsert({
+          where: { id },
+          update: { metadata: mergedMeta },
+          create: {
+            id,
+            campusId: "c1",
+            type: "CORRIDOR",
+            metadata: mergedMeta,
+          },
+        });
       }
-      console.log(`[PHOTO] Database Verification Result: SUCCESS (Verified photoUrl = ${verifiedMeta.photoUrl})`);
+
+      // 3. Update Draft and Published Snapshots in background
+      setTimeout(async () => {
+        if (!prisma) return;
+        try {
+          const [draftRec, pubRec] = await Promise.all([
+            prisma.draftGraph.findUnique({ where: { id: "active-draft" } }).catch(() => null),
+            prisma.publishedGraph.findUnique({ where: { id: "active-published" } }).catch(() => null),
+          ]);
+
+          if (draftRec?.snapshot && typeof draftRec.snapshot === "object") {
+            const snap = draftRec.snapshot as any;
+            if (Array.isArray(snap.nodes)) {
+              const nd = snap.nodes.find((n: any) => n.id === id);
+              if (nd) {
+                nd.photoUrl = persistentUrl;
+                nd.photoUploadedAt = uploadedAt;
+                nd.physicalVerified = true;
+                delete nd.photoData;
+                await prisma.draftGraph.update({
+                  where: { id: "active-draft" },
+                  data: { snapshot: snap },
+                }).catch(() => {});
+              }
+            }
+          }
+
+          if (pubRec?.snapshot && typeof pubRec.snapshot === "object") {
+            const snap = pubRec.snapshot as any;
+            if (Array.isArray(snap.nodes)) {
+              const nd = snap.nodes.find((n: any) => n.id === id);
+              if (nd) {
+                nd.photoUrl = persistentUrl;
+                nd.photoUploadedAt = uploadedAt;
+                nd.physicalVerified = true;
+                delete nd.photoData;
+                await prisma.publishedGraph.update({
+                  where: { id: "active-published" },
+                  data: { snapshot: snap },
+                }).catch(() => {});
+              }
+            }
+          }
+        } catch {}
+      }, 0);
     }
 
     return NextResponse.json({
       success: true,
       nodeId: id,
-      photoUrl: publicPhotoUrl,
+      photoUrl: persistentUrl,
       storagePath,
-      uploadedAt: new Date().toISOString(),
+      uploadedAt,
     });
   } catch (err: unknown) {
-    console.error(`Error uploading photo for node ${id}:`, err);
+    console.error(`[OBJECT-STORAGE] Error uploading photo for node ${id}:`, err);
     return NextResponse.json({ error: "Failed to upload reference photo." }, { status: 500 });
   }
 }
@@ -296,6 +330,20 @@ export async function DELETE(
   const { id } = await params;
 
   try {
+    // 1. Remove physical file from object storage
+    const safeNodeId = id.replace(/[^a-zA-Z0-9_-]/g, "_");
+    const nodeDir = path.join(OBJECT_STORAGE_ROOT, safeNodeId);
+    if (fs.existsSync(nodeDir)) {
+      const files = fs.readdirSync(nodeDir);
+      for (const file of files) {
+        fs.unlinkSync(path.join(nodeDir, file));
+      }
+      try {
+        fs.rmdirSync(nodeDir);
+      } catch {}
+    }
+
+    // 2. Remove photo metadata from database
     if (prisma) {
       const existingNode = await prisma.node.findUnique({
         where: { id },
@@ -304,26 +352,65 @@ export async function DELETE(
 
       if (existingNode?.metadata && typeof existingNode.metadata === "object") {
         const meta = { ...(existingNode.metadata as Record<string, any>) };
-        const storagePath = meta.storagePath || extractStoragePathFromUrl(meta.photoUrl);
-        if (storagePath) {
-          await deleteNodePhotoFromSupabase(storagePath).catch(() => {});
-        }
-
         delete meta.photoData;
         delete meta.photoUrl;
         delete meta.storagePath;
         delete meta.photoUploadedAt;
+        delete meta.physicalVerified;
 
         await prisma.node.update({
           where: { id },
-          data: { metadata: Object.keys(meta).length > 0 ? meta : undefined },
+          data: { metadata: meta },
         }).catch(() => {});
+      }
+
+      // Also clean up any legacy row in NodePhoto
+      await (prisma as any).nodePhoto?.deleteMany({ where: { nodeId: id } }).catch(() => {});
+
+      // 3. Remove photoUrl from snapshots
+      const [draftRec, pubRec] = await Promise.all([
+        prisma.draftGraph.findUnique({ where: { id: "active-draft" } }).catch(() => null),
+        prisma.publishedGraph.findUnique({ where: { id: "active-published" } }).catch(() => null),
+      ]);
+
+      if (draftRec?.snapshot && typeof draftRec.snapshot === "object") {
+        const snap = draftRec.snapshot as any;
+        if (Array.isArray(snap.nodes)) {
+          const nd = snap.nodes.find((n: any) => n.id === id);
+          if (nd) {
+            delete nd.photoUrl;
+            delete nd.photoData;
+            delete nd.photoUploadedAt;
+            delete nd.physicalVerified;
+            await prisma.draftGraph.update({
+              where: { id: "active-draft" },
+              data: { snapshot: snap },
+            }).catch(() => {});
+          }
+        }
+      }
+
+      if (pubRec?.snapshot && typeof pubRec.snapshot === "object") {
+        const snap = pubRec.snapshot as any;
+        if (Array.isArray(snap.nodes)) {
+          const nd = snap.nodes.find((n: any) => n.id === id);
+          if (nd) {
+            delete nd.photoUrl;
+            delete nd.photoData;
+            delete nd.photoUploadedAt;
+            delete nd.physicalVerified;
+            await prisma.publishedGraph.update({
+              where: { id: "active-published" },
+              data: { snapshot: snap },
+            }).catch(() => {});
+          }
+        }
       }
     }
 
     return NextResponse.json({ success: true, nodeId: id });
   } catch (err: unknown) {
-    console.error(`Error deleting photo for node ${id}:`, err);
+    console.error(`[OBJECT-STORAGE] Error deleting photo for node ${id}:`, err);
     return NextResponse.json({ error: "Failed to remove reference photo." }, { status: 500 });
   }
 }

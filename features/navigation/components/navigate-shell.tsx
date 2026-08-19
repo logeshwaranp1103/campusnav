@@ -1336,9 +1336,14 @@ export function NavigateShell() {
                     alt={`Reference for ${previewingPhoto.title}`}
                     className="w-full h-auto max-h-[70vh] object-contain rounded-xl"
                     onError={(e) => {
+                      const apiFallback = previewingPhoto.nodeId ? `/api/nodes/${previewingPhoto.nodeId}/photo` : null;
                       const targetNode = publishedData.nodes.find((n) => n.id === previewingPhoto.nodeId);
-                      if (targetNode?.photoUrl && targetNode.photoUrl !== previewingPhoto.url) {
-                        (e.target as HTMLImageElement).src = targetNode.photoUrl;
+                      const imgEl = e.target as HTMLImageElement;
+
+                      if (apiFallback && !imgEl.src.endsWith(apiFallback)) {
+                        imgEl.src = apiFallback;
+                      } else if (targetNode?.photoUrl && !imgEl.src.endsWith(targetNode.photoUrl)) {
+                        imgEl.src = targetNode.photoUrl;
                       } else {
                         setPreviewPhotoError(true);
                       }

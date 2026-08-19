@@ -542,7 +542,7 @@ function MapCanvas({
   );
 
   const scopeNodes = useMemo(() => {
-    return allNodes.filter((n) => isNodeOnActiveFloor(n) && n.visibleToUser === true);
+    return allNodes.filter((n) => isNodeOnActiveFloor(n) && (n.visibleToUser === true || Boolean(n.photoUrl)));
   }, [allNodes, isNodeOnActiveFloor]);
 
   const scopeEdges = useMemo(() => {
