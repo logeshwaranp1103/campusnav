@@ -5,13 +5,18 @@ import path from "path";
 
 const OBJECT_STORAGE_ROOT = path.join(process.cwd(), "public", "uploads", "reference-photos", "nodes");
 
-function ensureStorageDir(nodeId: string): string {
-  const safeId = nodeId.replace(/[^a-zA-Z0-9_-]/g, "_");
-  const dir = path.join(OBJECT_STORAGE_ROOT, safeId);
-  if (!fs.existsSync(dir)) {
-    fs.mkdirSync(dir, { recursive: true });
+function tryEnsureStorageDir(nodeId: string): string | null {
+  try {
+    const safeId = nodeId.replace(/[^a-zA-Z0-9_-]/g, "_");
+    const dir = path.join(OBJECT_STORAGE_ROOT, safeId);
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true });
+    }
+    return dir;
+  } catch {
+    // Read-only filesystem on Vercel / serverless
+    return null;
   }
-  return dir;
 }
 
 export async function GET(
@@ -21,90 +26,11 @@ export async function GET(
   const { id } = await params;
 
   try {
-    const safeId = id.replace(/[^a-zA-Z0-9_-]/g, "_");
-    const nodeDir = path.join(OBJECT_STORAGE_ROOT, safeId);
-
-    // 1. Primary: Check Node metadata in PostgreSQL for exact registered photoUrl / storagePath
+    // 1. Primary: Stream binary image from persistent PostgreSQL (Supabase)
     if (prisma) {
-      const node = await prisma.node
-        .findUnique({
-          where: { id },
-          select: { metadata: true },
-        })
-        .catch(() => null);
-
-      if (node?.metadata && typeof node.metadata === "object") {
-        const meta = node.metadata as Record<string, any>;
-        if (typeof meta.photoUrl === "string") {
-          // If relative upload path: e.g. /uploads/reference-photos/nodes/...
-          if (meta.photoUrl.startsWith("/uploads/")) {
-            const relPath = meta.photoUrl.replace(/^\//, "");
-            const specificFile = path.join(process.cwd(), "public", relPath);
-            if (fs.existsSync(specificFile)) {
-              const fileBuffer = fs.readFileSync(specificFile);
-              const ext = path.extname(specificFile).toLowerCase().replace(".", "");
-              const mimeType = ext === "png" ? "image/png" : ext === "webp" ? "image/webp" : "image/jpeg";
-              return new NextResponse(fileBuffer, {
-                status: 200,
-                headers: {
-                  "Content-Type": mimeType,
-                  "Cache-Control": "public, max-age=31536000, immutable",
-                  "Content-Length": String(fileBuffer.length),
-                  "Access-Control-Allow-Origin": "*",
-                },
-              });
-            }
-          } else if (meta.photoUrl.startsWith("http") && !meta.photoUrl.includes(`/api/nodes/${id}/photo`)) {
-            return NextResponse.redirect(meta.photoUrl, {
-              headers: {
-                "Cache-Control": "public, max-age=31536000, immutable",
-                "Access-Control-Allow-Origin": "*",
-              },
-            });
-          }
-        }
-      }
-    }
-
-    // 2. Secondary: Serve physical image file from Object Storage directory
-    if (fs.existsSync(nodeDir)) {
-      const files = fs.readdirSync(nodeDir).filter((f) => !f.endsWith(".json"));
-      if (files.length > 0) {
-        const newestFile = files.sort((a, b) => {
-          const statA = fs.statSync(path.join(nodeDir, a)).mtimeMs;
-          const statB = fs.statSync(path.join(nodeDir, b)).mtimeMs;
-          return statB - statA;
-        })[0];
-
-        const filePath = path.join(nodeDir, newestFile);
-        const fileBuffer = fs.readFileSync(filePath);
-        const ext = path.extname(newestFile).toLowerCase().replace(".", "");
-        const mimeType = ext === "png" ? "image/png" : ext === "webp" ? "image/webp" : "image/jpeg";
-
-        return new NextResponse(fileBuffer, {
-          status: 200,
-          headers: {
-            "Content-Type": mimeType,
-            "Cache-Control": "public, max-age=31536000, immutable",
-            "Content-Length": String(fileBuffer.length),
-            "Access-Control-Allow-Origin": "*",
-          },
-        });
-      }
-    }
-
-    // 3. Fallback: Legacy migration from NodePhoto table if present
-    if (prisma && (prisma as any).nodePhoto) {
-      const dbPhoto = await (prisma as any).nodePhoto.findUnique({ where: { nodeId: id } }).catch(() => null);
+      const dbPhoto = await prisma.nodePhoto.findUnique({ where: { nodeId: id } }).catch(() => null);
       if (dbPhoto?.data) {
         const buffer = Buffer.from(dbPhoto.data);
-        const ext = (dbPhoto.mimeType || "image/jpeg").split("/")[1] || "jpg";
-        const dir = ensureStorageDir(id);
-        const uniqueToken = Math.random().toString(36).substring(2, 9);
-        const filename = `ref_${Date.now()}_${uniqueToken}.${ext}`;
-        const filePath = path.join(dir, filename);
-        fs.writeFileSync(filePath, buffer);
-
         return new NextResponse(buffer, {
           status: 200,
           headers: {
@@ -117,8 +43,61 @@ export async function GET(
       }
     }
 
+    // 2. Secondary: Check local disk storage cache if accessible
+    try {
+      const safeId = id.replace(/[^a-zA-Z0-9_-]/g, "_");
+      const nodeDir = path.join(OBJECT_STORAGE_ROOT, safeId);
+      if (fs.existsSync(nodeDir)) {
+        const files = fs.readdirSync(nodeDir).filter((f) => !f.endsWith(".json"));
+        if (files.length > 0) {
+          const newestFile = files.sort((a, b) => {
+            const statA = fs.statSync(path.join(nodeDir, a)).mtimeMs;
+            const statB = fs.statSync(path.join(nodeDir, b)).mtimeMs;
+            return statB - statA;
+          })[0];
+
+          const filePath = path.join(nodeDir, newestFile);
+          const fileBuffer = fs.readFileSync(filePath);
+          const ext = path.extname(newestFile).toLowerCase().replace(".", "");
+          const mimeType = ext === "png" ? "image/png" : ext === "webp" ? "image/webp" : "image/jpeg";
+
+          return new NextResponse(fileBuffer, {
+            status: 200,
+            headers: {
+              "Content-Type": mimeType,
+              "Cache-Control": "public, max-age=31536000, immutable",
+              "Content-Length": String(fileBuffer.length),
+              "Access-Control-Allow-Origin": "*",
+            },
+          });
+        }
+      }
+    } catch {}
+
+    // 3. Tertiary: Check if Node.metadata has an external photoUrl
+    if (prisma) {
+      const node = await prisma.node
+        .findUnique({
+          where: { id },
+          select: { metadata: true },
+        })
+        .catch(() => null);
+
+      if (node?.metadata && typeof node.metadata === "object") {
+        const meta = node.metadata as Record<string, any>;
+        if (typeof meta.photoUrl === "string" && meta.photoUrl.startsWith("http") && !meta.photoUrl.includes(`/api/nodes/${id}/photo`)) {
+          return NextResponse.redirect(meta.photoUrl, {
+            headers: {
+              "Cache-Control": "public, max-age=31536000, immutable",
+              "Access-Control-Allow-Origin": "*",
+            },
+          });
+        }
+      }
+    }
+
     return new NextResponse(
-      JSON.stringify({ error: "Photo not found in object storage", nodeId: id }),
+      JSON.stringify({ error: "Photo not found for node", nodeId: id }),
       {
         status: 404,
         headers: {
@@ -194,38 +173,49 @@ export async function POST(
       return NextResponse.json({ error: "Could not process image binary." }, { status: 400 });
     }
 
-    // 1. Write Real Image File into Persistent Object Storage
     const safeNodeId = id.replace(/[^a-zA-Z0-9_-]/g, "_");
-    const nodeDir = ensureStorageDir(id);
-
-    // Clean up old physical files in node directory before saving new one
-    try {
-      const oldFiles = fs.readdirSync(nodeDir);
-      for (const oldFile of oldFiles) {
-        fs.unlinkSync(path.join(nodeDir, oldFile));
-      }
-    } catch {}
-
     const uniqueToken = Math.random().toString(36).substring(2, 9);
     const uniqueFilename = `ref_${Date.now()}_${uniqueToken}.${ext}`;
-    const targetFilePath = path.join(nodeDir, uniqueFilename);
-
-    // Save actual image file to disk
-    fs.writeFileSync(targetFilePath, rawBuffer);
-
-    const persistentUrl = `/uploads/reference-photos/nodes/${safeNodeId}/${uniqueFilename}`;
+    const persistentUrl = `/api/nodes/${id}/photo`;
     const storagePath = `nodes/${safeNodeId}/${uniqueFilename}`;
     const uploadedAt = new Date().toISOString();
 
-    console.log(`[OBJECT-STORAGE] Real File Saved: ${targetFilePath} (${rawBuffer.length} bytes, ${mimeType})`);
-    console.log(`[OBJECT-STORAGE] Persistent URL: ${persistentUrl}`);
-
-    // Verify storage file exists and is readable
-    if (!fs.existsSync(targetFilePath) || fs.statSync(targetFilePath).size === 0) {
-      return NextResponse.json({ error: "Failed to persist image file to object storage." }, { status: 500 });
+    // 1. Primary: Save to PostgreSQL NodePhoto table (Persistent on Vercel and Localhost)
+    if (prisma) {
+      await prisma.nodePhoto.upsert({
+        where: { nodeId: id },
+        update: {
+          data: rawBuffer,
+          mimeType,
+          size: rawBuffer.length,
+          updatedAt: new Date(),
+        },
+        create: {
+          nodeId: id,
+          data: rawBuffer,
+          mimeType,
+          size: rawBuffer.length,
+        },
+      });
     }
 
-    // 2. Persist ONLY the lightweight URL and path in PostgreSQL database (ZERO base64, ZERO binary)
+    // 2. Secondary: Best-effort local file cache (Safely handles EROFS on Vercel)
+    try {
+      const nodeDir = tryEnsureStorageDir(id);
+      if (nodeDir) {
+        const oldFiles = fs.readdirSync(nodeDir);
+        for (const oldFile of oldFiles) {
+          fs.unlinkSync(path.join(nodeDir, oldFile));
+        }
+        const targetFilePath = path.join(nodeDir, uniqueFilename);
+        fs.writeFileSync(targetFilePath, rawBuffer);
+        console.log(`[STORAGE-CACHE] Cached file to disk: ${targetFilePath}`);
+      }
+    } catch (fsErr: any) {
+      console.log(`[STORAGE-CACHE] Serverless environment: Disk cache skipped (${fsErr?.message || "EROFS"})`);
+    }
+
+    // 3. Persist lightweight URL & metadata in Node table
     if (prisma) {
       try {
         const updatedMeta: Record<string, any> = {
@@ -251,7 +241,7 @@ export async function POST(
           await prisma.node.update({
             where: { id },
             data: { metadata: mergedMeta },
-          }).catch((e) => console.warn(`[OBJECT-STORAGE] Node update notice:`, e?.message));
+          }).catch(() => {});
         } else {
           const defaultCampus = await prisma.campus.findFirst({ select: { id: true } }).catch(() => null);
           const campusId = existingNode?.campusId || defaultCampus?.id || "c1";
@@ -265,10 +255,10 @@ export async function POST(
               type: "CORRIDOR",
               metadata: mergedMeta,
             },
-          }).catch((e) => console.warn(`[OBJECT-STORAGE] Node upsert notice:`, e?.message));
+          }).catch(() => {});
         }
 
-        // 3. Update Draft and Published Snapshots in background
+        // 4. Update Draft and Published Snapshots in background
         setTimeout(async () => {
           if (!prisma) return;
           try {
@@ -313,7 +303,7 @@ export async function POST(
           } catch {}
         }, 0);
       } catch (dbErr: any) {
-        console.warn(`[OBJECT-STORAGE] Database metadata update warning for ${id}:`, dbErr?.message);
+        console.warn(`[PHOTO-STORAGE] Database metadata update warning for ${id}:`, dbErr?.message);
       }
     }
 
@@ -325,7 +315,7 @@ export async function POST(
       uploadedAt,
     });
   } catch (err: unknown) {
-    console.error(`[OBJECT-STORAGE] Error uploading photo for node ${id}:`, err);
+    console.error(`[PHOTO-STORAGE] Error uploading photo for node ${id}:`, err);
     return NextResponse.json({
       error: err instanceof Error ? err.message : "Failed to upload reference photo."
     }, { status: 500 });
@@ -339,20 +329,25 @@ export async function DELETE(
   const { id } = await params;
 
   try {
-    // 1. Remove physical file from object storage
-    const safeNodeId = id.replace(/[^a-zA-Z0-9_-]/g, "_");
-    const nodeDir = path.join(OBJECT_STORAGE_ROOT, safeNodeId);
-    if (fs.existsSync(nodeDir)) {
-      const files = fs.readdirSync(nodeDir);
-      for (const file of files) {
-        fs.unlinkSync(path.join(nodeDir, file));
-      }
-      try {
-        fs.rmdirSync(nodeDir);
-      } catch {}
+    // 1. Delete from PostgreSQL NodePhoto table
+    if (prisma) {
+      await prisma.nodePhoto.deleteMany({ where: { nodeId: id } }).catch(() => {});
     }
 
-    // 2. Remove photo metadata from database
+    // 2. Clean up disk cache if accessible
+    try {
+      const safeNodeId = id.replace(/[^a-zA-Z0-9_-]/g, "_");
+      const nodeDir = path.join(OBJECT_STORAGE_ROOT, safeNodeId);
+      if (fs.existsSync(nodeDir)) {
+        const files = fs.readdirSync(nodeDir);
+        for (const file of files) {
+          fs.unlinkSync(path.join(nodeDir, file));
+        }
+        fs.rmdirSync(nodeDir);
+      }
+    } catch {}
+
+    // 3. Remove photo metadata from Node table and Snapshots
     if (prisma) {
       const existingNode = await prisma.node.findUnique({
         where: { id },
@@ -373,10 +368,6 @@ export async function DELETE(
         }).catch(() => {});
       }
 
-      // Also clean up any legacy row in NodePhoto
-      await (prisma as any).nodePhoto?.deleteMany({ where: { nodeId: id } }).catch(() => {});
-
-      // 3. Remove photoUrl from snapshots
       const [draftRec, pubRec] = await Promise.all([
         prisma.draftGraph.findUnique({ where: { id: "active-draft" } }).catch(() => null),
         prisma.publishedGraph.findUnique({ where: { id: "active-published" } }).catch(() => null),
@@ -419,7 +410,7 @@ export async function DELETE(
 
     return NextResponse.json({ success: true, nodeId: id });
   } catch (err: unknown) {
-    console.error(`[OBJECT-STORAGE] Error deleting photo for node ${id}:`, err);
+    console.error(`[PHOTO-STORAGE] Error deleting photo for node ${id}:`, err);
     return NextResponse.json({ error: "Failed to remove reference photo." }, { status: 500 });
   }
 }
