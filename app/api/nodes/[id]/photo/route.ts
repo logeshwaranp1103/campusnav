@@ -247,6 +247,27 @@ export async function POST(
       }
     }
 
+    // 4. Strict Database Verification Step (Requirement 4)
+    if (prisma) {
+      const verifiedNode = await prisma.node.findUnique({
+        where: { id },
+        select: { id: true, metadata: true },
+      });
+
+      const verifiedMeta = (verifiedNode?.metadata && typeof verifiedNode?.metadata === "object")
+        ? (verifiedNode.metadata as Record<string, any>)
+        : {};
+
+      if (!verifiedNode || !verifiedMeta.photoUrl) {
+        console.error(`[DATABASE_VERIFICATION_FAILED] Node ${id} metadata missing after write.`);
+        return NextResponse.json(
+          { error: "Database verification failed: Photo reference could not be verified in PostgreSQL." },
+          { status: 500 }
+        );
+      }
+      console.log(`[DATABASE_VERIFICATION_SUCCESS] Node ${id} verified photoUrl: ${verifiedMeta.photoUrl}`);
+    }
+
     return NextResponse.json({
       success: true,
       nodeId: id,

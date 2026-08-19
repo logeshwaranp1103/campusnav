@@ -125,7 +125,34 @@ export async function publishDraftGraph(
 
       versionNum = (dbPublished?.version ?? 0) + 1;
 
-      const sanitizedSnapshot = sanitizeSnapshotForPayload(draftSnapshot);
+      // Pre-fetch all node metadata from DB so published snapshot ALWAYS contains verified cloud photo URLs
+      const dbNodes = await prisma.node.findMany({ select: { id: true, metadata: true } }).catch(() => []);
+      const dbNodeMetaMap = new Map<string, any>();
+      for (const dbn of dbNodes) {
+        if (dbn.metadata && typeof dbn.metadata === "object") {
+          dbNodeMetaMap.set(dbn.id, dbn.metadata);
+        }
+      }
+
+      const mergedNodes = (draftSnapshot.nodes || []).map((n) => {
+        const dbMeta = dbNodeMetaMap.get(n.id) || {};
+        const photoUrl = n.photoUrl || dbMeta.photoUrl;
+        const storagePath = (n as any).storagePath || dbMeta.storagePath;
+        const photoUploadedAt = n.photoUploadedAt || dbMeta.photoUploadedAt;
+        const safeNode = {
+          ...n,
+          ...(photoUrl ? { photoUrl } : {}),
+          ...(storagePath ? { storagePath } : {}),
+          ...(photoUploadedAt ? { photoUploadedAt } : {}),
+        };
+        delete (safeNode as any).photoData;
+        return safeNode;
+      });
+
+      const sanitizedSnapshot = sanitizeSnapshotForPayload({
+        ...draftSnapshot,
+        nodes: mergedNodes,
+      });
 
       // 2. ATOMIC DATABASE TRANSACTION for Core Publish Records
       // Ensures publishedGraph, draftGraph, and mapVersion are atomically committed

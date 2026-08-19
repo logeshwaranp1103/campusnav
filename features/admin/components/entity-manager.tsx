@@ -1127,13 +1127,16 @@ export function EntityManager() {
             body: JSON.stringify({ photoData: photoManagerFile }),
           });
 
+          const data = await res.json().catch(() => ({}));
           if (!res.ok) {
-            throw new Error(`Server returned status ${res.status}`);
+            throw new Error(data.error || `Server returned status ${res.status}`);
           }
 
+          const savedUrl = data.photoUrl || stableUrl;
+
           campusStore.updateNode(targetNode.id, {
-            photoUrl: stableUrl,
-            photoUploadedAt: new Date().toISOString(),
+            photoUrl: savedUrl,
+            photoUploadedAt: data.uploadedAt || new Date().toISOString(),
             physicalVerified: photoManagerPhysicalVerified,
           });
 
