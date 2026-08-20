@@ -303,6 +303,9 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
     outdoor: true,
   });
 
+  // State to toggle hiding node names while keeping node circles visible & interactive
+  const [hideNodeNames, setHideNodeNames] = useState(false);
+
   // Dragging State for Direct Element Dragging
   const [draggingId, setDraggingId] = useState<{
     type: "node" | "building" | "obstacle" | "event" | "door";
@@ -334,8 +337,10 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
   const getCanvasCoords = (e: React.MouseEvent | MouseEvent) => {
     if (!canvasRef.current) return { x: 400, y: 300 };
     const rect = canvasRef.current.getBoundingClientRect();
-    let x = Math.round((e.clientX - rect.left - panOffset.x) / zoom);
-    let y = Math.round((e.clientY - rect.top - panOffset.y) / zoom);
+    const curPan = panOffsetRef.current;
+    const curZoom = zoomRef.current || 1;
+    let x = Math.round((e.clientX - rect.left - curPan.x) / curZoom);
+    let y = Math.round((e.clientY - rect.top - curPan.y) / curZoom);
     if (snapToGrid) {
       x = Math.round(x / 20) * 20;
       y = Math.round(y / 20) * 20;
@@ -406,10 +411,10 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
   const searchParams = useSearchParams();
   const focusParamId = searchParams.get("focus") || searchParams.get("select");
 
-  const [hasAutoCentered, setHasAutoCentered] = useState(false);
+  const hasAutoCenteredRef = useRef(false);
 
   useEffect(() => {
-    if (hasAutoCentered || focusParamId || !canvasRef.current) return;
+    if (hasAutoCenteredRef.current || focusParamId || !canvasRef.current) return;
     
     // Collect all elements with x,y to find bounds
     const elements = [
@@ -436,12 +441,14 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
         x: (rect.width / 2) - cx * curZoom, 
         y: (rect.height / 2) - cy * curZoom 
       });
-      setHasAutoCentered(true);
+      hasAutoCenteredRef.current = true;
     }
-  }, [storeData.buildings, storeData.nodes, hasAutoCentered, focusParamId]);
+  }, [focusParamId]);
+
+  const lastFocusedParamRef = useRef<string | null>(null);
 
   useEffect(() => {
-    if (!focusParamId) return;
+    if (!focusParamId || lastFocusedParamRef.current === focusParamId) return;
 
     let targetX: number | null = null;
     let targetY: number | null = null;
@@ -547,6 +554,7 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
     }
 
     if (targetX !== null && targetY !== null) {
+      lastFocusedParamRef.current = focusParamId;
       if (targetFloorId) {
         setActiveFloorId(targetFloorId);
       }
@@ -568,7 +576,7 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
         description: `Centered CAD canvas viewport on object (${focusParamId}).`,
       });
     }
-  }, [focusParamId, storeData]);
+  }, [focusParamId]);
 
 
   // Event Tool Form State Helpers
@@ -1243,7 +1251,7 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
       const fl = storeData.floors.find((f) => f.id === targetFloorId);
       const isGroundIndoor =
         targetFloorId !== "f-out" &&
-        roomLinkedNodeIds.has(d.nodeId || "") &&
+        Boolean(d.nodeId) &&
         (targetFloorId?.includes("gnd") || fl?.ordinal === 0) &&
         !/entrance|gate/i.test(d.name);
       if (!isGroundFloorView && isGroundIndoor) return false;
@@ -1579,14 +1587,14 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
         y,
         searchable: true,
       };
-      campusStore.addNode(newNode, false); // Requirement #5: Never auto-add edges when node is added
+      campusStore.addNode(newNode, false); // Never auto-add edges when node is added
       setSelectedElement({ type: "node", id: newNodeId });
       const targetFloorObj = storeData.floors.find((f) => f.id === targetFloor);
       const targetFloorName = targetFloorObj ? targetFloorObj.name : (targetFloor === "f-out" ? "Outdoor & Ground Floor" : targetFloor);
       toast({
         type: "success",
         title: "Node Placed",
-        description: `Placed ${nodeType} node on ${targetFloorName} at (${x}, ${y}).`,
+        description: `Placed ${nodeType} node on ${targetFloorName} at (${Math.round(x)}, ${Math.round(y)}).`,
       });
       setNodeName("");
     } else if (activeTool === "BUILDING") {
@@ -1792,7 +1800,7 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
             description: `Placed elevator "${name}" at (${Math.round(x)}, ${Math.round(y)}).`,
           });
         }
-        if (selectedFloorIds.length > 0) {
+        if (selectedFloorIds.length > 0 && !selectedFloorIds.includes(activeFloorId) && activeFloorId !== "f-out") {
           setActiveFloorId(selectedFloorIds[0]);
         }
       }
@@ -1965,8 +1973,9 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
       }
     >
       {/* Top Header Toolbar - Compacted to extend Graph Map to top */}
-      <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-1.5 sm:gap-2 border-b bg-[rgb(var(--card))]/95 px-2.5 sm:px-3 py-1 backdrop-blur-md z-10 shrink-0">
-        <div className="flex items-center gap-1 overflow-x-auto scrollbar-none py-0.5 max-w-full">
+      <div className="flex flex-nowrap items-center justify-between gap-2 border-b bg-[rgb(var(--card))]/95 px-3 py-1.5 backdrop-blur-md z-10 shrink-0 min-h-[46px] overflow-x-auto scrollbar-none">
+        {/* Left Tools Group */}
+        <div className="flex items-center gap-1.5 shrink-0">
           <ToolButton
             active={activeTool === "SELECT"}
             onClick={() => {
@@ -2054,13 +2063,13 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
           />
         </div>
 
-        {/* Actions: Floor View Selector, Draft Status, Fullscreen & Publish at top right */}
-        <div className="flex items-center gap-1.5 sm:gap-2 shrink-0 justify-between sm:justify-end sm:ml-auto py-0.5 overflow-x-auto scrollbar-none">
+        {/* Right Actions: Floor View Selector, Draft Status, Hide Node Name, Fullscreen & Publish */}
+        <div className="flex items-center gap-2 shrink-0 ml-auto">
           {/* Floor View Selector Dropdown */}
           <select
             value={activeFloorId}
             onChange={(e) => setActiveFloorId(e.target.value)}
-            className="h-7 rounded-md border border-[rgb(var(--border))] bg-[rgb(var(--card))] px-2 text-xs font-semibold focus:outline-none focus:ring-1 focus:ring-[rgb(var(--primary))] shadow-2xs cursor-pointer max-w-[180px] sm:max-w-none truncate"
+            className="h-8 rounded-lg border border-[rgb(var(--border))] bg-[rgb(var(--card))] px-2.5 text-xs font-semibold focus:outline-none focus:ring-1 focus:ring-[rgb(var(--primary))] shadow-2xs cursor-pointer max-w-[200px] sm:max-w-none truncate shrink-0"
           >
             <option value="f-out">Outdoor & Ground Floor</option>
             <option value="f-all-1">All 1st Floors</option>
@@ -2078,23 +2087,47 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
           </select>
 
           {/* Draft Status Badge */}
-          <div className="flex items-center gap-1 rounded-lg border border-[rgb(var(--border))] bg-[rgb(var(--bg))] px-2 py-0.5 text-xs">
+          <div className="h-8 flex items-center gap-1.5 rounded-lg border border-[rgb(var(--border))] bg-[rgb(var(--bg))] px-2.5 text-xs shrink-0 select-none">
             <span
               className={cn(
                 "h-2 w-2 rounded-full",
                 campusStore.hasUnsavedEdits() ? "bg-amber-500 animate-pulse" : "bg-emerald-500"
               )}
             />
-            <span className="font-medium text-[rgb(var(--muted-fg))] hidden sm:inline text-[11px]">
+            <span className="font-medium text-[rgb(var(--muted-fg))] text-[11px] whitespace-nowrap">
               {campusStore.hasUnsavedEdits() ? "Unsaved Draft" : "Draft Clean"}
             </span>
           </div>
+
+          {/* Hide / Show Node Name Button */}
+          <Button
+            size="sm"
+            variant={hideNodeNames ? "secondary" : "outline"}
+            onClick={() => {
+              setHideNodeNames((prev) => !prev);
+              toast({
+                type: "info",
+                title: hideNodeNames ? "Node Names Visible" : "Node Names Hidden",
+                description: hideNodeNames ? "Showing node name labels on canvas." : "Node names hidden. Node circles remain visible and interactive.",
+              });
+            }}
+            className={cn(
+              "h-8 px-2.5 text-xs font-semibold shrink-0 gap-1.5 transition-colors whitespace-nowrap rounded-lg flex items-center",
+              hideNodeNames
+                ? "bg-amber-500/15 text-amber-600 dark:text-amber-400 border-amber-500/30 hover:bg-amber-500/25"
+                : "border-[rgb(var(--border))] text-[rgb(var(--fg))] hover:bg-[rgb(var(--muted))]"
+            )}
+            title={hideNodeNames ? "Show Node Names" : "Hide Node Names (nodes stay visible)"}
+          >
+            {hideNodeNames ? <EyeOff className="h-3.5 w-3.5 text-amber-500 shrink-0" /> : <Eye className="h-3.5 w-3.5 text-[rgb(var(--primary))] shrink-0" />}
+            <span>{hideNodeNames ? "Show Node Name" : "Hide Node Name"}</span>
+          </Button>
 
           <Button
             size="sm"
             variant="outline"
             onClick={() => setShowMobilePanels((prev) => !prev)}
-            className="h-7 px-2 text-xs font-semibold md:hidden border-[rgb(var(--border))] text-[rgb(var(--fg))]"
+            className="h-8 px-2.5 text-xs font-semibold md:hidden border-[rgb(var(--border))] text-[rgb(var(--fg))] rounded-lg shrink-0"
             title={showMobilePanels ? "Hide Side Panels" : "Show Side Panels"}
           >
             <Layers className="h-3.5 w-3.5 mr-1" />
@@ -2105,7 +2138,7 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
             size="sm"
             variant="outline"
             onClick={toggleFullscreen}
-            className="h-7 w-7 p-0 flex items-center justify-center text-xs font-medium shrink-0"
+            className="h-8 w-8 p-0 rounded-lg flex items-center justify-center text-xs font-medium shrink-0 border-[rgb(var(--border))] text-[rgb(var(--fg))]"
             title={isFullscreen ? "Exit Fullscreen" : "Fullscreen"}
           >
             {isFullscreen ? <Minimize2 className="h-3.5 w-3.5" /> : <Maximize2 className="h-3.5 w-3.5" />}
@@ -2116,7 +2149,7 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
             variant="outline"
             onClick={handleRefresh}
             disabled={isRefreshing}
-            className="h-7 w-7 p-0 flex items-center justify-center text-xs font-medium shrink-0"
+            className="h-8 w-8 p-0 rounded-lg flex items-center justify-center text-xs font-medium shrink-0 border-[rgb(var(--border))] text-[rgb(var(--fg))]"
             title="Soft Refresh Canvas & Store (Preserves Fullscreen)"
           >
             <RefreshCw className={cn("h-3.5 w-3.5", isRefreshing && "animate-spin")} />
@@ -2125,9 +2158,9 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
           <Button
             size="sm"
             onClick={() => setShowPublishModal(true)}
-            className="h-7 px-3 text-xs font-semibold bg-[rgb(var(--primary))] text-white shadow-md hover:brightness-110"
+            className="h-8 px-3.5 text-xs font-semibold rounded-lg bg-[rgb(var(--primary))] text-white shadow-md hover:brightness-110 shrink-0 flex items-center gap-1.5"
           >
-            <Rocket className="mr-1.5 h-3.5 w-3.5" /> Publish
+            <Rocket className="h-3.5 w-3.5" /> Publish
           </Button>
         </div>
       </div>
@@ -2360,6 +2393,17 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
               >
                 <span className="font-medium">Nodes ({storeData.nodes.length})</span>
                 {visibleLayers.nodes ? (
+                  <Eye className="h-3.5 w-3.5 text-[rgb(var(--primary))]" />
+                ) : (
+                  <EyeOff className="h-3.5 w-3.5 text-[rgb(var(--muted-fg))]" />
+                )}
+              </button>
+              <button
+                onClick={() => setHideNodeNames((prev) => !prev)}
+                className="flex w-full items-center justify-between rounded px-2 py-1 bg-[rgb(var(--muted))]/40 hover:bg-[rgb(var(--muted))]"
+              >
+                <span className="font-medium">Node Names</span>
+                {!hideNodeNames ? (
                   <Eye className="h-3.5 w-3.5 text-[rgb(var(--primary))]" />
                 ) : (
                   <EyeOff className="h-3.5 w-3.5 text-[rgb(var(--muted-fg))]" />
@@ -2771,6 +2815,7 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
 
                   const posKey = `${Math.round(n.x)},${Math.round(n.y)}`;
                   const shouldRenderBadge =
+                    !hideNodeNames &&
                     rawName.length > 0 &&
                     (isStairOrLift || !roomLinkedNodeIds.has(n.id)) &&
                     !renderedBadgePositions.has(posKey);
@@ -5781,14 +5826,14 @@ function ToolButton({
   return (
     <button
       onClick={onClick}
-      className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-all ${
+      className={`flex items-center gap-1.5 rounded-lg px-2.5 h-8 text-xs font-semibold whitespace-nowrap shrink-0 transition-all select-none ${
         active
-          ? "bg-[rgb(var(--primary))] text-white shadow-sm"
+          ? "bg-[rgb(var(--primary))] text-white shadow-sm ring-1 ring-[rgb(var(--primary))]"
           : "text-[rgb(var(--muted-fg))] hover:bg-[rgb(var(--muted))] hover:text-[rgb(var(--fg))]"
       }`}
     >
-      <Icon className="h-3.5 w-3.5" />
-      <span>{label}</span>
+      <Icon className="h-3.5 w-3.5 shrink-0" />
+      <span className="whitespace-nowrap leading-none">{label}</span>
     </button>
   );
 }

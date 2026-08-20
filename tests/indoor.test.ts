@@ -403,5 +403,52 @@ describe("Phase 3 – Indoor Navigation State Machine & Transitions", () => {
     expect(state.indoorPositionSource).toBe("INDOOR_GRAPH_CONTEXT");
     expect(state.positionConfidence).toBe("MEDIUM");
   });
+
+  it("ensures standalone STAIR and LIFT nodes do not connect automatically upon placement", () => {
+    const building: Building = {
+      id: "b-manual-connect",
+      campusId: "c1",
+      name: "Engineering Hall",
+      shortCode: "EH",
+      color: "#3b82f6",
+      lat: 12.9716,
+      lng: 77.5946,
+      floorsCount: 2,
+      basementsCount: 0,
+    };
+    campusStore.addBuilding(building);
+    const floors = campusStore.getWorkingData().floors.filter((f) => f.buildingId === "b-manual-connect");
+    const gFloor = floors.find((f) => f.ordinal === 0)!;
+    const f1Floor = floors.find((f) => f.ordinal === 1)!;
+
+    // Add Stair Node on Ground Floor
+    const stairGnd: Node = { id: "stair-gnd", type: "STAIR", name: "Main Staircase", floorId: gFloor.id, x: 200, y: 200 };
+    campusStore.addNode(stairGnd);
+
+    // Add Stair Node on Floor 1
+    const stairF1: Node = { id: "stair-f1", type: "STAIR", name: "Main Staircase", floorId: f1Floor.id, x: 205, y: 205 };
+    campusStore.addNode(stairF1);
+
+    // Verify NO edge is automatically created without explicit connection
+    const stairEdges = campusStore.getWorkingData().edges.filter(
+      (e) => (e.from === "stair-gnd" && e.to === "stair-f1") || (e.from === "stair-f1" && e.to === "stair-gnd")
+    );
+    expect(stairEdges.length).toBe(0);
+
+    // Add Lift Node on Ground Floor
+    const liftGnd: Node = { id: "lift-gnd", type: "LIFT", name: "Passenger Lift 1", floorId: gFloor.id, x: 350, y: 350 };
+    campusStore.addNode(liftGnd);
+
+    // Add Lift Node on Floor 1
+    const liftF1: Node = { id: "lift-f1", type: "LIFT", name: "Passenger Lift 1", floorId: f1Floor.id, x: 352, y: 352 };
+    campusStore.addNode(liftF1);
+
+    // Verify NO edge is automatically created
+    const liftEdges = campusStore.getWorkingData().edges.filter(
+      (e) => (e.from === "lift-gnd" && e.to === "lift-f1") || (e.from === "lift-f1" && e.to === "lift-gnd")
+    );
+    expect(liftEdges.length).toBe(0);
+  });
 });
+
 

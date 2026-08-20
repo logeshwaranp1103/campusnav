@@ -458,7 +458,6 @@ class CampusStore {
   }
 
   public getWorkingData() {
-    this.autoConnectMatchingVerticalNodesAcrossFloors();
     return {
       campus: this.campus,
       buildings: [...this.buildings],
@@ -1118,22 +1117,6 @@ class CampusStore {
     const updatedNode = { ...this.nodes[idx], ...patch };
     this.nodes[idx] = updatedNode;
 
-    // If node belongs to a stair group or lift group, sync x and y across all nodes in the group
-    const groupId = updatedNode.stairGroupId || updatedNode.liftGroupId;
-    if (groupId && (patch.x !== undefined || patch.y !== undefined)) {
-      const newX = patch.x !== undefined ? patch.x : updatedNode.x;
-      const newY = patch.y !== undefined ? patch.y : updatedNode.y;
-      this.nodes.forEach((n, i) => {
-        if (i !== idx && (n.stairGroupId === groupId || n.liftGroupId === groupId)) {
-          this.nodes[i] = {
-            ...this.nodes[i],
-            x: newX,
-            y: newY,
-          };
-        }
-      });
-    }
-
     if (recordHistory) {
       this.pendingChanges.unshift({
         id: `change-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
@@ -1404,38 +1387,34 @@ class CampusStore {
 
 
   public autoConnectMatchingVerticalNodesAcrossFloors() {
-    const stairNodes = this.nodes.filter((n) => n.type === "STAIR" || n.stairGroupId);
-    const groupMap = new Map<string, Node[]>();
+    let createdAny = false;
 
-    const getCanonicalKey = (n: Node) => {
-      // 1. stairGroupId (primary)
+    // ── 1. STAIR NODES AUTO-CONNECTION ────────────────────────
+    const stairNodes = this.nodes.filter(
+      (n) => n.type === "STAIR" || n.stairGroupId || (n.name && n.name.toLowerCase().includes("stair"))
+    );
+    const stairGroupMap = new Map<string, Node[]>();
+
+    const getStairCanonicalKey = (n: Node) => {
       if (n.stairGroupId) return `sg_${n.stairGroupId}`;
-
-      // 2. Stable internal connector ID
       const ext = n as any;
       if (ext.connectorId) return `conn_${ext.connectorId}`;
-
-      // 3. Canonical name (legacy compatibility fallback only)
       const rawName = (n.name || "").replace(/\s*\([^)]*\)/g, "").trim().toLowerCase();
       const cleaned = rawName
         .replace(/\b(staircases|staircase|stairs|stair|st)\b/gi, "")
         .replace(/[^a-z0-9]/gi, "")
         .trim();
-
-      if (cleaned.length > 0) {
-        return `stair_${cleaned}`;
-      }
-
+      if (cleaned.length > 0) return `stair_${cleaned}`;
       if (!rawName) return "";
       return `stair_${rawName.replace(/[\s\-_]+/g, "_")}`;
     };
 
     stairNodes.forEach((n) => {
-      const key = getCanonicalKey(n);
+      const key = getStairCanonicalKey(n);
       if (key) {
-        const list = groupMap.get(key) || [];
+        const list = stairGroupMap.get(key) || [];
         list.push(n);
-        groupMap.set(key, list);
+        stairGroupMap.set(key, list);
       }
     });
 
@@ -1444,22 +1423,44 @@ class CampusStore {
       for (let j = i + 1; j < stairNodes.length; j++) {
         const n1 = stairNodes[i];
         const n2 = stairNodes[j];
-        if (n1.floorId === n2.floorId) continue;
+        if (n1.floorId === n2.floorId) {
+          // On same floor: if very close (<= 120px) and not connected, connect them
+          if (Math.hypot(n1.x - n2.x, n1.y - n2.y) <= 120) {
+            const hasEdge = this.edges.some(
+              (e) => (e.from === n1.id && e.to === n2.id) || (e.from === n2.id && e.to === n1.id)
+            );
+            if (!hasEdge) {
+              const edgeId = `e-stair-nearby-${n1.id}-${n2.id}`;
+              const n1Gps = n1.lat && n1.lng ? { lat: n1.lat, lng: n1.lng } : canvasToGps(n1.x, n1.y);
+              const n2Gps = n2.lat && n2.lng ? { lat: n2.lat, lng: n2.lng } : canvasToGps(n2.x, n2.y);
+              const dist = calculateGeographicDistance(n1Gps.lat, n1Gps.lng, n2Gps.lat, n2Gps.lng);
+              this.addEdgeInternal({
+                id: edgeId,
+                from: n1.id,
+                to: n2.id,
+                type: "STAIRS",
+                distance: dist > 0 ? dist : 5,
+                bidirectional: true,
+              });
+              createdAny = true;
+            }
+          }
+          continue;
+        }
+
         if (Math.hypot(n1.x - n2.x, n1.y - n2.y) <= 150) {
-          const k1 = getCanonicalKey(n1) || `pos_${Math.round(n1.x / 40)}_${Math.round(n1.y / 40)}`;
-          const k2 = getCanonicalKey(n2) || `pos_${Math.round(n2.x / 40)}_${Math.round(n2.y / 40)}`;
+          const k1 = getStairCanonicalKey(n1) || `pos_${Math.round(n1.x / 40)}_${Math.round(n1.y / 40)}`;
+          const k2 = getStairCanonicalKey(n2) || `pos_${Math.round(n2.x / 40)}_${Math.round(n2.y / 40)}`;
           if (k1 && k2 && k1 !== k2) {
-            const list1 = groupMap.get(k1) || [n1];
-            const list2 = groupMap.get(k2) || [n2];
+            const list1 = stairGroupMap.get(k1) || [n1];
+            const list2 = stairGroupMap.get(k2) || [n2];
             const merged = Array.from(new Set([...list1, ...list2]));
-            groupMap.set(k1, merged);
-            groupMap.delete(k2);
+            stairGroupMap.set(k1, merged);
+            stairGroupMap.delete(k2);
           }
         }
       }
     }
-
-    let createdAny = false;
 
     // Purge any previously auto-generated unwanted horizontal same-floor stair links
     const prevEdgeCount = this.edges.length;
@@ -1468,8 +1469,7 @@ class CampusStore {
       createdAny = true;
     }
 
-
-    groupMap.forEach((nodesInGroup) => {
+    stairGroupMap.forEach((nodesInGroup) => {
       if (nodesInGroup.length >= 2) {
         nodesInGroup.sort((a, b) => {
           const fA = this.floors.find((f) => f.id === a.floorId)?.ordinal ?? 0;
@@ -1501,36 +1501,116 @@ class CampusStore {
       }
     });
 
+    // ── 2. LIFT / ELEVATOR NODES AUTO-CONNECTION ──────────────
+    const liftNodes = this.nodes.filter(
+      (n) => n.type === "LIFT" || n.liftGroupId || (n.name && (n.name.toLowerCase().includes("lift") || n.name.toLowerCase().includes("elevator")))
+    );
+    const liftGroupMap = new Map<string, Node[]>();
+
+    const getLiftCanonicalKey = (n: Node) => {
+      if (n.liftGroupId) return `lg_${n.liftGroupId}`;
+      const ext = n as any;
+      if (ext.connectorId) return `conn_${ext.connectorId}`;
+      const rawName = (n.name || "").replace(/\s*\([^)]*\)/g, "").trim().toLowerCase();
+      const cleaned = rawName
+        .replace(/\b(elevators|elevator|lifts|lift|el)\b/gi, "")
+        .replace(/[^a-z0-9]/gi, "")
+        .trim();
+      if (cleaned.length > 0) return `lift_${cleaned}`;
+      if (!rawName) return "";
+      return `lift_${rawName.replace(/[\s\-_]+/g, "_")}`;
+    };
+
+    liftNodes.forEach((n) => {
+      const key = getLiftCanonicalKey(n);
+      if (key) {
+        const list = liftGroupMap.get(key) || [];
+        list.push(n);
+        liftGroupMap.set(key, list);
+      }
+    });
+
+    // Spatial grouping for lifts across different floors (within 150px column radius)
+    for (let i = 0; i < liftNodes.length; i++) {
+      for (let j = i + 1; j < liftNodes.length; j++) {
+        const n1 = liftNodes[i];
+        const n2 = liftNodes[j];
+        if (n1.floorId === n2.floorId) {
+          // On same floor: if close (<= 120px) and not connected, connect them
+          if (Math.hypot(n1.x - n2.x, n1.y - n2.y) <= 120) {
+            const hasEdge = this.edges.some(
+              (e) => (e.from === n1.id && e.to === n2.id) || (e.from === n2.id && e.to === n1.id)
+            );
+            if (!hasEdge) {
+              const edgeId = `e-lift-nearby-${n1.id}-${n2.id}`;
+              const n1Gps = n1.lat && n1.lng ? { lat: n1.lat, lng: n1.lng } : canvasToGps(n1.x, n1.y);
+              const n2Gps = n2.lat && n2.lng ? { lat: n2.lat, lng: n2.lng } : canvasToGps(n2.x, n2.y);
+              const dist = calculateGeographicDistance(n1Gps.lat, n1Gps.lng, n2Gps.lat, n2Gps.lng);
+              this.addEdgeInternal({
+                id: edgeId,
+                from: n1.id,
+                to: n2.id,
+                type: "LIFT",
+                distance: dist > 0 ? dist : 5,
+                bidirectional: true,
+              });
+              createdAny = true;
+            }
+          }
+          continue;
+        }
+
+        if (Math.hypot(n1.x - n2.x, n1.y - n2.y) <= 150) {
+          const k1 = getLiftCanonicalKey(n1) || `pos_${Math.round(n1.x / 40)}_${Math.round(n1.y / 40)}`;
+          const k2 = getLiftCanonicalKey(n2) || `pos_${Math.round(n2.x / 40)}_${Math.round(n2.y / 40)}`;
+          if (k1 && k2 && k1 !== k2) {
+            const list1 = liftGroupMap.get(k1) || [n1];
+            const list2 = liftGroupMap.get(k2) || [n2];
+            const merged = Array.from(new Set([...list1, ...list2]));
+            liftGroupMap.set(k1, merged);
+            liftGroupMap.delete(k2);
+          }
+        }
+      }
+    }
+
+    liftGroupMap.forEach((nodesInGroup) => {
+      if (nodesInGroup.length >= 2) {
+        nodesInGroup.sort((a, b) => {
+          const fA = this.floors.find((f) => f.id === a.floorId)?.ordinal ?? 0;
+          const fB = this.floors.find((f) => f.id === b.floorId)?.ordinal ?? 0;
+          return fA - fB;
+        });
+
+        for (let i = 0; i < nodesInGroup.length - 1; i++) {
+          const from = nodesInGroup[i];
+          const to = nodesInGroup[i + 1];
+          if (from.floorId !== to.floorId) {
+            const hasEdge = this.edges.some(
+              (e) => (e.from === from.id && e.to === to.id) || (e.from === to.id && e.to === from.id)
+            );
+            if (!hasEdge) {
+              const edgeId = `e-lift-auto-${from.id}-${to.id}`;
+              this.addEdgeInternal({
+                id: edgeId,
+                from: from.id,
+                to: to.id,
+                type: "LIFT",
+                distance: 10,
+                bidirectional: true,
+              });
+              createdAny = true;
+            }
+          }
+        }
+      }
+    });
+
     if (createdAny) {
       this.persistWorkingDraft();
     }
   }
 
-  private syncVerticalGroupPositions() {
-    this.stairGroups.forEach((sg) => {
-      const groupNodes = this.nodes.filter((n) => n.stairGroupId === sg.id);
-      if (groupNodes.length > 0) {
-        const refX = groupNodes[0].x;
-        const refY = groupNodes[0].y;
-        groupNodes.forEach((n) => {
-          n.x = refX;
-          n.y = refY;
-        });
-      }
-    });
-
-    this.liftGroups.forEach((lg) => {
-      const groupNodes = this.nodes.filter((n) => n.liftGroupId === lg.id);
-      if (groupNodes.length > 0) {
-        const refX = groupNodes[0].x;
-        const refY = groupNodes[0].y;
-        groupNodes.forEach((n) => {
-          n.x = refX;
-          n.y = refY;
-        });
-      }
-    });
-  }
 
   private rebuildStairGroupConnections(group: StairGroup, basePos?: { x: number; y: number }) {
     // Get all connected floors and fill any intermediate floor gaps (min ordinal to max ordinal)
@@ -2295,9 +2375,7 @@ class CampusStore {
             this.liftGroups = Array.isArray(draft.liftGroups) ? draft.liftGroups : [];
             this.doors = Array.isArray(draft.doors) ? draft.doors : [];
             this.ensureDefaultGroundFloors();
-            this.syncVerticalGroupPositions();
             (this.stairGroups || []).forEach((sg) => this.rebuildStairGroupConnections(sg));
-            this.autoConnectMatchingVerticalNodesAcrossFloors();
             draftLoaded = true;
             try {
               localStorage.setItem("campusnav_working_draft_cache", JSON.stringify(this.getWorkingData()));
