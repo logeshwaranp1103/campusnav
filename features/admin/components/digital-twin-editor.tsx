@@ -170,10 +170,14 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
   const [showDiagnostics, setShowDiagnostics] = useState(false);
   const gps = useVisitorGps();
 
-  // Subscribe to live campusStore changes for instant CAD canvas update without page refresh
+  // Subscribe to live campusStore changes and sync with database on mount
   useEffect(() => {
     setStoreData(campusStore.getWorkingData());
     setPendingChanges(campusStore.getPendingChanges());
+    campusStore.syncWithServer().then(() => {
+      setStoreData(campusStore.getWorkingData());
+      setPendingChanges(campusStore.getPendingChanges());
+    });
     const unsubscribe = campusStore.subscribe(() => {
       setStoreData(campusStore.getWorkingData());
       setPendingChanges(campusStore.getPendingChanges());
@@ -684,7 +688,7 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
     setIsAddEventOpen(false);
   };
 
-  // ── Scroll-Wheel Zoom (Fix #1) ──────────────────────────────────────────
+  // ── Scroll-Wheel Zoom (Smooth & Cursor-Anchored) ──────────────────────────
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -693,19 +697,27 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
       const rect = canvas.getBoundingClientRect();
       const mouseX = e.clientX - rect.left;
       const mouseY = e.clientY - rect.top;
-      const currentZoom = zoomRef.current;
+      const currentZoom = zoomRef.current || 1;
       const currentPan = panOffsetRef.current;
-      const factor = e.deltaY > 0 ? 0.9 : 1.1;
-      const nextZoom = Math.min(5, Math.max(0.15, currentZoom * factor));
+      
+      const zoomFactor = e.deltaY < 0 ? 1.15 : 0.85;
+      const nextZoom = Math.min(5.0, Math.max(0.1, Number((currentZoom * zoomFactor).toFixed(3))));
+      
+      if (nextZoom === currentZoom) return;
+
       // Zoom centered on mouse cursor
       const newPanX = mouseX - (mouseX - currentPan.x) * (nextZoom / currentZoom);
       const newPanY = mouseY - (mouseY - currentPan.y) * (nextZoom / currentZoom);
+      
+      panOffsetRef.current = { x: newPanX, y: newPanY };
+      zoomRef.current = nextZoom;
+
       setPanOffset({ x: newPanX, y: newPanY });
       setZoom(nextZoom);
     };
     canvas.addEventListener("wheel", handleWheel, { passive: false });
     return () => canvas.removeEventListener("wheel", handleWheel);
-  }, []); // Only mount once — reads zoom/pan via refs
+  }, []); // Only mount once — reads and writes zoom/pan via refs
 
   // Unified Global Keyboard Shortcuts (Ctrl+C, Ctrl+V, Ctrl+Z, Ctrl+Y, Delete, Backspace, Escape)
   useEffect(() => {
@@ -1386,8 +1398,10 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
 
     if (!canvasRef.current) return;
     const rect = canvasRef.current.getBoundingClientRect();
-    let x = Math.round((e.clientX - rect.left - panOffset.x) / zoom);
-    let y = Math.round((e.clientY - rect.top - panOffset.y) / zoom);
+    const curPan = panOffsetRef.current;
+    const curZoom = zoomRef.current || 1;
+    let x = Math.round((e.clientX - rect.left - curPan.x) / curZoom);
+    let y = Math.round((e.clientY - rect.top - curPan.y) / curZoom);
     if (snapToGrid) {
       x = Math.round(x / 20) * 20;
       y = Math.round(y / 20) * 20;
@@ -2708,14 +2722,7 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
                         onClick={(evt) => {
                           evt.stopPropagation();
                           if (activeTool === "NODE") {
-                            if (!canvasRef.current) return;
-                            const rect = canvasRef.current.getBoundingClientRect();
-                            let rawX = Math.round((evt.clientX - rect.left - panOffset.x) / zoom);
-                            let rawY = Math.round((evt.clientY - rect.top - panOffset.y) / zoom);
-                            if (snapToGrid) {
-                              rawX = Math.round(rawX / 20) * 20;
-                              rawY = Math.round(rawY / 20) * 20;
-                            }
+                            const { x: rawX, y: rawY } = getCanvasCoords(evt);
                             const dx = toN.x - fromN.x;
                             const dy = toN.y - fromN.y;
                             const l2 = dx * dx + dy * dy;
@@ -2754,14 +2761,7 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
                         onClick={(evt) => {
                           evt.stopPropagation();
                           if (activeTool === "NODE") {
-                            if (!canvasRef.current) return;
-                            const rect = canvasRef.current.getBoundingClientRect();
-                            let rawX = Math.round((evt.clientX - rect.left - panOffset.x) / zoom);
-                            let rawY = Math.round((evt.clientY - rect.top - panOffset.y) / zoom);
-                            if (snapToGrid) {
-                              rawX = Math.round(rawX / 20) * 20;
-                              rawY = Math.round(rawY / 20) * 20;
-                            }
+                            const { x: rawX, y: rawY } = getCanvasCoords(evt);
                             const dx = toN.x - fromN.x;
                             const dy = toN.y - fromN.y;
                             const l2 = dx * dx + dy * dy;
@@ -3377,16 +3377,18 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
             <div className="flex items-center gap-1.5 rounded-xl border bg-[rgb(var(--card))]/95 px-2.5 py-1.5 shadow-xl backdrop-blur-md text-xs border-[rgb(var(--border))] whitespace-nowrap overflow-x-auto scrollbar-none">
               <button
                 onClick={() => {
-                  const prev = zoom;
-                  const next = Math.max(0.2, Number((prev - 0.15).toFixed(2)));
-                  if (canvasRef.current) {
+                  const prev = zoomRef.current || 1;
+                  const next = Math.max(0.1, Number((prev - 0.15).toFixed(2)));
+                  if (canvasRef.current && prev > 0) {
                     const rect = canvasRef.current.getBoundingClientRect();
                     const cx = rect.width / 2;
                     const cy = rect.height / 2;
-                    setPanOffset({
-                      x: cx - (cx - panOffset.x) * (next / prev),
-                      y: cy - (cy - panOffset.y) * (next / prev),
-                    });
+                    const curPan = panOffsetRef.current;
+                    const newPanX = cx - (cx - curPan.x) * (next / prev);
+                    const newPanY = cy - (cy - curPan.y) * (next / prev);
+                    panOffsetRef.current = { x: newPanX, y: newPanY };
+                    zoomRef.current = next;
+                    setPanOffset({ x: newPanX, y: newPanY });
                   }
                   setZoom(next);
                 }}
@@ -3398,21 +3400,23 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
 
               <input
                 type="range"
-                min="0.2"
+                min="0.1"
                 max="3.0"
                 step="0.05"
                 value={zoom}
                 onChange={(e) => {
-                  const prev = zoom;
+                  const prev = zoomRef.current || 1;
                   const next = Number(e.target.value);
-                  if (canvasRef.current) {
+                  if (canvasRef.current && prev > 0) {
                     const rect = canvasRef.current.getBoundingClientRect();
                     const cx = rect.width / 2;
                     const cy = rect.height / 2;
-                    setPanOffset({
-                      x: cx - (cx - panOffset.x) * (next / prev),
-                      y: cy - (cy - panOffset.y) * (next / prev),
-                    });
+                    const curPan = panOffsetRef.current;
+                    const newPanX = cx - (cx - curPan.x) * (next / prev);
+                    const newPanY = cy - (cy - curPan.y) * (next / prev);
+                    panOffsetRef.current = { x: newPanX, y: newPanY };
+                    zoomRef.current = next;
+                    setPanOffset({ x: newPanX, y: newPanY });
                   }
                   setZoom(next);
                 }}
@@ -3422,16 +3426,18 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
 
               <button
                 onClick={() => {
-                  const prev = zoom;
-                  const next = Math.min(4.0, Number((prev + 0.15).toFixed(2)));
-                  if (canvasRef.current) {
+                  const prev = zoomRef.current || 1;
+                  const next = Math.min(5.0, Number((prev + 0.15).toFixed(2)));
+                  if (canvasRef.current && prev > 0) {
                     const rect = canvasRef.current.getBoundingClientRect();
                     const cx = rect.width / 2;
                     const cy = rect.height / 2;
-                    setPanOffset({
-                      x: cx - (cx - panOffset.x) * (next / prev),
-                      y: cy - (cy - panOffset.y) * (next / prev),
-                    });
+                    const curPan = panOffsetRef.current;
+                    const newPanX = cx - (cx - curPan.x) * (next / prev);
+                    const newPanY = cy - (cy - curPan.y) * (next / prev);
+                    panOffsetRef.current = { x: newPanX, y: newPanY };
+                    zoomRef.current = next;
+                    setPanOffset({ x: newPanX, y: newPanY });
                   }
                   setZoom(next);
                 }}
@@ -3451,16 +3457,18 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
                     value={currentPct}
                     onChange={(e) => {
                       const targetPct = Number(e.target.value);
-                      const prev = zoom;
+                      const prev = zoomRef.current || 1;
                       const next = targetPct / 100;
-                      if (canvasRef.current) {
+                      if (canvasRef.current && prev > 0) {
                         const rect = canvasRef.current.getBoundingClientRect();
                         const cx = rect.width / 2;
                         const cy = rect.height / 2;
-                        setPanOffset({
-                          x: cx - (cx - panOffset.x) * (next / prev),
-                          y: cy - (cy - panOffset.y) * (next / prev),
-                        });
+                        const curPan = panOffsetRef.current;
+                        const newPanX = cx - (cx - curPan.x) * (next / prev);
+                        const newPanY = cy - (cy - curPan.y) * (next / prev);
+                        panOffsetRef.current = { x: newPanX, y: newPanY };
+                        zoomRef.current = next;
+                        setPanOffset({ x: newPanX, y: newPanY });
                       }
                       setZoom(next);
                     }}

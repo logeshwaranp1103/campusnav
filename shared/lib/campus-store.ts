@@ -257,6 +257,9 @@ class CampusStore {
     }
 
     const performSync = () => {
+      if (this.isSyncing || !this.isInitialized && !isExplicitReset) {
+        return;
+      }
       const hasEntities =
         this.buildings.length > 0 ||
         this.nodes.length > 0 ||
@@ -265,10 +268,6 @@ class CampusStore {
 
       if (!hasEntities && !isExplicitReset) {
         console.warn("[CampusStore] Protected database from accidental empty snapshot overwrite.");
-        return;
-      }
-      if (!this.isInitialized && !isExplicitReset) {
-        // Prevent pushing stale local state to the database while initial sync is still happening
         return;
       }
       try {
@@ -409,9 +408,11 @@ class CampusStore {
     }
   }
 
-  private notify(broadcast = true) {
+  private notify(broadcast = true, shouldPersist = true) {
     if (this.isBatching) return;
-    this.persistWorkingDraft();
+    if (shouldPersist && this.isInitialized && !this.isSyncing) {
+      this.persistWorkingDraft();
+    }
     this.listeners.forEach((l) => l());
     if (broadcast && this.broadcastChannel) {
       try {
@@ -2348,22 +2349,15 @@ class CampusStore {
       if (isAdmin) {
         // Admin: fetch draft and published graph in parallel
         const [resDraft, resPub] = await Promise.all([
-          fetch("/api/admin/campus-graph/draft"),
-          fetch("/api/published-graph"),
+          fetch("/api/admin/campus-graph/draft", { cache: "no-store" }),
+          fetch("/api/published-graph", { cache: "no-store" }),
         ]);
 
         let draftLoaded = false;
         if (resDraft.ok) {
           const jsonDraft = await resDraft.json();
           const draft = jsonDraft?.draft;
-          const hasDraftEntities =
-            draft &&
-            typeof draft === "object" &&
-            ((Array.isArray(draft.buildings) && draft.buildings.length > 0) ||
-              (Array.isArray(draft.nodes) && draft.nodes.length > 0) ||
-              (Array.isArray(draft.floors) && draft.floors.length > 0));
-
-          if (hasDraftEntities) {
+          if (draft && typeof draft === "object") {
             this.buildings = Array.isArray(draft.buildings) ? draft.buildings : [];
             this.floors = Array.isArray(draft.floors) ? draft.floors : [];
             this.nodes = Array.isArray(draft.nodes) ? draft.nodes : [];
@@ -2378,7 +2372,11 @@ class CampusStore {
             (this.stairGroups || []).forEach((sg) => this.rebuildStairGroupConnections(sg));
             draftLoaded = true;
             try {
-              localStorage.setItem("campusnav_working_draft_cache", JSON.stringify(this.getWorkingData()));
+              if (this.buildings.length === 0 && this.nodes.length === 0) {
+                localStorage.removeItem("campusnav_working_draft_cache");
+              } else {
+                localStorage.setItem("campusnav_working_draft_cache", JSON.stringify(this.getWorkingData()));
+              }
             } catch (e) {}
           }
         }
@@ -2386,12 +2384,7 @@ class CampusStore {
         if (resPub.ok) {
           const jsonPub = await resPub.json();
           const graph = jsonPub?.graph;
-          const hasPubEntities =
-            graph &&
-            ((Array.isArray(graph.buildings) && graph.buildings.length > 0) ||
-              (Array.isArray(graph.nodes) && graph.nodes.length > 0));
-
-          if (hasPubEntities) {
+          if (graph && typeof graph === "object") {
             this.publishedGraph = {
               buildings: graph.buildings || [],
               floors: graph.floors || [],
@@ -2405,8 +2398,8 @@ class CampusStore {
               doors: graph.doors || [],
             };
 
-            // If draft was not loaded and local store is empty, fallback to published graph
-            if (!draftLoaded && this.buildings.length === 0 && this.nodes.length === 0) {
+            // If draft was not loaded, populate from published graph
+            if (!draftLoaded) {
               this.buildings = JSON.parse(JSON.stringify(this.publishedGraph.buildings));
               this.floors = JSON.parse(JSON.stringify(this.publishedGraph.floors));
               this.nodes = JSON.parse(JSON.stringify(this.publishedGraph.nodes));
@@ -2418,7 +2411,11 @@ class CampusStore {
               this.liftGroups = JSON.parse(JSON.stringify(this.publishedGraph.liftGroups || []));
               this.doors = JSON.parse(JSON.stringify(this.publishedGraph.doors || []));
               try {
-                localStorage.setItem("campusnav_working_draft_cache", JSON.stringify(this.getWorkingData()));
+                if (this.buildings.length === 0 && this.nodes.length === 0) {
+                  localStorage.removeItem("campusnav_working_draft_cache");
+                } else {
+                  localStorage.setItem("campusnav_working_draft_cache", JSON.stringify(this.getWorkingData()));
+                }
               } catch (e) {}
             }
           }
@@ -2427,11 +2424,11 @@ class CampusStore {
         // Visitor: fetch only the published graph
         let loaded = false;
         try {
-          const resPub = await fetch("/api/published-graph");
+          const resPub = await fetch("/api/published-graph", { cache: "no-store" });
           if (resPub.ok) {
             const jsonPub = await resPub.json();
             const graph = jsonPub?.graph;
-            if (graph && (graph.buildings?.length > 0 || graph.nodes?.length > 0)) {
+            if (graph && typeof graph === "object") {
               if (jsonPub.version) this.publishedVersion = `v${jsonPub.version}`;
               this.publishedGraph = {
                 buildings: graph.buildings || [],
@@ -2553,7 +2550,7 @@ class CampusStore {
     } finally {
       this.isSyncing = false;
       this.isInitialized = true;
-      this.notify();
+      this.notify(false, false);
     }
   }
 

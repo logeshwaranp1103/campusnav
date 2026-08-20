@@ -478,7 +478,15 @@ export async function getRelationalGraphFromDatabase(): Promise<DraftSnapshot | 
     ]);
 
     if (rawNodes.length === 0 && rawBuildings.length === 0) {
-      return null;
+      return {
+        buildings: [],
+        floors: [],
+        nodes: [],
+        edges: [],
+        destinations: [],
+        obstacles: [],
+        doors: [],
+      };
     }
 
     const photoNodeIds = new Set(rawPhotos.map((p) => p.nodeId));
@@ -607,30 +615,46 @@ export function invalidatePublishedCache() {
 
 export async function getActivePublishedGraph(forceFresh = false) {
   if (!forceFresh && activePublishedSnapshot) {
-    return activePublishedSnapshot;
+    const hasEntities = (activePublishedSnapshot.snapshot?.buildings?.length ?? 0) > 0 || (activePublishedSnapshot.snapshot?.nodes?.length ?? 0) > 0;
+    if (hasEntities) return activePublishedSnapshot;
   }
 
   if (prisma) {
     try {
+      const relational = await getRelationalGraphFromDatabase();
+      const hasRelationalEntities = relational && ((relational.buildings?.length ?? 0) > 0 || (relational.nodes?.length ?? 0) > 0);
+
+      if (!hasRelationalEntities) {
+        activePublishedSnapshot = {
+          version: 1,
+          snapshot: { buildings: [], floors: [], nodes: [], edges: [], destinations: [], obstacles: [], doors: [] },
+          publishedAt: new Date(),
+          publishedBy: "system",
+          notes: "Database is empty",
+        };
+        return activePublishedSnapshot;
+      }
+
       const dbRecord = (await prisma.publishedGraph.findUnique({
         where: { id: "active-published" },
       })) as any;
 
       if (dbRecord && dbRecord.snapshot) {
         const sanitized = sanitizeSnapshotForPayload(dbRecord.snapshot as DraftSnapshot);
-        activePublishedSnapshot = {
-          version: dbRecord.version,
-          snapshot: sanitized,
-          publishedAt: dbRecord.publishedAt,
-          publishedBy: dbRecord.publishedBy || "admin",
-          notes: "Database published graph",
-        };
-        return activePublishedSnapshot;
+        const hasSnapEntities = (sanitized.buildings?.length ?? 0) > 0 || (sanitized.nodes?.length ?? 0) > 0;
+        if (hasSnapEntities) {
+          activePublishedSnapshot = {
+            version: dbRecord.version,
+            snapshot: sanitized,
+            publishedAt: dbRecord.publishedAt,
+            publishedBy: dbRecord.publishedBy || "admin",
+            notes: "Database published graph",
+          };
+          return activePublishedSnapshot;
+        }
       }
 
-      // Fallback: Assemble snapshot from PostgreSQL relational tables if active-published record does not exist yet
-      const relational = await getRelationalGraphFromDatabase();
-      if (relational && ((relational.buildings && relational.buildings.length > 0) || (relational.nodes && relational.nodes.length > 0))) {
+      if (relational) {
         const sanitizedRelational = sanitizeSnapshotForPayload(relational);
         activePublishedSnapshot = {
           version: 1,
@@ -639,14 +663,6 @@ export async function getActivePublishedGraph(forceFresh = false) {
           publishedBy: "system-auto",
           notes: "Auto-assembled from relational database",
         };
-
-        // Auto-seed active-published row so subsequent calls are fast
-        await prisma.publishedGraph.upsert({
-          where: { id: "active-published" },
-          update: { version: 1, snapshot: sanitizedRelational as any },
-          create: { id: "active-published", version: 1, snapshot: sanitizedRelational as any },
-        }).catch((e) => console.warn("Notice: Auto-seeding published graph failed:", e?.message));
-
         return activePublishedSnapshot;
       }
     } catch (e) {
