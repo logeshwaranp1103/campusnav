@@ -2913,11 +2913,14 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
 
               {/* Render Rooms / Destinations */}
               {visibleLayers.rooms &&
-                floorDestinations.map((d) => {
-                  const linkedNode = storeData.nodes.find((n) => n.id === d.nodeId);
-                  if (!linkedNode) return null;
+                (() => {
+                  const coordDestCount: Record<string, number> = {};
+                  
+                  return floorDestinations.map((d) => {
+                    const linkedNode = storeData.nodes.find((n) => n.id === d.nodeId);
+                    if (!linkedNode) return null;
 
-                  // Suppress drawing duplicate room/destination pill for stair & lift nodes (node renderer handles stair badge)
+                    // Suppress drawing duplicate room/destination pill for stair & lift nodes (node renderer handles stair badge)
                   const isLinkedStairOrLift =
                     linkedNode.type === "STAIR" ||
                     linkedNode.type === "LIFT" ||
@@ -2953,10 +2956,15 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
                   const nameStr = `${icon} ${d.name}${d.roomNumber ? ` (#${d.roomNumber})` : ""}`;
                   const pillWidth = Math.max(42, nameStr.length * 5.2 + 10);
 
+                  const coordKey = `${linkedNode.x},${linkedNode.y}`;
+                  const offsetIndex = coordDestCount[coordKey] || 0;
+                  coordDestCount[coordKey] = offsetIndex + 1;
+                  const yOffset = -15 - (offsetIndex * 19);
+
                   return (
                     <g
                       key={d.id}
-                      transform={`translate(${linkedNode.x}, ${linkedNode.y - 15})`}
+                      transform={`translate(${linkedNode.x}, ${linkedNode.y + yOffset})`}
                       onClick={(e) => {
                         e.stopPropagation();
                         setSelectedElement({ type: "destination", id: d.id });
@@ -2995,7 +3003,8 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
                       </text>
                     </g>
                   );
-                })}
+                });
+              })()}
 
 
 
@@ -4028,11 +4037,11 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
                   if (!isPointInCampusBoundary(lat, lng)) {
                     toast({ type: "warning", title: "Outside Campus Boundary", description: "The GPS coordinates are outside the campus boundary. Node placed anyway." });
                   }
-                  const { x, y } = gpsToCanvas(lat, lng);
-                  const newNodeId = `n-${Date.now().toString(36)}`;
                   const targetFloor = nodeTargetFloorId && !nodeTargetFloorId.startsWith("f-all")
                     ? nodeTargetFloorId
                     : (activeFloorId.startsWith("f-all") ? "f-out" : activeFloorId);
+                  const { x, y } = campusStore.getCanvasCoordsFromGps(lat, lng, targetFloor);
+                  const newNodeId = `n-${Date.now().toString(36)}`;
                   campusStore.addNode({ id: newNodeId, type: nodeType, name: nodeName.trim() || undefined, floorId: targetFloor, x, y, lat, lng, searchable: true }, false);
                   setSelectedElement({ type: "node", id: newNodeId });
                   const targetFloorObj = storeData.floors.find((f) => f.id === targetFloor);
@@ -4678,7 +4687,7 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
                         const lat = Number(e.target.value);
                         const lng = selectedNode.lng ?? 77.277485104;
                         // Fix #10: Sync canvas position when GPS changes
-                        const { x, y } = gpsToCanvas(lat, lng);
+                        const { x, y } = campusStore.getCanvasCoordsFromGps(lat, lng, selectedNode.floorId);
                         // Fix #14: Boundary check
                         if (!isPointInCampusBoundary(lat, lng)) {
                           toast({ type: "warning", title: "Outside Campus Boundary", description: "Coordinates are outside the campus boundary." });
@@ -4698,7 +4707,7 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
                         const lng = Number(e.target.value);
                         const lat = selectedNode.lat ?? 11.496327485;
                         // Fix #10: Sync canvas position when GPS changes
-                        const { x, y } = gpsToCanvas(lat, lng);
+                        const { x, y } = campusStore.getCanvasCoordsFromGps(lat, lng, selectedNode.floorId);
                         // Fix #14: Boundary check
                         if (!isPointInCampusBoundary(lat, lng)) {
                           toast({ type: "warning", title: "Outside Campus Boundary", description: "Coordinates are outside the campus boundary." });
@@ -4734,7 +4743,7 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
                         const text = await navigator.clipboard.readText();
                         const parts = text.split(",").map((s) => parseFloat(s.trim()));
                         if (parts.length === 2 && !isNaN(parts[0]) && !isNaN(parts[1])) {
-                          const { x, y } = gpsToCanvas(parts[0], parts[1]);
+                          const { x, y } = campusStore.getCanvasCoordsFromGps(parts[0], parts[1], selectedNode.floorId);
                           campusStore.updateNode(selectedNode.id, { lat: parts[0], lng: parts[1], x, y });
                           toast({ type: "success", title: "GPS Coordinates Pasted", description: `${parts[0]}, ${parts[1]}` });
                         }

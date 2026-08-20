@@ -1,4 +1,5 @@
 import { canvasToGps, gpsToCanvas, getCenterFromCorners } from "../../lib/geo/projection";
+import { solveAffineMatrix, gpsToCanvas as affineGpsToCanvas, canvasToGps as affineCanvasToGps, type AffineMatrix } from "../../lib/geo/affine";
 import { calculateGeographicDistance } from "../../lib/geo/haversine";
 import {
   getFloorCode,
@@ -509,7 +510,49 @@ class CampusStore {
     return this.redoStack.length > 0;
   }
 
-  // ── Actions ──────────────────────────────────────────────
+  // ── Helpers ─────────────────────────────────────────────
+
+  public getBuildingAffineMatrix(buildingId: string): AffineMatrix | null {
+    const b = this.buildings.find((b) => b.id === buildingId);
+    if (!b || b.corner1Lat === undefined || b.corner1Lng === undefined || b.corner3Lat === undefined || b.corner3Lng === undefined) {
+      return null;
+    }
+    
+    // Create calibration points from Top-Left (corner1) and Bottom-Right (corner3)
+    const points = [
+      {
+        canvasX: b.x || 0,
+        canvasY: b.y || 0,
+        lat: b.corner1Lat,
+        lng: b.corner1Lng,
+      },
+      {
+        canvasX: (b.x || 0) + (b.width || 180),
+        canvasY: (b.y || 0) + (b.height || 120),
+        lat: b.corner3Lat,
+        lng: b.corner3Lng,
+      },
+    ];
+
+    return solveAffineMatrix(points);
+  }
+
+  public getBuildingForNode(node: Node): Building | undefined {
+    if (node.floorId === "f-out") return undefined;
+    const floor = this.floors.find((f) => f.id === node.floorId);
+    if (!floor) return undefined;
+    return this.buildings.find((b) => b.id === floor.buildingId);
+  }
+
+  public getCanvasCoordsFromGps(lat: number, lng: number, floorId: string): { x: number; y: number } {
+    if (floorId === "f-out") return gpsToCanvas(lat, lng);
+    const floor = this.floors.find((f) => f.id === floorId);
+    const building = floor ? this.buildings.find((b) => b.id === floor.buildingId) : null;
+    const affine = building ? this.getBuildingAffineMatrix(building.id) : null;
+    return affine ? affineGpsToCanvas(lat, lng, affine) : gpsToCanvas(lat, lng);
+  }
+
+  // ── Subscriptions ──────────────────────────────────────────────
 
   public addBuilding(b: Building) {
     this.saveSnapshotToUndo(`Added Building "${b.name}"`);
@@ -577,6 +620,44 @@ class CampusStore {
       // Width/height resize preserves the canvas center (x, y) and geographic center (lat, lng)
       patch.x = oldX;
       patch.y = oldY;
+
+      const newW = patch.width ?? oldW;
+      const newH = patch.height ?? oldH;
+      if (newW !== oldW || newH !== oldH) {
+        const scaleX = newW / oldW;
+        const scaleY = newH / oldH;
+        
+        const buildingFloors = this.floors.filter((f) => f.buildingId === id);
+        const buildingFloorIds = new Set(buildingFloors.map((f) => f.id));
+        const buildingStairGroupIds = new Set(
+          (this.stairGroups || []).filter((sg) => sg.buildingId === id).map((sg) => sg.id)
+        );
+        const buildingLiftGroupIds = new Set(
+          (this.liftGroups || []).filter((lg) => lg.buildingId === id).map((lg) => lg.id)
+        );
+
+        const isNodeInBuilding = (n: Node) => {
+          if (n.floorId === "f-out") return false;
+          if (buildingFloorIds.has(n.floorId)) return true;
+          if ((n as unknown as { buildingId?: string }).buildingId === id) return true;
+          if (n.stairGroupId && buildingStairGroupIds.has(n.stairGroupId)) return true;
+          if (n.liftGroupId && buildingLiftGroupIds.has(n.liftGroupId)) return true;
+          return false;
+        };
+
+        this.nodes = this.nodes.map((n) => {
+          if (isNodeInBuilding(n)) {
+            const relX = n.x - oldX;
+            const relY = n.y - oldY;
+            const nx = oldX + relX * scaleX;
+            const ny = oldY + relY * scaleY;
+            // DO NOT change lat/lng. Visual resize scales the local coordinate space 
+            // without shifting the physical real-world layout.
+            return { ...n, x: nx, y: ny };
+          }
+          return n;
+        });
+      }
     } else if ((patch.x !== undefined || patch.y !== undefined) && patch.lat === undefined && patch.lng === undefined) {
       const newCenterX = patch.x ?? oldX;
       const newCenterY = patch.y ?? oldY;
@@ -1024,7 +1105,11 @@ class CampusStore {
   public addNode(node: Node, autoSuggestConnections = false) {
     this.saveSnapshotToUndo(`Added ${node.type} Node "${node.name ?? node.id}"`);
     if (!node.lat || !node.lng || node.lat === 12.9716 || node.lat === 0) {
-      const { lat, lng } = canvasToGps(node.x, node.y);
+      const building = this.getBuildingForNode(node);
+      const affine = building ? this.getBuildingAffineMatrix(building.id) : null;
+      const { lat, lng } = affine 
+        ? affineCanvasToGps(node.x, node.y, affine)
+        : canvasToGps(node.x, node.y);
       node.lat = Number(lat.toFixed(9));
       node.lng = Number(lng.toFixed(9));
     }
@@ -1060,8 +1145,18 @@ class CampusStore {
         })
         .slice(0, 2)
         .forEach((target) => {
-          const nGps = node.lat && node.lng ? { lat: node.lat, lng: node.lng } : canvasToGps(node.x, node.y);
-          const tGps = target.lat && target.lng ? { lat: target.lat, lng: target.lng } : canvasToGps(target.x, target.y);
+          const bNode = this.getBuildingForNode(node);
+          const affNode = bNode ? this.getBuildingAffineMatrix(bNode.id) : null;
+          const nGps = node.lat && node.lng 
+            ? { lat: node.lat, lng: node.lng } 
+            : (affNode ? affineCanvasToGps(node.x, node.y, affNode) : canvasToGps(node.x, node.y));
+          
+          const bTarget = this.getBuildingForNode(target);
+          const affTarget = bTarget ? this.getBuildingAffineMatrix(bTarget.id) : null;
+          const tGps = target.lat && target.lng 
+            ? { lat: target.lat, lng: target.lng } 
+            : (affTarget ? affineCanvasToGps(target.x, target.y, affTarget) : canvasToGps(target.x, target.y));
+          
           const d = calculateGeographicDistance(nGps.lat, nGps.lng, tGps.lat, tGps.lng);
           this.addEdgeInternal({
             id: `e-${node.id}-${target.id}`,
@@ -1089,14 +1184,25 @@ class CampusStore {
     if ((patch.x !== undefined || patch.y !== undefined) && patch.lat === undefined && patch.lng === undefined) {
       const newX = patch.x ?? this.nodes[idx].x;
       const newY = patch.y ?? this.nodes[idx].y;
-      const { lat, lng } = canvasToGps(newX, newY);
+      
+      const building = this.getBuildingForNode(this.nodes[idx]);
+      const affine = building ? this.getBuildingAffineMatrix(building.id) : null;
+      const { lat, lng } = affine 
+        ? affineCanvasToGps(newX, newY, affine)
+        : canvasToGps(newX, newY);
+        
       patch.lat = Number(lat.toFixed(9));
       patch.lng = Number(lng.toFixed(9));
     } else if ((patch.lat !== undefined || patch.lng !== undefined) && patch.x === undefined && patch.y === undefined) {
       const newLat = patch.lat ?? this.nodes[idx].lat;
       const newLng = patch.lng ?? this.nodes[idx].lng;
       if (newLat && newLng) {
-        const { x, y } = gpsToCanvas(newLat, newLng);
+        const building = this.getBuildingForNode(this.nodes[idx]);
+        const affine = building ? this.getBuildingAffineMatrix(building.id) : null;
+        const { x, y } = affine 
+          ? affineGpsToCanvas(newLat, newLng, affine)
+          : gpsToCanvas(newLat, newLng);
+          
         patch.x = x;
         patch.y = y;
       }
@@ -2882,6 +2988,9 @@ class CampusStore {
     this.obstacles = this.obstacles.filter((o) => !idSet.has(o.id));
     this.events = this.events.filter((ev) => !idSet.has(ev.id));
     this.buildings = this.buildings.filter((b) => !idSet.has(b.id));
+    this.floors = this.floors.filter((f) => !idSet.has(f.id));
+    this.stairGroups = this.stairGroups.filter((s) => !idSet.has(s.id));
+    this.liftGroups = this.liftGroups.filter((l) => !idSet.has(l.id));
 
     this.persistWorkingDraft();
     this.notify();

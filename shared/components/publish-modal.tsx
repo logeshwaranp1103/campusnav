@@ -6,6 +6,7 @@ import { Rocket, X } from "lucide-react";
 import { Button } from "@/shared/components/ui/button";
 import { useToast } from "@/shared/components/ui/toast";
 import { campusStore } from "@/shared/lib/campus-store";
+import { cn } from "@/shared/lib/utils";
 
 interface PublishModalProps {
   open: boolean;
