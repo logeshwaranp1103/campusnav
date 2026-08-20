@@ -632,7 +632,6 @@ class CampusStore {
         this.buildings[idx].corner4Lat = g4.lat;
         this.buildings[idx].corner4Lng = g4.lng;
       }
-
       const buildingFloors = this.floors.filter((f) => f.buildingId === id);
       const buildingFloorIds = new Set(buildingFloors.map((f) => f.id));
 
@@ -643,23 +642,17 @@ class CampusStore {
         (this.liftGroups || []).filter((lg) => lg.buildingId === id).map((lg) => lg.id)
       );
 
-      // Bounding box with 20px margin to capture nodes/doors inside or on edges of building
-      const margin = 20;
-      const minX = oldX - margin;
-      const maxX = oldX + oldW + margin;
-      const minY = oldY - margin;
-      const maxY = oldY + oldH + margin;
-
       const isNodeInBuilding = (n: Node) => {
+        // Outdoor nodes (f-out) are never moved automatically when dragging a building
+        if (n.floorId === "f-out") return false;
         if (buildingFloorIds.has(n.floorId)) return true;
         if ((n as unknown as { buildingId?: string }).buildingId === id) return true;
         if (n.stairGroupId && buildingStairGroupIds.has(n.stairGroupId)) return true;
         if (n.liftGroupId && buildingLiftGroupIds.has(n.liftGroupId)) return true;
-        if (n.x >= minX && n.x <= maxX && n.y >= minY && n.y <= maxY) return true;
         return false;
       };
 
-      // 1. Move all Nodes inside or associated with building
+      // 1. Move all Nodes belonging to this building's floors
       this.nodes = this.nodes.map((n) => {
         if (isNodeInBuilding(n)) {
           const nx = n.x + dx;
@@ -672,38 +665,36 @@ class CampusStore {
 
       const movedNodeIds = new Set(this.nodes.filter(isNodeInBuilding).map((n) => n.id));
 
-      // 2. Move all Doors inside or associated with building
+      // 2. Move all Doors belonging to this building's floors
       this.doors = this.doors.map((door) => {
+        if (door.floorId === "f-out") return door;
         const belongs =
           buildingFloorIds.has(door.floorId) ||
-          (door as unknown as { buildingId?: string }).buildingId === id ||
-          (door.x >= minX && door.x <= maxX && door.y >= minY && door.y <= maxY);
+          (door as unknown as { buildingId?: string }).buildingId === id;
         if (belongs) {
           return { ...door, x: door.x + dx, y: door.y + dy };
         }
         return door;
       });
 
-      // 3. Move all Obstacles inside or associated with building
+      // 3. Move all Obstacles belonging to this building's floors
       this.obstacles = this.obstacles.map((obs) => {
+        if (obs.floorId === "f-out") return obs;
         const belongs =
           (obs.floorId && buildingFloorIds.has(obs.floorId)) ||
-          (obs.nodeId && movedNodeIds.has(obs.nodeId)) ||
-          (obs.x >= minX && obs.x <= maxX && obs.y >= minY && obs.y <= maxY);
+          (obs.nodeId && movedNodeIds.has(obs.nodeId));
         if (belongs) {
           return { ...obs, x: obs.x + dx, y: obs.y + dy };
         }
         return obs;
       });
 
-
-
-      // 5. Move all Destinations inside or associated with building
+      // 4. Move all Destinations belonging to this building's floors
       this.destinations = this.destinations.map((dest) => {
+        if (dest.floorId === "f-out") return dest;
         const belongs =
           (dest.floorId && buildingFloorIds.has(dest.floorId)) ||
-          (dest.nodeId && movedNodeIds.has(dest.nodeId)) ||
-          (dest.x !== undefined && dest.y !== undefined && dest.x >= minX && dest.x <= maxX && dest.y >= minY && dest.y <= maxY);
+          (dest.nodeId && movedNodeIds.has(dest.nodeId));
         if (belongs) {
           return {
             ...dest,
@@ -714,15 +705,11 @@ class CampusStore {
         return dest;
       });
 
-      // 6. Move all Events inside or associated with building
+      // 5. Move all Events explicitly associated with building
       this.events = this.events.map((ev) => {
-        const belongs =
-          ev.buildingId === id ||
-          (ev.x !== undefined && ev.y !== undefined && ev.x >= minX && ev.x <= maxX && ev.y >= minY && ev.y <= maxY);
-        if (belongs) {
+        if (ev.buildingId === id) {
           return {
             ...ev,
-            buildingId: id,
             x: ev.x !== undefined ? ev.x + dx : undefined,
             y: ev.y !== undefined ? ev.y + dy : undefined,
           };
@@ -1117,6 +1104,31 @@ class CampusStore {
 
     const updatedNode = { ...this.nodes[idx], ...patch };
     this.nodes[idx] = updatedNode;
+
+    // Synchronize all vertical group sibling nodes (stairGroupId / liftGroupId) across floors to keep vertical shaft aligned
+    if (updatedNode.liftGroupId && (patch.x !== undefined || patch.y !== undefined || patch.lat !== undefined || patch.lng !== undefined)) {
+      const newX = updatedNode.x;
+      const newY = updatedNode.y;
+      const newLat = updatedNode.lat;
+      const newLng = updatedNode.lng;
+      this.nodes.forEach((n, i) => {
+        if (n.liftGroupId === updatedNode.liftGroupId && n.id !== id) {
+          this.nodes[i] = { ...n, x: newX, y: newY, lat: newLat, lng: newLng };
+        }
+      });
+    }
+
+    if (updatedNode.stairGroupId && (patch.x !== undefined || patch.y !== undefined || patch.lat !== undefined || patch.lng !== undefined)) {
+      const newX = updatedNode.x;
+      const newY = updatedNode.y;
+      const newLat = updatedNode.lat;
+      const newLng = updatedNode.lng;
+      this.nodes.forEach((n, i) => {
+        if (n.stairGroupId === updatedNode.stairGroupId && n.id !== id) {
+          this.nodes[i] = { ...n, x: newX, y: newY, lat: newLat, lng: newLng };
+        }
+      });
+    }
 
     if (recordHistory) {
       this.pendingChanges.unshift({
@@ -2265,15 +2277,9 @@ class CampusStore {
   }
 
   public async publishToServer(): Promise<{ success: boolean; version?: string; count?: number; error?: string }> {
-    const hasEntities =
-      this.buildings.length > 0 ||
-      this.nodes.length > 0 ||
-      this.floors.length > 0 ||
-      this.destinations.length > 0;
-
-    if (!hasEntities && this.isInitialized) {
-      console.warn("[CampusStore] Blocked publish attempt of an empty graph.");
-      return { success: false, error: "Cannot publish an empty campus graph." };
+    if (!this.isInitialized) {
+      console.warn("[CampusStore] Blocked publish attempt before server store initialization completes.");
+      return { success: false, error: "Cannot publish campus data before initialization completes." };
     }
 
     // Commit working draft graph to published graph

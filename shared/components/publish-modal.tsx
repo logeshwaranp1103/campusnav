@@ -16,6 +16,12 @@ export function PublishModal({ open, onClose }: PublishModalProps) {
   const { toast } = useToast();
   const [publishing, setPublishing] = React.useState(false);
 
+  const workingData = campusStore.getWorkingData();
+  const isEmptyGraph =
+    (workingData.buildings?.length ?? 0) === 0 &&
+    (workingData.nodes?.length ?? 0) === 0 &&
+    (workingData.floors?.length ?? 0) === 0;
+
   useEffect(() => {
     if (open) {
       document.body.classList.add("modal-open");
@@ -40,8 +46,10 @@ export function PublishModal({ open, onClose }: PublishModalProps) {
       } else {
         toast({
           type: "success",
-          title: "Digital Twin Published!",
-          description: `Version ${res.version || "v2.0"} is now live and saved in database.`,
+          title: isEmptyGraph ? "Empty Campus Published!" : "Digital Twin Published!",
+          description: isEmptyGraph
+            ? "Published empty state to database. All previous published graph data removed."
+            : `Version ${res.version || "v2.0"} is now live and saved in database.`,
         });
         onClose();
       }
@@ -69,8 +77,10 @@ export function PublishModal({ open, onClose }: PublishModalProps) {
         >
           <div className="flex items-center justify-between border-b pb-3">
             <div className="flex items-center gap-2">
-              <Rocket className="h-5 w-5 text-[rgb(var(--primary))]" />
-              <h3 className="font-bold text-lg text-[rgb(var(--fg))]">Confirm Publish</h3>
+              <Rocket className={cn("h-5 w-5", isEmptyGraph ? "text-amber-500" : "text-[rgb(var(--primary))]")} />
+              <h3 className="font-bold text-lg text-[rgb(var(--fg))]">
+                {isEmptyGraph ? "Publish Empty Campus?" : "Confirm Publish"}
+              </h3>
             </div>
             <Button size="sm" variant="ghost" onClick={onClose} disabled={publishing}>
               <X className="h-4 w-4" />
@@ -78,12 +88,25 @@ export function PublishModal({ open, onClose }: PublishModalProps) {
           </div>
 
           <div className="space-y-2 text-sm text-[rgb(var(--muted-fg))] leading-relaxed">
-            <p>
-              Are you sure you want to publish the updated Digital Twin graph live for all users?
-            </p>
-            <p className="text-xs italic text-[rgb(var(--muted-fg))]/80">
-              All saved draft changes, nodes, edges, buildings, and navigation paths will become active immediately and stored in PostgreSQL database.
-            </p>
+            {isEmptyGraph ? (
+              <>
+                <p className="font-semibold text-amber-500">
+                  Publishing this empty state will remove the currently published campus data from the database.
+                </p>
+                <p className="text-xs text-[rgb(var(--muted-fg))]/80">
+                  No buildings, floors, or nodes will be active on the public visitor view.
+                </p>
+              </>
+            ) : (
+              <>
+                <p>
+                  Are you sure you want to publish the updated Digital Twin graph live for all users?
+                </p>
+                <p className="text-xs italic text-[rgb(var(--muted-fg))]/80">
+                  All saved draft changes, nodes, edges, buildings, and navigation paths will become active immediately and stored in PostgreSQL database.
+                </p>
+              </>
+            )}
           </div>
 
           <div className="flex items-center justify-end gap-3 pt-2">
@@ -93,9 +116,16 @@ export function PublishModal({ open, onClose }: PublishModalProps) {
             <Button
               onClick={handleConfirmPublish}
               disabled={publishing}
-              className="bg-[rgb(var(--primary))] text-white hover:brightness-110"
+              className={cn(
+                "text-white hover:brightness-110",
+                isEmptyGraph
+                  ? "bg-amber-600 hover:bg-amber-700"
+                  : "bg-[rgb(var(--primary))]"
+              )}
             >
-              {publishing ? "Publishing to DB..." : "Confirm & Publish"}
+              {publishing
+                ? (isEmptyGraph ? "Publishing Empty State..." : "Publishing to DB...")
+                : (isEmptyGraph ? "Publish Empty State" : "Confirm & Publish")}
             </Button>
           </div>
         </motion.div>

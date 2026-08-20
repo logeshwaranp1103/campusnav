@@ -1217,13 +1217,20 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
     const toN = storeData.nodes.find((n) => n.id === e.to);
     if (!fromN || !toN) return false;
 
+    const fromOutdoor = isOutdoorNode(fromN);
+    const toOutdoor = isOutdoorNode(toN);
+
+    // Hide inter-floor indoor vertical edges in 2D single-floor view
+    if (activeFloorId !== "f-all" && fromN.floorId !== toN.floorId) {
+      if (!fromOutdoor && !toOutdoor) {
+        return false;
+      }
+    }
+
     // Edge connected to active floor
     if (fromN.floorId === activeFloorId || toN.floorId === activeFloorId) {
       return true;
     }
-
-    const fromOutdoor = isOutdoorNode(fromN);
-    const toOutdoor = isOutdoorNode(toN);
 
     // Outdoor edges (both endpoints outside or border entrances) show for ALL floor views (including Basement)
     if (fromOutdoor && toOutdoor) {
@@ -1456,25 +1463,25 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
     }
 
     if (draggingId) {
-      // Finalize position and commit to undo history stack
+      // Finalize position without recording duplicate undo history (onMouseDown already recorded the before-drag state)
       const liveData = campusStore.getWorkingData();
       if (draggingId.type === "node") {
         const n = liveData.nodes.find((item) => item.id === draggingId.id);
         if (n) {
           const { lat, lng } = canvasToGps(n.x, n.y);
-          campusStore.updateNode(n.id, { x: n.x, y: n.y, lat, lng }, true);
+          campusStore.updateNode(n.id, { x: n.x, y: n.y, lat, lng }, false);
         }
       } else if (draggingId.type === "building") {
         const b = liveData.buildings.find((item) => item.id === draggingId.id);
         if (b) {
-          campusStore.updateBuilding(b.id, { x: b.x, y: b.y }, true);
+          campusStore.updateBuilding(b.id, { x: b.x, y: b.y }, false);
         }
       } else if (draggingId.type === "obstacle") {
         const obs = liveData.obstacles.find((item) => item.id === draggingId.id);
-        if (obs) campusStore.updateObstacle(obs.id, { x: obs.x, y: obs.y }, true);
+        if (obs) campusStore.updateObstacle(obs.id, { x: obs.x, y: obs.y }, false);
       } else if (draggingId.type === "door") {
         const door = liveData.doors?.find((item) => item.id === draggingId.id);
-        if (door) campusStore.updateDoor(door.id, { x: door.x, y: door.y }, true);
+        if (door) campusStore.updateDoor(door.id, { x: door.x, y: door.y }, false);
       }
       dragTargetPosRef.current = null;
       setDraggingId(null);
@@ -2562,6 +2569,7 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
                       }}
                       onMouseDown={(e) => {
                         e.stopPropagation();
+                        campusStore.saveSnapshotToUndo("Moved Obstacle");
                         const cPos = getCanvasCoords(e);
                         setDraggingId({ type: "obstacle", id: obs.id });
                         setDragOffset({ x: cPos.x - obs.x, y: cPos.y - obs.y });
@@ -2622,6 +2630,7 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
                       onMouseDown={(e) => {
                         if (isPlacementTool) return;
                         e.stopPropagation();
+                        campusStore.saveSnapshotToUndo(`Moved Building "${b.name}"`);
                         const cPos = getCanvasCoords(e);
                         setDraggingId({ type: "building", id: b.id });
                         setDragOffset({ x: cPos.x - centerPos.x, y: cPos.y - centerPos.y });
@@ -2831,6 +2840,7 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
                       onClick={(e) => handleNodeClick(n, e)}
                       onMouseDown={(e) => {
                         e.stopPropagation();
+                        campusStore.saveSnapshotToUndo(`Moved Node "${n.name || n.id}"`);
                         const cPos = getCanvasCoords(e);
                         setDraggingId({ type: "node", id: n.id });
                         setDragOffset({ x: cPos.x - n.x, y: cPos.y - n.y });
@@ -2953,6 +2963,7 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
                       }}
                       onMouseDown={(e) => {
                         e.stopPropagation();
+                        campusStore.saveSnapshotToUndo(`Moved Room "${d.name}"`);
                         const cPos = getCanvasCoords(e);
                         setDraggingId({ type: "node", id: linkedNode.id });
                         setDragOffset({ x: cPos.x - linkedNode.x, y: cPos.y - linkedNode.y });
@@ -3035,6 +3046,7 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
                       }}
                       onMouseDown={(e) => {
                         e.stopPropagation();
+                        campusStore.saveSnapshotToUndo(`Moved Door "${d.name || d.id}"`);
                         const cPos = getCanvasCoords(e);
                         setDraggingId({ type: "door", id: d.id });
                         setDragOffset({ x: cPos.x - d.x, y: cPos.y - d.y });

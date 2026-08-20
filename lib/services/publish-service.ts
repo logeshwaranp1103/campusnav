@@ -63,14 +63,8 @@ export async function publishDraftGraph(
   const safeSnapshot = draftSnapshot || {};
   const { buildings, floors, nodes, edges, destinations, obstacles } = safeSnapshot;
 
-  const hasAnyEntities =
-    (buildings && buildings.length > 0) ||
-    (nodes && nodes.length > 0) ||
-    (floors && floors.length > 0) ||
-    (destinations && destinations.length > 0);
-
-  // Safety Guard: Never publish an empty snapshot over real database data
-  if (!hasAnyEntities) {
+  // Safety Guard: Require valid snapshot object
+  if (!draftSnapshot || typeof draftSnapshot !== "object") {
     return {
       success: false,
       validationReport: {
@@ -82,14 +76,14 @@ export async function publishDraftGraph(
         infoCount: 0,
         checks: [],
         issues: [{
-          id: "empty-snapshot-safety",
+          id: "invalid-snapshot-state",
           severity: "CRITICAL",
-          code: "EMPTY_GRAPH",
-          title: "Empty Campus Graph",
-          description: "Publishing blocked: Cannot publish an empty campus graph.",
+          code: "INVALID_GRAPH",
+          title: "Invalid Campus Graph",
+          description: "Publishing blocked: Invalid or uninitialized graph state.",
         }],
       },
-      error: "Publishing blocked: Cannot publish an empty campus graph.",
+      error: "Publishing blocked: Invalid or uninitialized graph state.",
     };
   }
 
@@ -211,6 +205,24 @@ export async function publishDraftGraph(
       for (const e of existingEdges) {
         existingEdgeMap.set(`${e.fromNodeId}_${e.toNodeId}_${e.type}`, e.id);
       }
+
+      // 3.1 Gather target IDs and prune obsolete relational records no longer present in published snapshot
+      const targetBuildingIds = new Set((buildings || []).map((b) => b.id));
+      const targetFloorIds = new Set((floors || []).map((f) => f.id));
+      const targetNodeIds = new Set((nodes || []).map((n) => n.id));
+      const targetEdgeIds = new Set((edges || []).map((e) => e.id));
+      const targetDestIds = new Set((destinations || []).map((d) => d.id));
+      const targetObstacleIds = new Set((obstacles || []).map((obs) => obs.id));
+      const targetDoorIds = new Set(((draftSnapshot as any).doors || []).map((d: any) => d.id));
+
+      await prisma.door.deleteMany({ where: { id: { notIn: Array.from(targetDoorIds) } } }).catch(() => {});
+      await prisma.destination.deleteMany({ where: { id: { notIn: Array.from(targetDestIds) } } }).catch(() => {});
+      await prisma.obstacle.deleteMany({ where: { id: { notIn: Array.from(targetObstacleIds) } } }).catch(() => {});
+      await prisma.edge.deleteMany({ where: { id: { notIn: Array.from(targetEdgeIds) } } }).catch(() => {});
+      await prisma.nodePhoto.deleteMany({ where: { nodeId: { notIn: Array.from(targetNodeIds) } } }).catch(() => {});
+      await prisma.node.deleteMany({ where: { id: { notIn: Array.from(targetNodeIds) } } }).catch(() => {});
+      await prisma.floor.deleteMany({ where: { id: { notIn: Array.from(targetFloorIds) } } }).catch(() => {});
+      await prisma.building.deleteMany({ where: { id: { notIn: Array.from(targetBuildingIds) } } }).catch(() => {});
 
       // 4. Safe Topological Relational Upserts (Parent to Child: Campus -> Buildings -> Floors -> Nodes -> Edges/Dests/Obstacles)
       // 4.1 Buildings
