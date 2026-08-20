@@ -212,8 +212,8 @@ export async function publishDraftGraph(
       const targetNodeIds = new Set((nodes || []).map((n) => n.id));
       const targetEdgeIds = new Set((edges || []).map((e) => e.id));
       const targetDestIds = new Set((destinations || []).map((d) => d.id));
-      const targetObstacleIds = new Set((obstacles || []).map((obs) => obs.id));
-      const targetDoorIds = new Set(((draftSnapshot as any).doors || []).map((d: any) => d.id));
+      const targetObstacleIds = new Set<string>((obstacles || []).map((obs) => obs.id));
+      const targetDoorIds = new Set<string>(((draftSnapshot as any).doors || []).map((d: any) => String(d.id)));
 
       await prisma.door.deleteMany({ where: { id: { notIn: Array.from(targetDoorIds) } } }).catch(() => {});
       await prisma.destination.deleteMany({ where: { id: { notIn: Array.from(targetDestIds) } } }).catch(() => {});

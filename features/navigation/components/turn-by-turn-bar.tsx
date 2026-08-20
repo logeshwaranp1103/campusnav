@@ -16,6 +16,7 @@ import {
   X,
   CheckCircle2,
   ChevronRight,
+  ChevronLeft,
   Camera,
   Image as ImageIcon,
   AlertCircle,
@@ -101,14 +102,15 @@ export function TurnByTurnBar({
     <>
       <AnimatePresence>
         <motion.div
-          initial={{ opacity: 0, y: 50 }}
+          initial={{ opacity: 0, y: 30 }}
           animate={{ opacity: 1, y: 0 }}
-          exit={{ opacity: 0, y: 50 }}
-          className="fixed bottom-4 left-4 right-4 z-40 mx-auto max-w-lg rounded-2xl border bg-gray-900/95 p-4 shadow-2xl backdrop-blur-md text-white border-gray-800 space-y-3"
+          exit={{ opacity: 0, y: 30 }}
+          transition={{ duration: 0.25, ease: "easeOut" }}
+          className="fixed bottom-4 left-3 right-3 sm:left-4 sm:right-4 z-40 mx-auto max-w-lg rounded-2xl border bg-gray-900/95 p-3.5 sm:p-4 shadow-2xl backdrop-blur-md text-white border-gray-800 space-y-2.5 sm:space-y-3 pointer-events-auto"
         >
           {/* Off-Route Alert */}
           {isOffRoute && (
-            <div className="flex items-center justify-between rounded-lg bg-amber-500/20 border border-amber-500/40 p-2 text-xs text-amber-300">
+            <div className="flex items-center justify-between rounded-xl bg-amber-500/20 border border-amber-500/40 p-2 text-xs text-amber-300">
               <span className="font-semibold">⚠️ Off route detected! Recalculating path...</span>
               {onRecalculate && (
                 <Button size="sm" onClick={onRecalculate} className="h-6 text-[10px] bg-amber-600 hover:bg-amber-700 text-white">
@@ -121,21 +123,35 @@ export function TurnByTurnBar({
           {/* Primary Instruction Row */}
           <div className="flex items-center justify-between gap-3">
             <div className="flex items-center gap-3 min-w-0 flex-1">
-              <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-emerald-500/20 border border-emerald-500/30">
+              <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-emerald-500/20 border border-emerald-500/30 shadow-inner">
                 {renderIcon(currentStep.icon)}
               </div>
               <div className="min-w-0 flex-1">
-                <h3 className="font-bold text-base leading-tight text-white truncate">{currentStep.text}</h3>
-                <div className="flex items-center gap-2 mt-1 text-xs text-gray-400 font-medium">
-                  <span>{currentStep.distanceMeters} meters ahead</span>
-                  <span>•</span>
-                  <span>Step {currentStepIndex + 1} of {totalStepsCount}</span>
-                </div>
+                <AnimatePresence mode="wait">
+                  <motion.div
+                    key={currentStep.text}
+                    initial={{ opacity: 0, x: -6 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    exit={{ opacity: 0, x: 6 }}
+                    transition={{ duration: 0.15 }}
+                  >
+                    <h3 className="font-bold text-base leading-tight text-white truncate">{currentStep.text}</h3>
+                    <div className="flex items-center gap-2 mt-1 text-xs text-gray-400 font-medium">
+                      {currentStep.distanceMeters > 0 ? (
+                        <span className="text-emerald-400 font-bold">{currentStep.distanceMeters} m ahead</span>
+                      ) : (
+                        <span className="text-emerald-400 font-bold">Arrived</span>
+                      )}
+                      <span>•</span>
+                      <span>Step {currentStepIndex + 1} of {totalStepsCount}</span>
+                    </div>
+                  </motion.div>
+                </AnimatePresence>
               </div>
             </div>
 
             <div className="flex items-center gap-1.5 shrink-0">
-              {/* Optional Reference Photo Action Button */}
+              {/* Reference Photo Action Button */}
               {activePhotoUrl && (
                 <button
                   type="button"
@@ -147,7 +163,29 @@ export function TurnByTurnBar({
                   title="View real-world reference photo"
                 >
                   <Camera className="h-4 w-4" />
-                  <span className="hidden sm:inline">Reference</span>
+                  <span className="hidden sm:inline">Photo</span>
+                </button>
+              )}
+
+              {/* Step Prev/Next Navigation Controls */}
+              {onPrevStep && currentStepIndex > 0 && (
+                <button
+                  onClick={onPrevStep}
+                  className="flex h-8 w-8 items-center justify-center rounded-xl bg-gray-800/80 hover:bg-gray-800 text-gray-300 hover:text-white border border-gray-700/60 transition-colors"
+                  title="Previous Step"
+                  aria-label="Previous Step"
+                >
+                  <ChevronLeft className="h-4 w-4" />
+                </button>
+              )}
+              {onNextStep && currentStepIndex < totalStepsCount - 1 && (
+                <button
+                  onClick={onNextStep}
+                  className="flex h-8 w-8 items-center justify-center rounded-xl bg-gray-800/80 hover:bg-gray-800 text-gray-300 hover:text-white border border-gray-700/60 transition-colors"
+                  title="Next Step"
+                  aria-label="Next Step"
+                >
+                  <ChevronRight className="h-4 w-4" />
                 </button>
               )}
 
@@ -155,20 +193,23 @@ export function TurnByTurnBar({
                 size="sm"
                 variant="ghost"
                 onClick={onEndNavigation}
-                className="h-8 w-8 p-0 rounded-full text-gray-400 hover:bg-gray-800 hover:text-white shrink-0"
+                className="h-8 w-8 p-0 rounded-xl text-gray-400 hover:bg-gray-800 hover:text-white shrink-0"
                 title="End Navigation"
+                aria-label="End Navigation"
               >
                 <X className="h-4 w-4" />
               </Button>
             </div>
           </div>
 
-          {/* Next Step Preview Banner (Non-interactive) */}
+          {/* Next Step Preview Banner */}
           {nextStep && (
             <div className="flex items-center gap-2 border-t border-gray-800/80 pt-2 text-xs text-gray-300">
-              <span className="font-semibold text-emerald-400 uppercase tracking-wider text-[10px] shrink-0">NEXT:</span>
+              <span className="font-semibold text-emerald-400 uppercase tracking-wider text-[10px] shrink-0">THEN:</span>
               <span className="truncate font-medium">{nextStep.text}</span>
-              <ChevronRight className="h-3.5 w-3.5 text-gray-500 shrink-0 ml-auto" />
+              {nextStep.distanceMeters > 0 && (
+                <span className="text-[10px] text-gray-400 ml-auto shrink-0 font-mono">({nextStep.distanceMeters}m)</span>
+              )}
             </div>
           )}
 

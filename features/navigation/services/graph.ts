@@ -2,11 +2,12 @@ import { campusStore } from "../../../shared/lib/campus-store";
 import type { Edge, Node, Obstacle } from "../../../shared/data/campus";
 import { buildAdjacencyGraph } from "../../../lib/routing/graph";
 import { findShortestPath } from "../../../lib/routing/dijkstra";
-import { calculateTurnAngle, turnIconFromAngle, getNodeVector, cleanLandmarkName, formatInstructionText } from "../../../lib/routing/directions";
+import { calculateTurnAngle, turnIconFromAngle, getNodeVector, cleanLandmarkName, formatInstructionText, type DirectionIcon } from "../../../lib/routing/directions";
 
 export type RouteInstruction = {
   text: string;
   distance: number;
+  icon?: DirectionIcon;
   floor?: string;
   building?: string;
   transition?: "outdoor->indoor" | "indoor->outdoor" | "floor" | "arrive";
@@ -286,7 +287,10 @@ function computeShortestPathForData(
   };
 }
 
-export function multiStopShortestPath(waypointIds: string[]): Route | null {
+export function multiStopShortestPath(
+  waypointIds: string[],
+  options?: { isDraftMode?: boolean; travelMode?: TravelMode; graphData?: any }
+): Route | null {
   const validWaypoints = waypointIds.filter(Boolean);
   if (validWaypoints.length < 2) return null;
 
@@ -300,7 +304,7 @@ export function multiStopShortestPath(waypointIds: string[]): Route | null {
   for (let i = 0; i < validWaypoints.length - 1; i++) {
     const segStart = validWaypoints[i];
     const segEnd = validWaypoints[i + 1];
-    const segRoute = shortestPath(segStart, segEnd);
+    const segRoute = shortestPath(segStart, segEnd, options);
     if (!segRoute) return null;
 
     totalDistance += segRoute.distance;
@@ -391,26 +395,32 @@ function buildInstructions(
     if (edge.type === "LIFT") {
       text = `Take lift to ${floor?.name ?? "next floor"}`;
       transitionType = "floor";
+      icon = "lift";
       prevVector = null;
     } else if (edge.type === "STAIRS") {
       text = `Take stairs to ${floor?.name ?? "next floor"}`;
       transitionType = "floor";
+      icon = "stairs-up";
       prevVector = null;
     } else if (isFloorTransition && edge.type === "RAMP") {
       text = `Take ramp to ${floor?.name ?? "next floor"}`;
       transitionType = "floor";
+      icon = "straight";
       prevVector = currentVector;
     } else if ((to.type === "ENTRANCE" || to.type === "BUILDING_ENTRANCE" || to.isEntranceNode) && isOutdoorToIndoor) {
       text = `Enter ${bld?.name ?? "the building"}`;
       transitionType = "outdoor->indoor";
+      icon = "straight";
       prevVector = currentVector;
     } else if (isIndoorToOutdoor) {
       text = "Exit the building";
       transitionType = "indoor->outdoor";
+      icon = "straight";
       prevVector = currentVector;
     } else if (isFloorTransition) {
       text = `Go to ${floor?.name ?? "next floor"}`;
       transitionType = "floor";
+      icon = "straight";
       prevVector = currentVector;
     } else {
       text = formatInstructionText(icon, to.name);
@@ -420,6 +430,7 @@ function buildInstructions(
     out.push({
       text,
       distance: edge.distance,
+      icon,
       floor: floor?.name,
       building: bld?.name,
       transition: transitionType,
@@ -435,6 +446,7 @@ function buildInstructions(
   out.push({
     text: lastLandmark ? `You have arrived at ${lastLandmark}` : "You have arrived",
     distance: 0,
+    icon: "arrive",
     transition: "arrive",
     targetNodeId: last?.id,
     targetNodeName: last?.name,
