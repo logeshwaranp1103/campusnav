@@ -160,7 +160,6 @@ class CampusStore {
   private broadcastChannel: BroadcastChannel | null = null;
 
   constructor() {
-    this.hydrateFromLocalCache();
     this.initializeStore();
     if (typeof window !== "undefined" && "BroadcastChannel" in window) {
       try {
@@ -190,30 +189,6 @@ class CampusStore {
     }
   }
 
-  private hydrateFromLocalCache() {
-    if (typeof window === "undefined") return;
-    try {
-      const cached = localStorage.getItem("campusnav_working_draft_cache");
-      if (cached) {
-        const parsed = JSON.parse(cached);
-        if (parsed && typeof parsed === "object") {
-          if (Array.isArray(parsed.buildings) && parsed.buildings.length > 0) this.buildings = parsed.buildings;
-          if (Array.isArray(parsed.floors) && parsed.floors.length > 0) this.floors = parsed.floors;
-          if (Array.isArray(parsed.nodes) && parsed.nodes.length > 0) this.nodes = parsed.nodes;
-          if (Array.isArray(parsed.edges) && parsed.edges.length > 0) this.edges = parsed.edges;
-          if (Array.isArray(parsed.destinations) && parsed.destinations.length > 0) this.destinations = parsed.destinations;
-          if (Array.isArray(parsed.events)) this.events = parsed.events;
-          if (Array.isArray(parsed.obstacles)) this.obstacles = parsed.obstacles;
-          if (Array.isArray(parsed.stairGroups)) this.stairGroups = parsed.stairGroups;
-          if (Array.isArray(parsed.liftGroups)) this.liftGroups = parsed.liftGroups;
-          if (Array.isArray(parsed.doors)) this.doors = parsed.doors;
-        }
-      }
-    } catch (e) {
-      console.warn("Notice: Local draft cache hydration notice:", e);
-    }
-  }
-
   public loadSnapshotFromBroadcast(snapshot: any) {
     if (!snapshot) return;
     if (Array.isArray(snapshot.buildings)) this.buildings = snapshot.buildings;
@@ -232,25 +207,6 @@ class CampusStore {
 
   private saveWorkingDraftToDatabase(isExplicitReset = false) {
     if (typeof window === "undefined") return;
-
-    // Immediately cache to localStorage so hot reloads / fast refresh never lose state
-    try {
-      if (isExplicitReset) {
-        localStorage.removeItem("campusnav_working_draft_cache");
-      } else {
-        const currentData = this.getWorkingData();
-        const hasEntities =
-          currentData.buildings.length > 0 ||
-          currentData.nodes.length > 0 ||
-          currentData.floors.length > 0 ||
-          currentData.destinations.length > 0;
-        if (hasEntities) {
-          localStorage.setItem("campusnav_working_draft_cache", JSON.stringify(currentData));
-        }
-      }
-    } catch (e) {
-      // Ignore storage quota or disabled storage
-    }
 
     if (this.syncTimeout) {
       clearTimeout(this.syncTimeout);
@@ -519,16 +475,21 @@ class CampusStore {
     }
     
     // Create calibration points from Top-Left (corner1) and Bottom-Right (corner3)
+    const bx = b.x || 0;
+    const by = b.y || 0;
+    const bw = b.width || 180;
+    const bh = b.height || 120;
+    
     const points = [
       {
-        canvasX: b.x || 0,
-        canvasY: b.y || 0,
+        canvasX: bx - bw / 2,
+        canvasY: by - bh / 2,
         lat: b.corner1Lat,
         lng: b.corner1Lng,
       },
       {
-        canvasX: (b.x || 0) + (b.width || 180),
-        canvasY: (b.y || 0) + (b.height || 120),
+        canvasX: bx + bw / 2,
+        canvasY: by + bh / 2,
         lat: b.corner3Lat,
         lng: b.corner3Lng,
       },
@@ -2483,13 +2444,6 @@ class CampusStore {
             this.ensureDefaultGroundFloors();
             (this.stairGroups || []).forEach((sg) => this.rebuildStairGroupConnections(sg));
             draftLoaded = true;
-            try {
-              if (this.buildings.length === 0 && this.nodes.length === 0) {
-                localStorage.removeItem("campusnav_working_draft_cache");
-              } else {
-                localStorage.setItem("campusnav_working_draft_cache", JSON.stringify(this.getWorkingData()));
-              }
-            } catch (e) {}
           }
         }
 
