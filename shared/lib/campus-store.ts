@@ -2518,7 +2518,9 @@ class CampusStore {
               this.stairGroups = graph.stairGroups || [];
               this.liftGroups = graph.liftGroups || [];
               this.doors = graph.doors || [];
-              loaded = true;
+              if (this.buildings.length > 0 || this.nodes.length > 0) {
+                loaded = true;
+              }
             }
           }
         } catch (e) {

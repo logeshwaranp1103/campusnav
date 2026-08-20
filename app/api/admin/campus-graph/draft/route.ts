@@ -18,23 +18,7 @@ const EMPTY_GRAPH = {
 export async function GET() {
   try {
     if (prisma) {
-      // 1. Query PostgreSQL relational database tables (Authoritative Source of Truth)
-      const relational = await getRelationalGraphFromDatabase().catch(() => null);
-
-      const hasRelationalEntities =
-        relational &&
-        ((Array.isArray(relational.buildings) && relational.buildings.length > 0) ||
-          (Array.isArray(relational.nodes) && relational.nodes.length > 0) ||
-          (Array.isArray(relational.floors) && relational.floors.length > 0));
-
-      // If database relational tables are empty (0 buildings, 0 nodes), clean up stale JSON snapshot rows & return empty draft
-      if (!hasRelationalEntities) {
-        await prisma.draftGraph.deleteMany({ where: { id: "active-draft" } }).catch(() => {});
-        await prisma.publishedGraph.deleteMany({ where: { id: "active-published" } }).catch(() => {});
-        return NextResponse.json({ draft: EMPTY_GRAPH });
-      }
-
-      // 2. Check if active draft overlay snapshot exists in database
+      // 1. Check if active draft overlay snapshot exists in database
       const draftRecord = await prisma.draftGraph.findUnique({
         where: { id: "active-draft" },
       }).catch(() => null);
@@ -50,8 +34,27 @@ export async function GET() {
         }
       }
 
-      // 3. Fallback to relational database graph
-      return NextResponse.json({ draft: sanitizeSnapshotForPayload(relational) });
+      // 2. Query PostgreSQL relational database tables
+      const relational = await getRelationalGraphFromDatabase().catch(() => null);
+      if (relational) {
+        const hasRelationalEntities =
+          (Array.isArray(relational.buildings) && relational.buildings.length > 0) ||
+          (Array.isArray(relational.nodes) && relational.nodes.length > 0);
+        if (hasRelationalEntities) {
+          return NextResponse.json({ draft: sanitizeSnapshotForPayload(relational) });
+        }
+      }
+
+      // 3. Fallback to active published graph if draft is not set
+      const published = await getActivePublishedGraph(false).catch(() => null);
+      if (published && published.snapshot) {
+        const hasPubEntities =
+          (Array.isArray(published.snapshot.buildings) && published.snapshot.buildings.length > 0) ||
+          (Array.isArray(published.snapshot.nodes) && published.snapshot.nodes.length > 0);
+        if (hasPubEntities) {
+          return NextResponse.json({ draft: sanitizeSnapshotForPayload(published.snapshot) });
+        }
+      }
     }
     return NextResponse.json({ draft: EMPTY_GRAPH });
   } catch (err: unknown) {
@@ -95,5 +98,3 @@ export async function PUT(req: Request) {
     return NextResponse.json({ success: false, offline: true, message: "Draft stored in local memory" });
   }
 }
-
-

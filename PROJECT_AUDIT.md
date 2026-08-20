@@ -290,7 +290,7 @@ Angle_Deg     = atan2(Cross_Product, Dot_Product) × (180 / π)
 ### 7.2 Atomic Publishing Pipeline (`lib/services/publish-service.ts`)
 
 When an administrator clicks **"Publish Map"**:
-1. **Graph Validation Engine**: Checks for orphaned nodes, duplicate IDs, missing floor references, and broken edges. Blocks publish if critical errors exist.
+1. **Graph Validation Engine**: Runs automated validation checks for orphaned nodes, duplicate IDs, missing floor references, and broken edges, generating full diagnostic reports while permitting publishing even if critical errors are present.
 2. **Topological Relational Upsert**: Writes entities in topological order (`Campus` $\to$ `Building` $\to$ `Floor` $\to$ `Node` $\to$ `Edge` $\to$ `Destination` $\to$ `Obstacle`).
 3. **Map Version Snapshot**: Creates a permanent JSON snapshot in the `MapVersion` table for one-click rollbacks.
 4. **SSE Real-time Broadcast**: Dispatches an event on `/api/campus/stream`, instructing active visitors to reload graph data without page reloads.

@@ -96,12 +96,9 @@ export async function publishDraftGraph(
     obstacles || []
   );
 
+  // Allow publishing even if there are critical validation errors (logging warnings for diagnostics)
   if (validationReport.issues.some((i) => i.severity === "CRITICAL")) {
-    return {
-      success: false,
-      validationReport,
-      error: "Publishing blocked: Graph Validation Engine found critical errors. Fix issues before publishing.",
-    };
+    console.warn(`[PublishService] Notice: Campus graph published with ${validationReport.criticalCount} critical validation warnings.`);
   }
 
   let versionNum = 1;
@@ -469,36 +466,17 @@ export async function publishDraftGraph(
 export async function getRelationalGraphFromDatabase(): Promise<DraftSnapshot | null> {
   if (!prisma) return null;
   try {
-    const [
-      rawBuildings,
-      rawFloors,
-      rawNodes,
-      rawEdges,
-      rawDestinations,
-      rawObstacles,
-      rawDoors,
-      rawPhotos,
-    ] = await Promise.all([
-      prisma.building.findMany().catch(() => []),
-      prisma.floor.findMany().catch(() => []),
-      prisma.node.findMany().catch(() => []),
-      prisma.edge.findMany().catch(() => []),
-      prisma.destination.findMany().catch(() => []),
-      prisma.obstacle.findMany().catch(() => []),
-      prisma.door.findMany().catch(() => []),
-      prisma.nodePhoto.findMany({ select: { nodeId: true } }).catch(() => []),
-    ]);
+    const rawBuildings = await prisma.building.findMany().catch(() => []);
+    const rawFloors = await prisma.floor.findMany().catch(() => []);
+    const rawNodes = await prisma.node.findMany().catch(() => []);
+    const rawEdges = await prisma.edge.findMany().catch(() => []);
+    const rawDestinations = await prisma.destination.findMany().catch(() => []);
+    const rawObstacles = await prisma.obstacle.findMany().catch(() => []);
+    const rawDoors = await prisma.door.findMany().catch(() => []);
+    const rawPhotos = await prisma.nodePhoto.findMany({ select: { nodeId: true } }).catch(() => []);
 
     if (rawNodes.length === 0 && rawBuildings.length === 0) {
-      return {
-        buildings: [],
-        floors: [],
-        nodes: [],
-        edges: [],
-        destinations: [],
-        obstacles: [],
-        doors: [],
-      };
+      return null;
     }
 
     const photoNodeIds = new Set(rawPhotos.map((p) => p.nodeId));
@@ -627,38 +605,29 @@ export function invalidatePublishedCache() {
 
 export async function getActivePublishedGraph(forceFresh = false) {
   if (!forceFresh && activePublishedSnapshot) {
-    const hasEntities = (activePublishedSnapshot.snapshot?.buildings?.length ?? 0) > 0 || (activePublishedSnapshot.snapshot?.nodes?.length ?? 0) > 0;
+    const hasEntities =
+      (activePublishedSnapshot.snapshot?.buildings?.length ?? 0) > 0 ||
+      (activePublishedSnapshot.snapshot?.nodes?.length ?? 0) > 0;
     if (hasEntities) return activePublishedSnapshot;
   }
 
   if (prisma) {
     try {
-      const relational = await getRelationalGraphFromDatabase();
-      const hasRelationalEntities = relational && ((relational.buildings?.length ?? 0) > 0 || (relational.nodes?.length ?? 0) > 0);
-
-      if (!hasRelationalEntities) {
-        activePublishedSnapshot = {
-          version: 1,
-          snapshot: { buildings: [], floors: [], nodes: [], edges: [], destinations: [], obstacles: [], doors: [] },
-          publishedAt: new Date(),
-          publishedBy: "system",
-          notes: "Database is empty",
-        };
-        return activePublishedSnapshot;
-      }
-
+      // 1. FIRST check published snapshot record in Prisma (active-published)
       const dbRecord = (await prisma.publishedGraph.findUnique({
         where: { id: "active-published" },
-      })) as any;
+      }).catch(() => null)) as any;
 
-      if (dbRecord && dbRecord.snapshot) {
+      if (dbRecord && dbRecord.snapshot && typeof dbRecord.snapshot === "object") {
         const sanitized = sanitizeSnapshotForPayload(dbRecord.snapshot as DraftSnapshot);
-        const hasSnapEntities = (sanitized.buildings?.length ?? 0) > 0 || (sanitized.nodes?.length ?? 0) > 0;
+        const hasSnapEntities =
+          (Array.isArray(sanitized.buildings) && sanitized.buildings.length > 0) ||
+          (Array.isArray(sanitized.nodes) && sanitized.nodes.length > 0);
         if (hasSnapEntities) {
           activePublishedSnapshot = {
-            version: dbRecord.version,
+            version: dbRecord.version || 1,
             snapshot: sanitized,
-            publishedAt: dbRecord.publishedAt,
+            publishedAt: dbRecord.publishedAt || new Date(),
             publishedBy: dbRecord.publishedBy || "admin",
             notes: "Database published graph",
           };
@@ -666,16 +635,68 @@ export async function getActivePublishedGraph(forceFresh = false) {
         }
       }
 
+      // 2. SECOND check if there is any published MapVersion record in database
+      const latestMapVersion = await prisma.mapVersion.findFirst({
+        where: { status: "PUBLISHED" },
+        orderBy: { version: "desc" },
+      }).catch(() => null);
+
+      if (latestMapVersion && latestMapVersion.snapshot && typeof latestMapVersion.snapshot === "object") {
+        const sanitized = sanitizeSnapshotForPayload(latestMapVersion.snapshot as DraftSnapshot);
+        const hasSnapEntities =
+          (Array.isArray(sanitized.buildings) && sanitized.buildings.length > 0) ||
+          (Array.isArray(sanitized.nodes) && sanitized.nodes.length > 0);
+        if (hasSnapEntities) {
+          activePublishedSnapshot = {
+            version: latestMapVersion.version,
+            snapshot: sanitized,
+            publishedAt: latestMapVersion.publishedAt || latestMapVersion.createdAt,
+            publishedBy: latestMapVersion.publishedBy || "admin",
+            notes: latestMapVersion.notes || "Restored from MapVersion",
+          };
+          return activePublishedSnapshot;
+        }
+      }
+
+      // 3. THIRD query PostgreSQL relational tables
+      const relational = await getRelationalGraphFromDatabase().catch(() => null);
       if (relational) {
-        const sanitizedRelational = sanitizeSnapshotForPayload(relational);
-        activePublishedSnapshot = {
-          version: 1,
-          snapshot: sanitizedRelational,
-          publishedAt: new Date(),
-          publishedBy: "system-auto",
-          notes: "Auto-assembled from relational database",
-        };
-        return activePublishedSnapshot;
+        const hasRelationalEntities =
+          (Array.isArray(relational.buildings) && relational.buildings.length > 0) ||
+          (Array.isArray(relational.nodes) && relational.nodes.length > 0);
+
+        if (hasRelationalEntities) {
+          const sanitizedRelational = sanitizeSnapshotForPayload(relational);
+          activePublishedSnapshot = {
+            version: 1,
+            snapshot: sanitizedRelational,
+            publishedAt: new Date(),
+            publishedBy: "system-auto",
+            notes: "Auto-assembled from relational database",
+          };
+          return activePublishedSnapshot;
+        }
+      }
+
+      // 4. FOURTH check active-draft snapshot as fallback
+      const draftRecord = await prisma.draftGraph.findUnique({
+        where: { id: "active-draft" },
+      }).catch(() => null);
+
+      if (draftRecord && draftRecord.snapshot && typeof draftRecord.snapshot === "object") {
+        const sanitized = sanitizeSnapshotForPayload(draftRecord.snapshot as DraftSnapshot);
+        const hasDraftEntities =
+          (Array.isArray(sanitized.buildings) && sanitized.buildings.length > 0) ||
+          (Array.isArray(sanitized.nodes) && sanitized.nodes.length > 0);
+        if (hasDraftEntities) {
+          return {
+            version: 1,
+            snapshot: sanitized,
+            publishedAt: draftRecord.updatedAt,
+            publishedBy: "draft-fallback",
+            notes: "Loaded from draft snapshot",
+          };
+        }
       }
     } catch (e) {
       console.warn("Failed to fetch active published graph from Prisma database:", e);

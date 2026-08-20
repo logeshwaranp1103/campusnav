@@ -15,8 +15,8 @@ describe("Google Maps Experience — Enhanced Navigation & Gestures Spec", () =>
     // Graph where n1 -> n2 is EV-accessible road, but n2 -> n3 is WALK-only path, and n2 -> n4 has an EV bypass road
     const mockEdges: Edge[] = [
       { id: "e1", from: "n1", to: "n2", distance: 100, type: "ROAD", pathType: "EV" },
-      { id: "e2", from: "n2", to: "n3", distance: 50, type: "WALKWAY", pathType: "WALK" },
-      { id: "e3", from: "n3", to: "n4", distance: 50, type: "WALKWAY", pathType: "WALK" },
+      { id: "e2", from: "n2", to: "n3", distance: 50, type: "WALK", pathType: "WALK" },
+      { id: "e3", from: "n3", to: "n4", distance: 50, type: "WALK", pathType: "WALK" },
       { id: "e4", from: "n2", to: "n4", distance: 120, type: "ROAD", pathType: "EV" },
     ];
 

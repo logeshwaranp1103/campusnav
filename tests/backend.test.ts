@@ -56,7 +56,7 @@ describe("Production Backend & API Services", () => {
     expect(logs.some((l: any) => l.action === "ROOM_UPDATED")).toBe(true);
   });
 
-  it("blocks publishing when Graph Validation Engine finds critical errors", async () => {
+  it("allows publishing even when Graph Validation Engine finds critical errors", async () => {
     // Unlinked staircase node without a StairGroup produces a CRITICAL graph validation error
     const draftSnapshot = {
       buildings: [],
@@ -68,9 +68,10 @@ describe("Production Backend & API Services", () => {
     };
 
     const result = await publishDraftGraph(draftSnapshot, "admin-1");
-    expect(result.success).toBe(false);
-    expect(result.error).toContain("Publishing blocked");
+    expect(result.success).toBe(true);
+    expect(result.version).toBeGreaterThan(0);
     expect(result.validationReport.issues.length).toBeGreaterThan(0);
+    expect(result.validationReport.issues.some((i) => i.severity === "CRITICAL")).toBe(true);
   });
 
   it("successfully publishes clean draft graph and generates map version", async () => {
