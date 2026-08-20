@@ -27,26 +27,28 @@ describe("Navigation Destination Filtering Rules", () => {
     expect(isStairOrLiftOrUnnamed(liftGroupNode)).toBe(true);
   });
 
-  it("includes valid named nodes as selectable destinations", () => {
-    const roomNode = { id: "n7", name: "Chemistry Lab 101", type: "LABORATORY" as const, floorId: "f1", x: 10, y: 10 };
+  it("includes valid named nodes as selectable destinations when visibleToUser is true", () => {
+    const roomNode = { id: "n7", name: "Chemistry Lab 101", type: "LABORATORY" as const, floorId: "f1", x: 10, y: 10, visibleToUser: true };
     expect(isStairOrLiftOrUnnamed(roomNode)).toBe(false);
 
-    const entranceNode = { id: "n8", name: "Main Building Entrance", type: "BUILDING_ENTRANCE" as const, floorId: "f1", x: 10, y: 10 };
+    const entranceNode = { id: "n8", name: "Main Building Entrance", type: "BUILDING_ENTRANCE" as const, floorId: "f1", x: 10, y: 10, visibleToUser: true };
     expect(isStairOrLiftOrUnnamed(entranceNode)).toBe(false);
   });
 
-  it("builds valid start/end navigation destination list excluding stairs, lifts, and unnamed nodes", () => {
+  it("builds valid start/end navigation destination list respecting visibleToUser = true", () => {
     const sampleNodes: Node[] = [
       { id: "n-unnamed", floorId: "f1", x: 0, y: 0, type: "CORRIDOR" },
-      { id: "n-stair", name: "Staircase West", floorId: "f1", x: 10, y: 10, type: "STAIR", stairGroupId: "sg-1" },
-      { id: "n-lift", name: "Elevator 1", floorId: "f1", x: 20, y: 20, type: "LIFT", liftGroupId: "lg-1" },
-      { id: "n-lab", name: "Robotics Lab", floorId: "f1", x: 30, y: 30, type: "LABORATORY" },
-      { id: "n-office", name: "Dean's Office", floorId: "f1", x: 40, y: 40, type: "OFFICE" },
+      { id: "n-stair", name: "Staircase West", floorId: "f1", x: 10, y: 10, type: "STAIR", stairGroupId: "sg-1", visibleToUser: true },
+      { id: "n-lift", name: "Elevator 1", floorId: "f1", x: 20, y: 20, type: "LIFT", liftGroupId: "lg-1", visibleToUser: true },
+      { id: "n-lab", name: "Robotics Lab", floorId: "f1", x: 30, y: 30, type: "LABORATORY", visibleToUser: true },
+      { id: "n-office", name: "Dean's Office", floorId: "f1", x: 40, y: 40, type: "OFFICE", visibleToUser: true },
+      { id: "n-hidden", name: "Hidden Service Corridor", floorId: "f1", x: 50, y: 50, type: "CORRIDOR", visibleToUser: false },
     ];
 
     const sampleDestinations: Destination[] = [
       { id: "d-stair", name: "Staircase West", category: "Stairs", nodeId: "n-stair", aliases: [] },
       { id: "d-lab", name: "Robotics Lab", category: "Laboratory", nodeId: "n-lab", aliases: [] },
+      { id: "d-hidden", name: "Hidden Maintenance Room", category: "Utility", nodeId: "n-hidden", aliases: [] },
     ];
 
     const result = getValidNavigationDestinations({
@@ -56,10 +58,32 @@ describe("Navigation Destination Filtering Rules", () => {
 
     const names = result.map((d) => d.name);
 
+    // Visible = YES appears in search
     expect(names).toContain("Robotics Lab");
     expect(names).toContain("Dean's Office");
+
+    // Visible = NO does not appear in search
+    expect(names).not.toContain("Hidden Service Corridor");
+    expect(names).not.toContain("Hidden Maintenance Room");
+
+    // Stairs and lifts excluded
     expect(names).not.toContain("Staircase West");
     expect(names).not.toContain("Elevator 1");
     expect(names.length).toBe(2);
+  });
+
+  it("ensures nodes with visibleToUser = false are strictly excluded from user search results", () => {
+    const nodes: Node[] = [
+      { id: "n1", name: "Visible Room 101", floorId: "f1", x: 10, y: 10, type: "ROOM", visibleToUser: true },
+      { id: "n2", name: "Hidden Waypoint 102", floorId: "f1", x: 20, y: 20, type: "CORRIDOR", visibleToUser: false },
+      { id: "n3", name: "Default Unspecified Node", floorId: "f1", x: 30, y: 30, type: "ROOM" },
+    ];
+
+    const result = getValidNavigationDestinations({ nodes });
+    const resultIds = result.map((d) => d.nodeId || d.id);
+
+    expect(resultIds).toContain("n1");
+    expect(resultIds).not.toContain("n2");
+    expect(resultIds).not.toContain("n3");
   });
 });

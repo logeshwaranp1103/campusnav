@@ -327,6 +327,7 @@ export function useVisitorGps(
   }, []);
 
   // ── Device Orientation / Compass Heading ────────────────────────────────
+  const lastHeadingRef = useRef<number>(0);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -346,7 +347,13 @@ export function useVisitorGps(
       }
 
       if (compassHeading !== null && !isNaN(compassHeading)) {
-        setState((prev) => ({ ...prev, heading: Math.round(compassHeading!) }));
+        const rounded = Math.round(((compassHeading % 360) + 360) % 360);
+        // Shortest angular difference filter to suppress micro-noise (< 1.5°)
+        const diff = Math.abs(((rounded - lastHeadingRef.current + 540) % 360) - 180);
+        if (diff >= 1.5) {
+          lastHeadingRef.current = rounded;
+          setState((prev) => ({ ...prev, heading: rounded }));
+        }
       }
     };
 

@@ -742,13 +742,25 @@ export default function VisitorPage() {
             return (
               <g
                 key={d.id}
-                transform={`translate(${linkedNode.x + 10}, ${linkedNode.y - 10})`}
                 onClick={() => handleCalculateRoute(d)}
                 className="cursor-pointer"
               >
-                <circle r={isSelected ? 6 : 4} fill="#4f46e5" stroke="white" strokeWidth="1" />
-                <text x={8} y={3} fill="currentColor" className="text-[10px] font-bold text-indigo-600 dark:text-indigo-400">
-                  ★ {d.name}
+                <circle
+                  cx={linkedNode.x}
+                  cy={linkedNode.y}
+                  r={isSelected ? 6.5 : 4.5}
+                  fill={isSelected ? "#10b981" : "#64748b"}
+                  stroke="white"
+                  strokeWidth={isSelected ? 2 : 1.5}
+                  opacity={0.9}
+                />
+                <text
+                  x={linkedNode.x + 8}
+                  y={linkedNode.y - 4}
+                  fill="currentColor"
+                  className="text-[10px] font-bold text-indigo-600 dark:text-indigo-400"
+                >
+                  {d.name}
                 </text>
               </g>
             );

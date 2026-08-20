@@ -247,6 +247,7 @@ export function CampusMap({ route, livePosition, progress, gps: passedGps, onNav
         onUserPan={() => setIsFollowingUser(false)}
         onSelectDestination={(dest) => setSelectedDestForDetails(dest)}
         fromSelected={fromSelected}
+        toSelected={toSelected}
       />
 
       {/* ── Top-Right Floor Selection Controls ── */}
@@ -300,42 +301,52 @@ export function CampusMap({ route, livePosition, progress, gps: passedGps, onNav
 
       {/* ── Right-Center Tools Stack (4-Direction Compass Rose, Zoom, Obstacles) ── */}
       <div className="absolute right-3 top-1/2 -translate-y-1/2 z-20 pointer-events-auto flex flex-col items-end gap-2.5">
-        {/* 🧭 4-Direction Compass Rose & North-Up Button */}
+        {/* 🧭 4-Cardinal Compass Rose & North-Up Button */}
         <button
           onClick={resetBearingToNorth}
           className={cn(
-            "relative flex h-11 w-11 items-center justify-center rounded-2xl border bg-[rgb(var(--card))]/95 p-1 shadow-lg backdrop-blur-md transition-all active:scale-95 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[rgb(var(--primary))]",
-            Math.abs(bearing) > 2 ? "border-red-500/40 shadow-red-500/20" : "border-[rgb(var(--border))]"
+            "relative flex h-12 w-12 items-center justify-center rounded-2xl border bg-[rgb(var(--card))]/95 p-1 shadow-xl backdrop-blur-md transition-all active:scale-95 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[rgb(var(--primary))]",
+            Math.abs(bearing) > 2 ? "border-red-500/50 shadow-red-500/25 ring-1 ring-red-500/30" : "border-[rgb(var(--border))]"
           )}
-          title={Math.abs(bearing) > 2 ? `Bearing ${Math.round(bearing)}° · Click to reset North-Up` : "North-Up Active"}
-          aria-label={`Compass bearing ${Math.round(bearing)} degrees. Click to reset North-Up.`}
+          title={Math.abs(bearing) > 2 ? `Bearing ${Math.round(((bearing % 360) + 360) % 360)}° · Tap to reset North-Up` : "North-Up Active"}
+          aria-label={`Compass bearing ${Math.round(bearing)} degrees. Tap to reset North-Up.`}
         >
           {/* Compass Rose SVG Dial */}
           <div
-            className="relative h-9 w-9 flex items-center justify-center transition-transform duration-100 ease-out"
+            className="relative h-10 w-10 flex items-center justify-center transition-transform duration-100 ease-out"
             style={{ transform: `rotate(${-bearing}deg)` }}
           >
-            {/* Compass Outer Ring */}
-            <svg viewBox="0 0 36 36" className="h-full w-full">
+            <svg viewBox="0 0 40 40" className="h-full w-full select-none pointer-events-none">
+              {/* Outer Dial Circle */}
+              <circle cx="20" cy="20" r="18" fill="none" stroke="#cbd5e1" strokeWidth="1" opacity="0.6" />
+
               {/* Cardinal Tick Marks */}
-              <line x1="18" y1="2" x2="18" y2="5" stroke="#ef4444" strokeWidth="2" strokeLinecap="round" />
-              <line x1="18" y1="31" x2="18" y2="34" stroke="#94a3b8" strokeWidth="1.5" strokeLinecap="round" />
-              <line x1="2" y1="18" x2="5" y2="18" stroke="#94a3b8" strokeWidth="1.5" strokeLinecap="round" />
-              <line x1="31" y1="18" x2="34" y2="18" stroke="#94a3b8" strokeWidth="1.5" strokeLinecap="round" />
+              <line x1="20" y1="3" x2="20" y2="7" stroke="#ef4444" strokeWidth="2" strokeLinecap="round" />
+              <line x1="20" y1="33" x2="20" y2="37" stroke="#94a3b8" strokeWidth="1.5" strokeLinecap="round" />
+              <line x1="3" y1="20" x2="7" y2="20" stroke="#94a3b8" strokeWidth="1.5" strokeLinecap="round" />
+              <line x1="33" y1="20" x2="37" y2="20" stroke="#94a3b8" strokeWidth="1.5" strokeLinecap="round" />
+
+              {/* 4 Cardinal Letters (N, E, S, W) */}
+              <text x="20" y="10" textAnchor="middle" fill="#ef4444" fontSize="6.5" fontWeight="900">N</text>
+              <text x="31" y="22" textAnchor="middle" fill="#94a3b8" fontSize="5.5" fontWeight="800">E</text>
+              <text x="20" y="32" textAnchor="middle" fill="#94a3b8" fontSize="5.5" fontWeight="800">S</text>
+              <text x="9" y="22" textAnchor="middle" fill="#94a3b8" fontSize="5.5" fontWeight="800">W</text>
 
               {/* Red North Needle */}
-              <polygon points="18,4 22,18 14,18" fill="#ef4444" />
-              {/* White/Muted South Needle */}
-              <polygon points="18,32 22,18 14,18" fill="#94a3b8" opacity="0.65" />
+              <polygon points="20,10 23,20 17,20" fill="#ef4444" />
+              {/* Slate South Needle */}
+              <polygon points="20,30 23,20 17,20" fill="#94a3b8" opacity="0.75" />
               {/* Center Pivot Dot */}
-              <circle cx="18" cy="18" r="2.5" fill="#ffffff" stroke="#475569" strokeWidth="1" />
+              <circle cx="20" cy="20" r="2.5" fill="#ffffff" stroke="#475569" strokeWidth="1.2" />
             </svg>
-
-            {/* Floating 'N' Label */}
-            <span className="absolute -top-1 font-black text-[9px] text-red-500 tracking-tighter select-none">
-              N
-            </span>
           </div>
+
+          {/* Active Bearing Badge when rotated */}
+          {Math.abs(bearing) > 2 && (
+            <span className="absolute -bottom-2 px-1 py-0.2 rounded-md bg-red-600 text-[8px] font-black text-white shadow-xs leading-tight">
+              {Math.round(((bearing % 360) + 360) % 360)}°
+            </span>
+          )}
         </button>
 
         {/* Zoom & Fit Controls Stack */}
@@ -393,7 +404,7 @@ export function CampusMap({ route, livePosition, progress, gps: passedGps, onNav
       </div>
 
       {/* ── Bottom-Right Recenter / Follow Location Floating Action Button (FAB) ── */}
-      <div className="absolute right-3.5 bottom-20 md:bottom-6 z-25 pointer-events-auto flex items-center gap-2">
+      <div className="absolute right-3.5 bottom-28 md:bottom-28 z-25 pointer-events-auto flex items-center gap-2">
         {!isFollowingUser && (gps?.isGpsActive || fromSelected?.id === "dest-live-user-location" || livePosition) && (
           <button
             onClick={handleRecenter}
@@ -475,6 +486,7 @@ function MapCanvas({
   onUserPan,
   onSelectDestination,
   fromSelected,
+  toSelected,
 }: {
   floorId: string;
   route: Route | null;
@@ -492,6 +504,7 @@ function MapCanvas({
   onUserPan?: () => void;
   onSelectDestination?: (dest: Destination) => void;
   fromSelected?: Destination | null;
+  toSelected?: Destination | null;
 }) {
   const { buildings, nodes: allNodes, edges: allEdges, destinations: allDestinations, events: allEvents } = publishedData;
   const svgRef = useRef<SVGSVGElement | null>(null);
@@ -597,35 +610,39 @@ function MapCanvas({
         // Circular shortest angle interpolation for heading
         const dHeading = (((targetHeading - cur.heading + 540) % 360) - 180);
 
-        if (Math.abs(dx) > 0.05 || Math.abs(dy) > 0.05 || Math.abs(dHeading) > 0.1) {
-          const nextX = cur.x + dx * 0.18;
-          const nextY = cur.y + dy * 0.18;
-          const nextHeading = (cur.heading + dHeading * 0.15 + 360) % 360;
+        if (Math.abs(dx) > 0.02 || Math.abs(dy) > 0.02 || Math.abs(dHeading) > 0.05) {
+          const nextX = cur.x + dx * 0.16;
+          const nextY = cur.y + dy * 0.16;
+          const nextHeading = (cur.heading + dHeading * 0.14 + 360) % 360;
 
           setVisualGps({
             x: nextX,
             y: nextY,
             heading: nextHeading,
           });
+        }
+      }
 
-          // Smoothly glide camera pan if auto-following
-          if (isFollowingUser) {
-            const centerX = boundsRef.current.x + boundsRef.current.w / 2;
-            const centerY = boundsRef.current.y + boundsRef.current.h / 2;
-            const targetPanX = centerX - nextX;
-            const targetPanY = centerY - nextY;
+      // Smoothly glide camera pan if auto-following
+      if (isFollowingUser) {
+        const curMarker = visualGpsRef.current;
+        const targetFollowX = targetGpsPos ? targetGpsPos.x : curMarker.x;
+        const targetFollowY = targetGpsPos ? targetGpsPos.y : curMarker.y;
 
-            const curPan = panRef.current;
-            const panDx = targetPanX - curPan.x;
-            const panDy = targetPanY - curPan.y;
+        const centerX = boundsRef.current.x + boundsRef.current.w / 2;
+        const centerY = boundsRef.current.y + boundsRef.current.h / 2;
+        const targetPanX = centerX - targetFollowX;
+        const targetPanY = centerY - targetFollowY;
 
-            if (Math.abs(panDx) > 0.1 || Math.abs(panDy) > 0.1) {
-              setPan({
-                x: curPan.x + panDx * 0.12,
-                y: curPan.y + panDy * 0.12,
-              });
-            }
-          }
+        const curPan = panRef.current;
+        const panDx = targetPanX - curPan.x;
+        const panDy = targetPanY - curPan.y;
+
+        if (Math.abs(panDx) > 0.05 || Math.abs(panDy) > 0.05) {
+          setPan({
+            x: curPan.x + panDx * 0.12,
+            y: curPan.y + panDy * 0.12,
+          });
         }
       }
 
@@ -1149,6 +1166,13 @@ function MapCanvas({
   const boundsCenterX = bounds.x + bounds.w / 2;
   const boundsCenterY = bounds.y + bounds.h / 2;
 
+  // ── Correct Rotation Pivot (Invariance Engine) ──
+  // When following user with active GPS or live position, pivot directly around the user's visual coordinate (visualGps.x, visualGps.y).
+  // In free-pan mode, pivot around the current screen/viewport center: (boundsCenterX - pan.x, boundsCenterY - pan.y).
+  const hasLiveTarget = Boolean(targetGpsPos || livePosition || (fromSelected && fromSelected.id === "dest-live-user-location"));
+  const rotationPivotX = (isFollowingUser && hasLiveTarget) ? visualGps.x : boundsCenterX - pan.x;
+  const rotationPivotY = (isFollowingUser && hasLiveTarget) ? visualGps.y : boundsCenterY - pan.y;
+
   return (
     <svg
       ref={svgRef}
@@ -1188,8 +1212,8 @@ function MapCanvas({
       {/* Background grid covering all zoom levels */}
       <rect x="-100000" y="-100000" width="200000" height="200000" fill="url(#grid)" />
 
-      {/* ── Main Transform Group (Supports Bearing Rotation around Map Center) ── */}
-      <g transform={bearing !== 0 ? `rotate(${bearing} ${boundsCenterX} ${boundsCenterY})` : undefined}>
+      {/* ── Main Transform Group (Supports Bearing Rotation around User Location / Camera Pivot) ── */}
+      <g transform={bearing !== 0 ? `rotate(${bearing} ${rotationPivotX} ${rotationPivotY})` : undefined}>
         {buildings.length === 0 && (
           <g transform={`translate(${bounds.w / 2}, ${bounds.h / 2})`}>
             <text
@@ -1567,19 +1591,35 @@ function MapCanvas({
             );
           })}
 
-        {/* Destinations Labels */}
+        {/* Destinations Labels & Markers */}
         {allDestinations.map((d) => {
           const linkedNode = allNodes.find((n) => n.id === d.nodeId);
           if (!linkedNode || (linkedNode.floorId !== floorId && floorId !== "f-out")) return null;
+          const isSelected = toSelected?.id === d.id || toSelected?.nodeId === linkedNode.id;
           return (
             <g
               key={d.id}
-              transform={`translate(${linkedNode.x + 8}, ${linkedNode.y - 6})`}
               onClick={() => onSelectDestination && onSelectDestination(d)}
-              className="cursor-pointer hover:scale-110 transition-transform"
+              className="cursor-pointer hover:scale-105 transition-transform"
             >
-              <text fill="currentColor" className="text-[10px] font-extrabold text-indigo-600 dark:text-indigo-400">
-                ★ {d.name}
+              {/* Room Node-Style Dot Marker */}
+              <circle
+                cx={linkedNode.x}
+                cy={linkedNode.y}
+                r={isSelected ? 6.5 : 4.5}
+                fill={isSelected ? "#10b981" : "#64748b"}
+                stroke="#ffffff"
+                strokeWidth={isSelected ? 2 : 1.5}
+                opacity={0.9}
+              />
+              {/* Room Name Label */}
+              <text
+                x={linkedNode.x + 8}
+                y={linkedNode.y - 4}
+                fill="currentColor"
+                className="text-[10px] font-extrabold text-indigo-600 dark:text-indigo-400"
+              >
+                {d.name}
               </text>
             </g>
           );

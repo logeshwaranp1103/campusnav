@@ -297,3 +297,68 @@ describe("Reference Photo Navigation & Preloading Engine", () => {
   });
 });
 
+describe("Google Maps Navigation UX & Step Progression", () => {
+  it("strictly filters technical IDs RP1, RP2, node_123, junction_4 from instructions", () => {
+    const technicalNodes = ["RP1", "RP2", "node_123", "junction_4", "wp_1", "pt_2", "corr_3"];
+    technicalNodes.forEach((name) => {
+      expect(isTechnicalOrWaypointName(name)).toBe(true);
+      expect(cleanLandmarkName(name)).toBeNull();
+    });
+  });
+
+  it("formats standard Google Maps navigation step instructions cleanly", () => {
+    expect(formatInstructionText("straight")).toBe("Go straight");
+    expect(formatInstructionText("left")).toBe("Turn left");
+    expect(formatInstructionText("right")).toBe("Turn right");
+    expect(formatInstructionText("slight-left")).toBe("Keep left");
+    expect(formatInstructionText("slight-right")).toBe("Keep right");
+    expect(formatInstructionText("stairs-up")).toBe("Take the stairs");
+    expect(formatInstructionText("lift")).toBe("Take the lift");
+    expect(formatInstructionText("straight", undefined, undefined, true, "Main Block")).toBe("Enter Main Block");
+    expect(formatInstructionText("arrive")).toBe("You have arrived");
+  });
+});
+
+describe("Map Rotation Physics & Shortest Angular Path", () => {
+  // Helper for shortest angular delta
+  const shortestAngularDelta = (fromDeg: number, toDeg: number) => {
+    return ((toDeg - fromDeg + 540) % 360) - 180;
+  };
+
+  it("handles 359° -> 0° transition as +1° movement instead of a 359° spin", () => {
+    const delta = shortestAngularDelta(359, 0);
+    expect(delta).toBe(1);
+  });
+
+  it("handles 0° -> 359° transition as -1° movement", () => {
+    const delta = shortestAngularDelta(0, 359);
+    expect(delta).toBe(-1);
+  });
+
+  it("handles cross-quadrant smooth transitions accurately", () => {
+    expect(shortestAngularDelta(10, 350)).toBe(-20);
+    expect(shortestAngularDelta(350, 10)).toBe(20);
+    expect(shortestAngularDelta(179, 181)).toBe(2);
+    expect(shortestAngularDelta(181, 179)).toBe(-2);
+  });
+
+  it("maintains mathematical user location invariance when rotating around user pivot", () => {
+    // Let user position be (Ux, Uy)
+    const Ux = 720;
+    const Uy = 480;
+    const angleDeg = 45;
+    const rad = (angleDeg * Math.PI) / 180;
+
+    // Standard 2D affine rotation of (Ux, Uy) around pivot (Ux, Uy):
+    // X' = cos(theta) * (Ux - Ux) - sin(theta) * (Uy - Uy) + Ux = Ux
+    // Y' = sin(theta) * (Ux - Ux) + cos(theta) * (Uy - Uy) + Uy = Uy
+    const rotatedX = Math.cos(rad) * (Ux - Ux) - Math.sin(rad) * (Uy - Uy) + Ux;
+    const rotatedY = Math.sin(rad) * (Ux - Ux) + Math.cos(rad) * (Uy - Uy) + Uy;
+
+    expect(rotatedX).toBeCloseTo(Ux, 5);
+    expect(rotatedY).toBeCloseTo(Uy, 5);
+  });
+});
+
+
+

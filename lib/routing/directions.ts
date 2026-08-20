@@ -91,13 +91,15 @@ export function isTechnicalOrWaypointName(name?: string): boolean {
   const trimmed = name.trim();
   if (!trimmed) return true;
 
-  // 1. Technical waypoint / route point patterns:
-  // e.g. "RP 1", "RP 2", "RP 3", "RP-1", "RP_1", "RP1", "RP 10", "RP-OUT-1"
-  if (/^rp[\s_\-]*\d+$/i.test(trimmed) || /^rp[\s_\-]+(?:out|indoor|node|wp|pt|seg|point)[\s_\-]*\d*$/i.test(trimmed)) {
+  // 1. Technical waypoint / route point patterns (e.g. "RP 1", "RP2", "RP-1", "RP_1", "RP10", "RP_123", "RP-OUT-1")
+  if (
+    /^rp[\s_\-]*\d+$/i.test(trimmed) ||
+    /^rp[\s_\-]+(?:out|indoor|node|wp|pt|seg|point|coord|waypoint|loc|pos|junction|jct)[\s_\-]*\d*$/i.test(trimmed)
+  ) {
     return true;
   }
 
-  // 2. Node IDs: "n1", "n102", "node_14", "node 14", "node-14", "node14", "n-1", "n_1"
+  // 2. Node IDs: "n1", "n102", "node_14", "node 14", "node-14", "node14", "node_123", "n-1", "n_1"
   if (/^n[\s_\-]*\d+$/i.test(trimmed) || /^node[\s_\-]*\d+$/i.test(trimmed)) {
     return true;
   }
@@ -107,7 +109,7 @@ export function isTechnicalOrWaypointName(name?: string): boolean {
     return true;
   }
 
-  // 4. Infrastructure IDs: "junction 1", "jct 2", "corridor 1", "corr 2", "stair 1", "lift 1", "door 1"
+  // 4. Infrastructure IDs: "junction 1", "junction_4", "junction-4", "junction4", "jct 2", "corridor 1", "corr 2", "stair 1", "lift 1", "door 1"
   if (/^(junction|jct|junc|corridor|corr|stair|staircase|lift|elevator|door|gate)[\s_\-]*\d+$/i.test(trimmed)) {
     return true;
   }

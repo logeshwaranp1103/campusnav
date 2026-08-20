@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   ArrowUp,
@@ -17,16 +17,23 @@ import {
   CheckCircle2,
   ChevronRight,
   ChevronLeft,
+  ChevronUp,
+  ChevronDown,
   Camera,
   Image as ImageIcon,
   AlertCircle,
+  Clock,
 } from "lucide-react";
 import { Button } from "@/shared/components/ui/button";
-import { cleanLandmarkName, type DirectionStep } from "@/lib/routing/directions";
+import { Badge } from "@/shared/components/ui/badge";
+import { cleanLandmarkName, type DirectionStep, type DirectionIcon } from "@/lib/routing/directions";
+import type { RouteInstruction } from "@/features/navigation/services/graph";
+import { cn } from "@/shared/lib/utils";
 
-interface TurnByTurnBarProps {
+export interface TurnByTurnBarProps {
   currentStep: DirectionStep | null;
   nextStep: DirectionStep | null;
+  allSteps?: (DirectionStep | RouteInstruction)[];
   totalDistanceMeters: number;
   remainingDistanceMeters: number;
   currentStepIndex: number;
@@ -41,6 +48,7 @@ interface TurnByTurnBarProps {
 export function TurnByTurnBar({
   currentStep,
   nextStep,
+  allSteps = [],
   totalDistanceMeters,
   remainingDistanceMeters,
   currentStepIndex,
@@ -51,8 +59,13 @@ export function TurnByTurnBar({
   onPrevStep,
   isOffRoute,
 }: TurnByTurnBarProps) {
-  const [showPhotoModal, setShowPhotoModal] = useState(false);
+  const [isExpanded, setIsExpanded] = useState(false);
+  const [activePhotoModal, setActivePhotoModal] = useState<{ url: string; title: string; nodeId?: string } | null>(null);
   const [imageError, setImageError] = useState(false);
+
+  // Swipe gesture tracking refs
+  const touchStartY = useRef<number | null>(null);
+  const touchEndY = useRef<number | null>(null);
 
   if (!currentStep) return null;
 
@@ -68,110 +81,244 @@ export function TurnByTurnBar({
 
   const etaMinutes = Math.max(1, Math.round(remainingDistanceMeters / 70));
 
-  const renderIcon = (icon: DirectionStep["icon"]) => {
+  // Compute estimated arrival time string (e.g. "4:25 PM")
+  const arrivalTime = new Date(Date.now() + etaMinutes * 60 * 1000).toLocaleTimeString([], {
+    hour: "numeric",
+    minute: "2-digit",
+  });
+
+  const renderIcon = (icon?: DirectionIcon, className = "h-6 w-6 text-white") => {
     switch (icon) {
       case "straight":
-        return <ArrowUp className="h-6 w-6 text-emerald-400" />;
+        return <ArrowUp className={className} />;
       case "slight-left":
-        return <ArrowUpLeft className="h-6 w-6 text-emerald-400" />;
+        return <ArrowUpLeft className={className} />;
       case "left":
-        return <ArrowLeft className="h-6 w-6 text-emerald-400" />;
+        return <ArrowLeft className={className} />;
       case "sharp-left":
-        return <ArrowDownLeft className="h-6 w-6 text-emerald-400" />;
+        return <ArrowDownLeft className={className} />;
       case "slight-right":
-        return <ArrowUpRight className="h-6 w-6 text-emerald-400" />;
+        return <ArrowUpRight className={className} />;
       case "right":
-        return <ArrowRight className="h-6 w-6 text-emerald-400" />;
+        return <ArrowRight className={className} />;
       case "sharp-right":
-        return <ArrowDownRight className="h-6 w-6 text-emerald-400" />;
+        return <ArrowDownRight className={className} />;
       case "u-turn":
-        return <RotateCcw className="h-6 w-6 text-amber-400" />;
+        return <RotateCcw className={className} />;
       case "stairs-up":
       case "stairs-down":
-        return <Footprints className="h-6 w-6 text-indigo-400" />;
+        return <Footprints className={className} />;
       case "lift":
-        return <Navigation className="h-6 w-6 text-blue-400" />;
+        return <Navigation className={className} />;
       case "arrive":
-        return <CheckCircle2 className="h-6 w-6 text-emerald-400" />;
+        return <CheckCircle2 className={className} />;
       default:
-        return <ArrowUp className="h-6 w-6 text-emerald-400" />;
+        return <ArrowUp className={className} />;
     }
+  };
+
+  // Format clean distance string (e.g. "80 m", "1.2 km")
+  const formatDistance = (meters: number) => {
+    if (meters >= 1000) {
+      return `${(meters / 1000).toFixed(1)} km`;
+    }
+    return `${Math.round(meters)} m`;
+  };
+
+  // Touch gesture handlers for swiping
+  const handleTouchStart = (e: React.TouchEvent) => {
+    touchStartY.current = e.targetTouches[0].clientY;
+    touchEndY.current = null;
+  };
+
+  const handleTouchMove = (e: React.TouchEvent) => {
+    touchEndY.current = e.targetTouches[0].clientY;
+  };
+
+  const handleTouchEnd = () => {
+    if (touchStartY.current === null || touchEndY.current === null) return;
+    const deltaY = touchEndY.current - touchStartY.current;
+    // Swipe UP (deltaY < -35) -> Expand full route
+    if (deltaY < -35 && !isExpanded) {
+      setIsExpanded(true);
+    }
+    // Swipe DOWN (deltaY > 35) -> Collapse full route
+    if (deltaY > 35 && isExpanded) {
+      setIsExpanded(false);
+    }
+    touchStartY.current = null;
+    touchEndY.current = null;
   };
 
   return (
     <>
-      <AnimatePresence>
+      {/* ══════════════════════════════════════════════════════════ */}
+      {/* 1. TOP GUIDANCE BANNER: CURRENT STEP + NEXT STEP (Google Maps style) */}
+      {/* ══════════════════════════════════════════════════════════ */}
+      <div className="fixed top-3 left-3 right-3 sm:left-4 sm:right-4 z-40 mx-auto max-w-lg pointer-events-none">
         <motion.div
-          initial={{ opacity: 0, y: 30 }}
+          initial={{ opacity: 0, y: -20 }}
           animate={{ opacity: 1, y: 0 }}
-          exit={{ opacity: 0, y: 30 }}
+          exit={{ opacity: 0, y: -20 }}
           transition={{ duration: 0.25, ease: "easeOut" }}
-          className="fixed bottom-4 left-3 right-3 sm:left-4 sm:right-4 z-40 mx-auto max-w-lg rounded-2xl border bg-gray-900/95 p-3.5 sm:p-4 shadow-2xl backdrop-blur-md text-white border-gray-800 space-y-2.5 sm:space-y-3 pointer-events-auto"
+          className="pointer-events-auto overflow-hidden rounded-2xl border border-emerald-600/40 bg-emerald-950/95 shadow-2xl backdrop-blur-xl text-white divide-y divide-emerald-800/60"
         >
           {/* Off-Route Alert */}
           {isOffRoute && (
-            <div className="flex items-center justify-between rounded-xl bg-amber-500/20 border border-amber-500/40 p-2 text-xs text-amber-300">
-              <span className="font-semibold">⚠️ Off route detected! Recalculating path...</span>
+            <div className="flex items-center justify-between bg-amber-500/25 border-b border-amber-500/40 px-3.5 py-2 text-xs text-amber-200">
+              <span className="font-semibold flex items-center gap-1.5">
+                <AlertCircle className="h-4 w-4 text-amber-400 shrink-0" />
+                <span>Off route detected! Recalculating path...</span>
+              </span>
               {onRecalculate && (
-                <Button size="sm" onClick={onRecalculate} className="h-6 text-[10px] bg-amber-600 hover:bg-amber-700 text-white">
+                <Button
+                  size="sm"
+                  onClick={onRecalculate}
+                  className="h-6 text-[10px] bg-amber-600 hover:bg-amber-700 text-white font-bold px-2"
+                >
                   Recalculate
                 </Button>
               )}
             </div>
           )}
 
-          {/* Primary Instruction Row */}
-          <div className="flex items-center justify-between gap-3">
-            <div className="flex items-center gap-3 min-w-0 flex-1">
-              <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-emerald-500/20 border border-emerald-500/30 shadow-inner">
-                {renderIcon(currentStep.icon)}
+          {/* PRIMARY CURRENT STEP */}
+          <div className="p-3.5 sm:p-4">
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex items-center gap-3.5 min-w-0 flex-1">
+                {/* Large Direction Icon */}
+                <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-emerald-500 text-white shadow-md border border-emerald-400/40">
+                  {renderIcon(currentStep.icon, "h-7 w-7 text-white stroke-[2.5]")}
+                </div>
+
+                {/* Primary Instruction & Distance */}
+                <div className="min-w-0 flex-1">
+                  <AnimatePresence mode="wait">
+                    <motion.div
+                      key={currentStep.text}
+                      initial={{ opacity: 0, y: -4 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: 4 }}
+                      transition={{ duration: 0.15 }}
+                    >
+                      <h2 className="font-extrabold text-base sm:text-lg leading-tight text-white tracking-tight truncate">
+                        {currentStep.text}
+                      </h2>
+                      <div className="flex items-center gap-2 mt-0.5 text-xs text-emerald-300 font-bold">
+                        {currentStep.distanceMeters > 0 ? (
+                          <span>In {formatDistance(currentStep.distanceMeters)}</span>
+                        ) : (
+                          <span className="text-emerald-400">Arrived</span>
+                        )}
+                        <span className="text-emerald-600">•</span>
+                        <span className="text-emerald-200/80 font-normal">
+                          Step {currentStepIndex + 1} of {totalStepsCount}
+                        </span>
+                      </div>
+                    </motion.div>
+                  </AnimatePresence>
+                </div>
               </div>
-              <div className="min-w-0 flex-1">
-                <AnimatePresence mode="wait">
-                  <motion.div
-                    key={currentStep.text}
-                    initial={{ opacity: 0, x: -6 }}
-                    animate={{ opacity: 1, x: 0 }}
-                    exit={{ opacity: 0, x: 6 }}
-                    transition={{ duration: 0.15 }}
+
+              {/* Quick Reference Photo & Step Controls */}
+              <div className="flex items-center gap-1.5 shrink-0">
+                {activePhotoUrl && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setImageError(false);
+                      setActivePhotoModal({
+                        url: activePhotoUrl,
+                        title: photoNodeName,
+                        nodeId: currentStep.targetNodeId,
+                      });
+                    }}
+                    className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-emerald-500/25 hover:bg-emerald-500/35 text-emerald-200 border border-emerald-400/30 text-xs font-semibold transition-all active:scale-95 cursor-pointer shadow-xs"
+                    title="View real-world reference photo"
                   >
-                    <h3 className="font-bold text-base leading-tight text-white truncate">{currentStep.text}</h3>
-                    <div className="flex items-center gap-2 mt-1 text-xs text-gray-400 font-medium">
-                      {currentStep.distanceMeters > 0 ? (
-                        <span className="text-emerald-400 font-bold">{currentStep.distanceMeters} m ahead</span>
-                      ) : (
-                        <span className="text-emerald-400 font-bold">Arrived</span>
-                      )}
-                      <span>•</span>
-                      <span>Step {currentStepIndex + 1} of {totalStepsCount}</span>
-                    </div>
-                  </motion.div>
-                </AnimatePresence>
+                    <Camera className="h-4 w-4 text-emerald-300" />
+                    <span className="hidden sm:inline">Photo</span>
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* SECONDARY NEXT STEP (Google Maps "Next:" preview) */}
+          {nextStep && (
+            <div className="flex items-center gap-2.5 px-3.5 py-2 bg-emerald-950/80 text-xs text-emerald-200/90 font-medium">
+              <span className="font-extrabold text-[10px] uppercase tracking-wider text-emerald-400 shrink-0">
+                Next:
+              </span>
+              <div className="flex items-center gap-1.5 min-w-0 flex-1 truncate">
+                <span className="shrink-0">{renderIcon(nextStep.icon, "h-3.5 w-3.5 text-emerald-300")}</span>
+                <span className="truncate">{nextStep.text}</span>
+              </div>
+              {nextStep.distanceMeters > 0 && (
+                <span className="text-[11px] text-emerald-300/80 font-bold shrink-0">
+                  {formatDistance(nextStep.distanceMeters)}
+                </span>
+              )}
+            </div>
+          )}
+        </motion.div>
+      </div>
+
+      {/* ══════════════════════════════════════════════════════════ */}
+      {/* 2. BOTTOM NAVIGATION BAR: ETA, DISTANCE, SWIPE-UP CUE, & EXIT */}
+      {/* ══════════════════════════════════════════════════════════ */}
+      <div
+        className="fixed bottom-3 left-3 right-3 sm:left-4 sm:right-4 z-40 mx-auto max-w-lg pointer-events-none"
+        onTouchStart={handleTouchStart}
+        onTouchMove={handleTouchMove}
+        onTouchEnd={handleTouchEnd}
+      >
+        <motion.div
+          initial={{ opacity: 0, y: 30 }}
+          animate={{ opacity: 1, y: 0 }}
+          exit={{ opacity: 0, y: 30 }}
+          transition={{ duration: 0.25, ease: "easeOut" }}
+          className="pointer-events-auto rounded-2xl border border-gray-800 bg-gray-900/95 shadow-2xl backdrop-blur-xl text-white p-3 sm:p-3.5 space-y-2.5"
+        >
+          {/* Swipe-Up Drag Handle Pill (Tap or Swipe to expand full route) */}
+          <button
+            type="button"
+            onClick={() => setIsExpanded(true)}
+            className="w-full flex flex-col items-center justify-center -mt-1 group cursor-pointer"
+            aria-label="Swipe up for full route step list"
+          >
+            <div className="h-1 w-10 rounded-full bg-gray-700 group-hover:bg-gray-500 transition-colors" />
+            <div className="flex items-center gap-1 text-[11px] font-semibold text-emerald-400 pt-1 group-hover:text-emerald-300 transition-colors">
+              <ChevronUp className="h-3.5 w-3.5 animate-bounce" />
+              <span>Swipe up for all steps</span>
+            </div>
+          </button>
+
+          {/* Metrics & Action Controls */}
+          <div className="flex items-center justify-between gap-3 pt-0.5">
+            {/* ETA & Remaining Distance */}
+            <div className="min-w-0">
+              <div className="flex items-baseline gap-2">
+                <span className="text-xl sm:text-2xl font-black text-white tracking-tight">
+                  {etaMinutes} <span className="text-sm font-semibold text-gray-400">min</span>
+                </span>
+                <span className="text-xs text-gray-400 font-medium">
+                  ({formatDistance(remainingDistanceMeters)})
+                </span>
+              </div>
+              <div className="text-[11px] text-gray-400 flex items-center gap-1.5 mt-0.5">
+                <Clock className="h-3 w-3 text-emerald-400" />
+                <span>Arrival ~{arrivalTime}</span>
               </div>
             </div>
 
+            {/* Stepper buttons & End Navigation Button */}
             <div className="flex items-center gap-1.5 shrink-0">
-              {/* Reference Photo Action Button */}
-              {activePhotoUrl && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setImageError(false);
-                    setShowPhotoModal(true);
-                  }}
-                  className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-400 border border-emerald-500/30 text-xs font-semibold transition-all active:scale-95 cursor-pointer shadow-xs"
-                  title="View real-world reference photo"
-                >
-                  <Camera className="h-4 w-4" />
-                  <span className="hidden sm:inline">Photo</span>
-                </button>
-              )}
-
-              {/* Step Prev/Next Navigation Controls */}
               {onPrevStep && currentStepIndex > 0 && (
                 <button
+                  type="button"
                   onClick={onPrevStep}
-                  className="flex h-8 w-8 items-center justify-center rounded-xl bg-gray-800/80 hover:bg-gray-800 text-gray-300 hover:text-white border border-gray-700/60 transition-colors"
+                  className="flex h-9 w-9 items-center justify-center rounded-xl bg-gray-800 hover:bg-gray-700 text-gray-300 hover:text-white border border-gray-700/60 transition-all active:scale-95 cursor-pointer"
                   title="Previous Step"
                   aria-label="Previous Step"
                 >
@@ -180,8 +327,9 @@ export function TurnByTurnBar({
               )}
               {onNextStep && currentStepIndex < totalStepsCount - 1 && (
                 <button
+                  type="button"
                   onClick={onNextStep}
-                  className="flex h-8 w-8 items-center justify-center rounded-xl bg-gray-800/80 hover:bg-gray-800 text-gray-300 hover:text-white border border-gray-700/60 transition-colors"
+                  className="flex h-9 w-9 items-center justify-center rounded-xl bg-gray-800 hover:bg-gray-700 text-gray-300 hover:text-white border border-gray-700/60 transition-all active:scale-95 cursor-pointer"
                   title="Next Step"
                   aria-label="Next Step"
                 >
@@ -189,49 +337,212 @@ export function TurnByTurnBar({
                 </button>
               )}
 
+              {/* End Navigation Action */}
               <Button
                 size="sm"
-                variant="ghost"
                 onClick={onEndNavigation}
-                className="h-8 w-8 p-0 rounded-xl text-gray-400 hover:bg-gray-800 hover:text-white shrink-0"
-                title="End Navigation"
-                aria-label="End Navigation"
+                className="h-9 px-3.5 rounded-xl bg-rose-600/20 hover:bg-rose-600/30 text-rose-300 border border-rose-500/40 text-xs font-bold transition-all active:scale-95 cursor-pointer"
+                title="End Navigation Session"
               >
-                <X className="h-4 w-4" />
+                <X className="h-3.5 w-3.5 mr-1" />
+                <span>Exit</span>
               </Button>
             </div>
           </div>
 
-          {/* Next Step Preview Banner */}
-          {nextStep && (
-            <div className="flex items-center gap-2 border-t border-gray-800/80 pt-2 text-xs text-gray-300">
-              <span className="font-semibold text-emerald-400 uppercase tracking-wider text-[10px] shrink-0">THEN:</span>
-              <span className="truncate font-medium">{nextStep.text}</span>
-              {nextStep.distanceMeters > 0 && (
-                <span className="text-[10px] text-gray-400 ml-auto shrink-0 font-mono">({nextStep.distanceMeters}m)</span>
-              )}
-            </div>
-          )}
-
-          {/* Route Progress Bar & Remaining Stats */}
-          <div className="space-y-1.5 border-t border-gray-800/80 pt-2 text-xs">
-            <div className="flex items-center justify-between text-gray-300 font-medium">
-              <span className="text-emerald-400 font-bold">{remainingDistanceMeters}m remaining</span>
-              <span>~{etaMinutes} min walk</span>
-            </div>
-            <div className="h-2 w-full overflow-hidden rounded-full bg-gray-800">
-              <div
-                className="h-full bg-gradient-to-r from-emerald-500 to-indigo-500 transition-all duration-300"
-                style={{ width: `${progressPct}%` }}
-              />
-            </div>
+          {/* Progress Bar */}
+          <div className="h-1.5 w-full overflow-hidden rounded-full bg-gray-800">
+            <div
+              className="h-full bg-gradient-to-r from-emerald-500 via-teal-500 to-indigo-500 transition-all duration-300"
+              style={{ width: `${progressPct}%` }}
+            />
           </div>
         </motion.div>
+      </div>
+
+      {/* ══════════════════════════════════════════════════════════ */}
+      {/* 3. EXPANDED FULL ROUTE STEP LIST (SWIPE UP / SWIPE DOWN SHEET) */}
+      {/* ══════════════════════════════════════════════════════════ */}
+      <AnimatePresence>
+        {isExpanded && (
+          <div className="fixed inset-0 z-50 flex flex-col justify-end">
+            {/* Backdrop */}
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setIsExpanded(false)}
+              className="absolute inset-0 bg-black/60 backdrop-blur-xs"
+            />
+
+            {/* Bottom Sheet Drawer */}
+            <motion.div
+              initial={{ y: "100%" }}
+              animate={{ y: 0 }}
+              exit={{ y: "100%" }}
+              transition={{ type: "spring", damping: 28, stiffness: 300 }}
+              onTouchStart={handleTouchStart}
+              onTouchMove={handleTouchMove}
+              onTouchEnd={handleTouchEnd}
+              className="relative w-full max-w-lg mx-auto max-h-[82vh] flex flex-col rounded-t-3xl border-t border-gray-800 bg-gray-900 shadow-2xl text-white overflow-hidden"
+            >
+              {/* Sheet Header & Swipe-Down Handle */}
+              <div className="p-4 border-b border-gray-800/80 bg-gray-900/95 sticky top-0 z-10">
+                {/* Drag Handle */}
+                <button
+                  type="button"
+                  onClick={() => setIsExpanded(false)}
+                  className="w-full flex flex-col items-center justify-center -mt-1 pb-2 group cursor-pointer"
+                  aria-label="Swipe down to collapse route steps"
+                >
+                  <div className="h-1.5 w-12 rounded-full bg-gray-700 group-hover:bg-gray-500 transition-colors" />
+                  <div className="flex items-center gap-1 text-[11px] font-semibold text-gray-400 pt-1.5 group-hover:text-white transition-colors">
+                    <ChevronDown className="h-3.5 w-3.5" />
+                    <span>Swipe down to close</span>
+                  </div>
+                </button>
+
+                {/* Trip Summary Row */}
+                <div className="flex items-center justify-between pt-1">
+                  <div>
+                    <h3 className="text-lg font-black text-white">Full Route Steps</h3>
+                    <p className="text-xs text-gray-400 mt-0.5">
+                      ~{etaMinutes} min · {formatDistance(remainingDistanceMeters)} remaining · {allSteps.length || totalStepsCount} total steps
+                    </p>
+                  </div>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => setIsExpanded(false)}
+                    className="h-8 w-8 p-0 rounded-full text-gray-400 hover:bg-gray-800 hover:text-white"
+                  >
+                    <X className="h-4 w-4" />
+                  </Button>
+                </div>
+              </div>
+
+              {/* Scrollable Timeline of All Route Steps */}
+              <div className="flex-1 overflow-y-auto p-4 space-y-3 scrollbar-thin">
+                {(allSteps.length > 0 ? allSteps : [currentStep, nextStep].filter(Boolean)).map((step, idx) => {
+                  const stepText = (step as any).text || "";
+                  const stepDistance = (step as any).distanceMeters ?? (step as any).distance ?? 0;
+                  const stepIcon = (step as any).icon;
+                  const stepFloor = (step as any).floor;
+                  const stepBuilding = (step as any).building;
+                  const stepPhoto = (step as any).photoUrl;
+                  const targetName = (step as any).targetNodeName;
+                  const landmark = cleanLandmarkName(targetName);
+                  const isCurrent = idx === currentStepIndex;
+                  const isPast = idx < currentStepIndex;
+
+                  return (
+                    <div
+                      key={idx}
+                      className={cn(
+                        "relative flex items-start gap-3.5 p-3 rounded-2xl border transition-all",
+                        isCurrent
+                          ? "bg-emerald-950/60 border-emerald-500/50 shadow-md ring-1 ring-emerald-500/30"
+                          : isPast
+                          ? "bg-gray-800/40 border-gray-800/60 opacity-60"
+                          : "bg-gray-800/70 border-gray-800 hover:bg-gray-800"
+                      )}
+                    >
+                      {/* Step Direction Icon */}
+                      <div
+                        className={cn(
+                          "flex h-10 w-10 shrink-0 items-center justify-center rounded-xl font-bold shadow-xs",
+                          isCurrent
+                            ? "bg-emerald-500 text-white shadow-emerald-500/30"
+                            : isPast
+                            ? "bg-gray-800 text-gray-400"
+                            : "bg-gray-700 text-gray-200"
+                        )}
+                      >
+                        {renderIcon(stepIcon, cn("h-5 w-5", isCurrent ? "text-white" : "text-gray-300"))}
+                      </div>
+
+                      {/* Step Details */}
+                      <div className="min-w-0 flex-1 pt-0.5">
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="flex items-center gap-2">
+                            <span className="text-xs font-bold text-gray-400">Step {idx + 1}</span>
+                            {isCurrent && (
+                              <Badge className="bg-emerald-500 text-white text-[9px] font-extrabold px-1.5 py-0">
+                                CURRENT
+                              </Badge>
+                            )}
+                          </div>
+                          {stepDistance > 0 && (
+                            <span className={cn("text-xs font-extrabold font-mono", isCurrent ? "text-emerald-400" : "text-gray-300")}>
+                              {formatDistance(stepDistance)}
+                            </span>
+                          )}
+                        </div>
+
+                        {/* Main Instruction Text */}
+                        <div className={cn("text-sm font-bold mt-1", isCurrent ? "text-white" : "text-gray-200")}>
+                          {stepText}
+                        </div>
+
+                        {/* Contextual physical landmark / floor info */}
+                        {(landmark || stepFloor || stepBuilding) && (
+                          <div className="text-[11px] text-gray-400 mt-0.5 flex items-center gap-1.5 flex-wrap">
+                            {landmark && <span className="text-emerald-300/90 font-medium">📍 Near {landmark}</span>}
+                            {stepFloor && <span>· {stepFloor}</span>}
+                            {stepBuilding && <span>· {stepBuilding}</span>}
+                          </div>
+                        )}
+
+                        {/* Step Reference Photo preview button */}
+                        {stepPhoto && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setImageError(false);
+                              setActivePhotoModal({
+                                url: stepPhoto,
+                                title: landmark || stepText,
+                                nodeId: (step as any).targetNodeId,
+                              });
+                            }}
+                            className="mt-2 inline-flex items-center gap-1.5 rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-2.5 py-1 text-[11px] font-semibold text-emerald-300 hover:bg-emerald-500/20 transition-all cursor-pointer"
+                          >
+                            <Camera className="h-3.5 w-3.5" />
+                            <span>📷 View Reference Photo</span>
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Sheet Footer */}
+              <div className="p-3.5 border-t border-gray-800 bg-gray-900/95 flex items-center justify-between gap-3">
+                <Button
+                  onClick={() => setIsExpanded(false)}
+                  variant="outline"
+                  className="flex-1 text-xs font-bold border-gray-700 bg-gray-800 text-gray-200 hover:bg-gray-700"
+                >
+                  Return to Map
+                </Button>
+                <Button
+                  onClick={onEndNavigation}
+                  className="flex-1 text-xs font-bold bg-rose-600 hover:bg-rose-700 text-white"
+                >
+                  End Navigation
+                </Button>
+              </div>
+            </motion.div>
+          </div>
+        )}
       </AnimatePresence>
 
-      {/* Reference Image Modal */}
+      {/* ══════════════════════════════════════════════════════════ */}
+      {/* 4. REFERENCE PHOTO MODAL */}
+      {/* ══════════════════════════════════════════════════════════ */}
       <AnimatePresence>
-        {showPhotoModal && activePhotoUrl && (
+        {activePhotoModal && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
             <motion.div
               initial={{ opacity: 0, scale: 0.95, y: 20 }}
@@ -246,13 +557,15 @@ export function TurnByTurnBar({
                     <ImageIcon className="h-4 w-4" />
                   </div>
                   <div>
-                    <h4 className="text-sm font-bold text-white truncate max-w-[260px]">{photoNodeName}</h4>
+                    <h4 className="text-sm font-bold text-white truncate max-w-[260px]">
+                      {activePhotoModal.title}
+                    </h4>
                     <p className="text-[11px] text-gray-400">Visual landmark reference</p>
                   </div>
                 </div>
                 <button
                   type="button"
-                  onClick={() => setShowPhotoModal(false)}
+                  onClick={() => setActivePhotoModal(null)}
                   className="rounded-lg p-1.5 text-gray-400 hover:bg-gray-800 hover:text-white transition-colors cursor-pointer"
                   title="Close reference photo"
                 >
@@ -261,7 +574,7 @@ export function TurnByTurnBar({
               </div>
 
               {/* Photo Display Body */}
-              <div className="mt-3 relative w-full overflow-hidden rounded-xl bg-transparent flex items-center justify-center border border-gray-800/80">
+              <div className="mt-3 relative w-full overflow-hidden rounded-xl bg-black/40 flex items-center justify-center border border-gray-800/80 min-h-[160px]">
                 {imageError ? (
                   <div className="flex flex-col items-center justify-center p-6 text-center text-gray-400">
                     <AlertCircle className="h-8 w-8 text-amber-400 mb-2" />
@@ -270,10 +583,10 @@ export function TurnByTurnBar({
                   </div>
                 ) : (
                   <img
-                    src={activePhotoUrl}
-                    alt={photoNodeName}
+                    src={activePhotoModal.url}
+                    alt={activePhotoModal.title}
                     onError={(e) => {
-                      const targetId = currentStep.targetNodeId || nextStep?.targetNodeId;
+                      const targetId = activePhotoModal.nodeId;
                       const apiFallback = targetId ? `/api/nodes/${targetId}/photo` : null;
                       const imgEl = e.target as HTMLImageElement;
                       if (apiFallback && !imgEl.src.endsWith(apiFallback)) {
@@ -292,7 +605,7 @@ export function TurnByTurnBar({
               <div className="mt-3 flex justify-end">
                 <Button
                   size="sm"
-                  onClick={() => setShowPhotoModal(false)}
+                  onClick={() => setActivePhotoModal(null)}
                   className="bg-gray-800 hover:bg-gray-700 text-white text-xs px-4"
                 >
                   Close Reference

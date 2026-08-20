@@ -34,6 +34,7 @@ import { CampusMap } from "./campus-map";
 import { LiveRoutePanel } from "./live-route-panel";
 import { TurnByTurnBar } from "./turn-by-turn-bar";
 import type { TravelMode } from "@/lib/routing/edge-accessibility";
+import { getValidNavigationDestinations } from "@/shared/lib/destination-utils";
 
 type StopEntry = {
   dest: Destination | null;
@@ -127,7 +128,7 @@ export function NavigateShell() {
   }, []);
 
   const allDestinations = useMemo(() => {
-    return publishedData.destinations || [];
+    return getValidNavigationDestinations(publishedData);
   }, [publishedData]);
 
   // Detected building based on live GPS position
@@ -1035,6 +1036,7 @@ export function NavigateShell() {
                       }
                     : null)
             }
+            allSteps={navSession.activeRoute?.instructions || route?.instructions || []}
             totalDistanceMeters={Math.round(navSession.activeRoute?.distance ?? route?.distance ?? 0)}
             remainingDistanceMeters={navSession.distanceRemaining}
             currentStepIndex={navSession.currentSegmentIndex}

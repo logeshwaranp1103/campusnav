@@ -83,7 +83,7 @@ export function getValidNavigationDestinations(
     // Linked node check
     if (d.nodeId) {
       const linkedNode = nodeMap.get(d.nodeId);
-      if (linkedNode && isStairOrLiftOrUnnamed(linkedNode)) {
+      if (linkedNode && (isStairOrLiftOrUnnamed(linkedNode) || linkedNode.visibleToUser === false)) {
         return;
       }
     }
@@ -96,9 +96,10 @@ export function getValidNavigationDestinations(
     validMap.set(key, d);
   });
 
-  // 2. Process all named nodes (showing every named node that is not a staircase or lift)
+  // 2. Process all named nodes (only include nodes where Visible to User = YES)
   nodes.forEach((n) => {
     if (isStairOrLiftOrUnnamed(n)) return;
+    if (n.visibleToUser !== true) return;
 
     if (!validMap.has(n.id)) {
       const typeLabel =

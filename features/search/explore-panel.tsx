@@ -11,6 +11,7 @@ import { campusStore } from "@/shared/lib/campus-store";
 import type { Destination } from "@/shared/data/campus";
 
 import { isEventActive } from "@/shared/lib/event-utils";
+import { isStairOrLiftOrUnnamed } from "@/shared/lib/destination-utils";
 
 const containerVariants = {
   hidden: { opacity: 0 },
@@ -63,11 +64,25 @@ export function ExplorePanel() {
   }, []);
 
   const items = useMemo(() => {
-    // Destinations from store
-    const destItems: (Destination & { isEvent?: boolean; eventTitle?: string })[] = (storeData.destinations || []).map((d) => ({
-      ...d,
-      isEvent: false,
-    }));
+    const nodeMap = new Map<string, any>();
+    (storeData.nodes || []).forEach((n) => nodeMap.set(n.id, n));
+
+    // Destinations from store (exclude destinations whose linked node is hidden or stairs/lifts)
+    const destItems: (Destination & { isEvent?: boolean; eventTitle?: string })[] = (storeData.destinations || [])
+      .filter((d) => {
+        if (!d.name || d.name.trim().length === 0) return false;
+        if (d.nodeId) {
+          const linkedNode = nodeMap.get(d.nodeId);
+          if (linkedNode && (isStairOrLiftOrUnnamed(linkedNode) || linkedNode.visibleToUser === false)) {
+            return false;
+          }
+        }
+        return !isStairOrLiftOrUnnamed(d);
+      })
+      .map((d) => ({
+        ...d,
+        isEvent: false,
+      }));
 
     // Buildings from store
     const buildingItems = (storeData.buildings || []).map((b) => {
@@ -98,9 +113,9 @@ export function ExplorePanel() {
         eventTitle: ev.title,
       }));
 
-    // Named Nodes (Gates, Entrances, Landmarks) from store
+    // Named Nodes (Gates, Entrances, Landmarks) from store (strictly require visibleToUser === true)
     const namedNodeItems = (storeData.nodes || [])
-      .filter((n) => n.name && n.name.trim().length > 0)
+      .filter((n) => n.name && n.name.trim().length > 0 && n.visibleToUser === true && !isStairOrLiftOrUnnamed(n))
       .map((n) => {
         const category =
           n.type === "GATE"
