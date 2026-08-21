@@ -32,6 +32,23 @@ const icons = {
   info: <Info className="h-5 w-5 text-blue-500 shrink-0" />,
 };
 
+function formatToastText(val: unknown): string {
+  if (typeof val === "string") return val;
+  if (!val) return "";
+  if (val instanceof Error) return val.message;
+  if (typeof val === "object") {
+    if ("message" in val && typeof (val as any).message === "string") return (val as any).message;
+    if ("userMessage" in val && typeof (val as any).userMessage === "string") return (val as any).userMessage;
+    if ("title" in val && typeof (val as any).title === "string") return (val as any).title;
+    try {
+      return JSON.stringify(val);
+    } catch {
+      return String(val);
+    }
+  }
+  return String(val);
+}
+
 export function ToastProvider({ children }: { children: ReactNode }) {
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [portalTarget, setPortalTarget] = useState<HTMLElement | null>(null);
@@ -40,10 +57,16 @@ export function ToastProvider({ children }: { children: ReactNode }) {
 
   const toast = useCallback((t: Omit<Toast, "id">) => {
     const id = Math.random().toString(36).slice(2);
+    const safeToast: Toast = {
+      ...t,
+      id,
+      title: formatToastText(t.title) || "Notification",
+      description: t.description ? formatToastText(t.description) : undefined,
+    };
     setToasts((s) => {
       // Keep max 2 visible toasts at a time so notifications do not flood the screen
       const currentToasts = s.length >= 2 ? s.slice(1) : s;
-      return [...currentToasts, { ...t, id }];
+      return [...currentToasts, safeToast];
     });
     setTimeout(() => setToasts((s) => s.filter((x) => x.id !== id)), 4000);
   }, []);

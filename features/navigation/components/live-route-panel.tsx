@@ -56,13 +56,27 @@ export function LiveRoutePanel({ destinationId, fromId, onArrive, onPosition }: 
     esRef.current = es;
 
     es.addEventListener("route", (e) => {
-      setRoute(JSON.parse((e as MessageEvent).data));
+      try {
+        if ((e as MessageEvent).data) {
+          setRoute(JSON.parse((e as MessageEvent).data));
+        }
+      } catch (err) {
+        console.warn("[LiveRoutePanel] route parse error:", err);
+      }
     });
+
     es.addEventListener("position", (e) => {
-      const p = JSON.parse((e as MessageEvent).data);
-      setPos(p);
-      onPositionRef.current?.(p);
+      try {
+        if ((e as MessageEvent).data) {
+          const p = JSON.parse((e as MessageEvent).data);
+          setPos(p);
+          onPositionRef.current?.(p);
+        }
+      } catch (err) {
+        console.warn("[LiveRoutePanel] position parse error:", err);
+      }
     });
+
     es.addEventListener("arrived", () => {
       if (arrivedRef.current) return;
       arrivedRef.current = true;
@@ -70,8 +84,12 @@ export function LiveRoutePanel({ destinationId, fromId, onArrive, onPosition }: 
       onArriveRef.current?.();
       es.close();
     });
+
     es.onerror = () => {
-      es.close();
+      if (esRef.current) {
+        esRef.current.close();
+        esRef.current = null;
+      }
     };
 
     return () => {
