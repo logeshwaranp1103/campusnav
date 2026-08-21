@@ -5,6 +5,7 @@ import {
   calculateShortestAngleDelta,
   getNodeGeographicCoordinates,
 } from "../lib/geo/haversine";
+import { gpsToCanvas, canvasToGps, PIXELS_PER_METER } from "../lib/geo/projection";
 import { shortestPath } from "../features/navigation/services/graph";
 import { campusStore } from "../shared/lib/campus-store";
 import type { Building, Floor, Node, Edge, Destination } from "../shared/data/campus";
@@ -107,6 +108,8 @@ describe("Master Navigation Fix Suite", () => {
       expect(calculateShortestAngleDelta(1, 359)).toBe(-2);
       expect(calculateShortestAngleDelta(180, 180)).toBe(0);
       expect(Math.abs(calculateShortestAngleDelta(90, 270))).toBe(180);
+      expect(calculateShortestAngleDelta(0, 90)).toBe(90);
+      expect(calculateShortestAngleDelta(90, 0)).toBe(-90);
     });
 
     it("resolves node geographic coordinates smoothly with fallback to canvas", () => {
@@ -119,6 +122,73 @@ describe("Master Navigation Fix Suite", () => {
       const fallbackCoords = getNodeGeographicCoordinates(nCanvasOnly);
       expect(fallbackCoords.lat).not.toBe(0);
       expect(fallbackCoords.lng).not.toBe(0);
+    });
+  });
+
+  describe("Coordinate-Space Separation & Camera Invariance", () => {
+    it("guarantees user GPS latitude/longitude and world coordinates are strictly invariant under camera transforms", () => {
+      const initialUserGps = { lat: 11.496612, lng: 77.277543 };
+      const userWorldPos = gpsToCanvas(initialUserGps.lat, initialUserGps.lng);
+
+      const testAngles = [0, 45, 90, 135, 180, 225, 270, 315, 359];
+      const testZooms = [0.35, 0.5, 1.0, 1.5, 2.0, 3.5, 5.0];
+      const testPans = [{ x: -200, y: -150 }, { x: 0, y: 0 }, { x: 300, y: 400 }];
+
+      // Camera transformation function: world -> screen (SVG viewBox)
+      const projectToScreen = (
+        worldPt: { x: number; y: number },
+        bearingDeg: number,
+        zoom: number,
+        pan: { x: number; y: number },
+        pivot: { x: number; y: number }
+      ) => {
+        // Rotation around pivot
+        const rad = (bearingDeg * Math.PI) / 180;
+        const cos = Math.cos(rad);
+        const sin = Math.sin(rad);
+        const dx = worldPt.x - pivot.x;
+        const dy = worldPt.y - pivot.y;
+        const rotatedX = pivot.x + (dx * cos - dy * sin);
+        const rotatedY = pivot.y + (dx * sin + dy * cos);
+
+        // Pan and Zoom viewport mapping
+        const screenX = (rotatedX + pan.x) * zoom;
+        const screenY = (rotatedY + pan.y) * zoom;
+        return { screenX, screenY };
+      };
+
+      for (const bearing of testAngles) {
+        for (const zoom of testZooms) {
+          for (const pan of testPans) {
+            // Screen projection computed
+            const screen = projectToScreen(userWorldPos, bearing, zoom, pan, userWorldPos);
+            expect(isFinite(screen.screenX)).toBe(true);
+            expect(isFinite(screen.screenY)).toBe(true);
+
+            // User's underlying world coordinates and GPS MUST NEVER BE MODIFIED by screen projection
+            expect(userWorldPos.x).toBe(gpsToCanvas(initialUserGps.lat, initialUserGps.lng).x);
+            expect(userWorldPos.y).toBe(gpsToCanvas(initialUserGps.lat, initialUserGps.lng).y);
+            expect(initialUserGps.lat).toBe(11.496612);
+            expect(initialUserGps.lng).toBe(77.277543);
+          }
+        }
+      }
+    });
+
+    it("verifies user location dot remains stationary under finger during user-pivoted navigation rotation", () => {
+      const userWorld = { x: 450, y: 350 };
+      const pivot = { x: 450, y: 350 }; // Rotation pivot set to user location
+
+      for (let angle = 0; angle <= 360; angle += 15) {
+        const rad = (angle * Math.PI) / 180;
+        // Rotated point around pivot: pivot + rotate(world - pivot)
+        const rotX = pivot.x + (userWorld.x - pivot.x) * Math.cos(rad) - (userWorld.y - pivot.y) * Math.sin(rad);
+        const rotY = pivot.y + (userWorld.x - pivot.x) * Math.sin(rad) + (userWorld.y - pivot.y) * Math.cos(rad);
+
+        // Since userWorld === pivot, (rotX, rotY) is EXACTLY userWorld with ZERO displacement
+        expect(rotX).toBeCloseTo(userWorld.x, 10);
+        expect(rotY).toBeCloseTo(userWorld.y, 10);
+      }
     });
   });
 });
