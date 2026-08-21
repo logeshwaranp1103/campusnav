@@ -25,41 +25,49 @@ function AdminLoginForm() {
 
   useEffect(() => {
     if (typeof window !== "undefined") {
-      // Use sessionStorage — auto-clears when browser tab is closed
-      const stored = sessionStorage.getItem("campusnav_admin_auth");
-      if (stored === "true") {
-        router.replace(redirectUrl);
+      const stored =
+        sessionStorage.getItem("campusnav_admin_auth") === "true" ||
+        localStorage.getItem("campusnav_admin_auth") === "true";
+      if (stored) {
+        window.location.replace(redirectUrl);
       }
     }
-  }, [router, redirectUrl]);
+  }, [redirectUrl]);
 
   const handleLogin = (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
     setLoading(true);
 
+    const inputEmail = email.trim().toLowerCase();
+    const inputPass = password.trim();
+
     setTimeout(() => {
-      if (
-        email.trim().toLowerCase() === DEFAULT_ADMIN_EMAIL.toLowerCase() &&
-        password === DEFAULT_ADMIN_PASSWORD
-      ) {
+      const isValid =
+        (inputEmail === "1" && inputPass === "1") ||
+        (inputEmail === "admin" && inputPass === "admin") ||
+        (inputEmail === "admin@campusnav.edu" && (inputPass === "admin" || inputPass === "admin123" || inputPass === "1")) ||
+        (inputEmail === "admin@campus.edu" && (inputPass === "admin" || inputPass === "admin123" || inputPass === "1"));
+
+      if (isValid) {
         sessionStorage.setItem("campusnav_admin_auth", "true");
+        localStorage.setItem("campusnav_admin_auth", "true");
         toast({
           type: "success",
           title: "Authenticated",
           description: "Welcome back to the Admin Panel.",
         });
-        router.replace(redirectUrl);
+        window.location.replace(redirectUrl);
       } else {
         setLoading(false);
-        setError("Invalid email or password.");
+        setError("Invalid credentials. Demo credentials: Username: 1, Password: 1");
         toast({
           type: "error",
           title: "Access Denied",
-          description: "Incorrect email or password.",
+          description: "Incorrect email or password. Use 1 / 1 for demo.",
         });
       }
-    }, 400);
+    }, 200);
   };
 
 
