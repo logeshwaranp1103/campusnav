@@ -3,6 +3,13 @@ import type { Destination, Node as CampusNode, Edge } from "../../shared/data/ca
 import type { Route, RouteInstruction } from "./services/graph";
 import { calculateGeographicDistance } from "../../lib/geo/haversine";
 import { checkRouteDeviation } from "../../lib/routing/deviation";
+import {
+  projectUserOntoRoute,
+  computeLiveTurnGuidance,
+  type LiveUserPosition,
+  type RouteProjectionResult,
+} from "../../lib/navigation/live-guidance";
+import { gpsToCanvas } from "../../lib/geo/projection";
 
 export type NavigationStatus =
   | "IDLE"
@@ -73,7 +80,14 @@ export interface NavigationSessionState {
     gpsLng: number,
     matchedNode: CampusNode | null,
     publishedNodes: CampusNode[],
-    recalculateRouteFn: (fromNodeId: string, toNodeId: string) => Route | null
+    recalculateRouteFn: (fromNodeId: string, toNodeId: string) => Route | null,
+    options?: {
+      canvasPos?: { x: number; y: number; floorId?: string };
+      heading?: number;
+      speed?: number | null;
+      movementHeading?: number | null;
+      deviceHeading?: number | null;
+    }
   ) => void;
   setCurrentFloor: (floorId: string) => void;
   setIndoorContext: (
@@ -136,10 +150,36 @@ export const useNavigationStore = create<NavigationSessionState>((set, get) => (
     }),
 
   startNavigationSession: (origin, destination, route) => {
-    const instructions = route.instructions || [];
     const firstNode = route.nodes[0];
     const initialFloorId = firstNode?.floorId || "f-out";
     const initialMode: NavigationMode = initialFloorId === "f-out" ? "OUTDOOR" : "INDOOR";
+
+    const initialPos: LiveUserPosition = {
+      x: origin.x ?? firstNode?.x ?? 0,
+      y: origin.y ?? firstNode?.y ?? 0,
+      lat: (origin as any).lat ?? firstNode?.lat,
+      lng: (origin as any).lng ?? firstNode?.lng,
+      floorId: initialFloorId,
+    };
+
+    const initialProjection = projectUserOntoRoute(
+      initialPos,
+      route.nodes,
+      route.edges,
+      0,
+      {
+        outdoorThresholdMeters: OFF_ROUTE_THRESHOLD_METERS,
+        indoorThresholdMeters: 10.0,
+        arrivalThresholdMeters: ARRIVAL_THRESHOLD_METERS,
+      }
+    );
+
+    const initialGuidance = computeLiveTurnGuidance(
+      initialPos,
+      route,
+      initialProjection,
+      { arrivalThresholdMeters: ARRIVAL_THRESHOLD_METERS }
+    );
 
     set((state) => ({
       status: "NAVIGATING",
@@ -147,16 +187,16 @@ export const useNavigationStore = create<NavigationSessionState>((set, get) => (
       origin,
       destination,
       activeRoute: route,
-      currentSegmentIndex: 0,
-      matchedNodeId: origin.nodeId,
+      currentSegmentIndex: initialGuidance.currentSegmentIndex,
+      matchedNodeId: origin.nodeId || firstNode?.id || null,
       currentFloorId: initialFloorId,
       currentBuildingId: (firstNode as any)?.buildingId ?? null,
       indoorPositionSource: initialFloorId === "f-out" ? "OUTDOOR_GPS" : "BUILDING_ENTRANCE",
       positionConfidence: "HIGH",
-      distanceRemaining: Math.round(route.distance),
-      etaSeconds: Math.round(route.durationSec || route.distance / AVERAGE_WALKING_SPEED_MPS),
-      currentInstruction: instructions[0] ?? null,
-      nextInstruction: instructions[1] ?? null,
+      distanceRemaining: initialGuidance.distanceRemaining,
+      etaSeconds: Math.round(route.durationSec || initialGuidance.distanceRemaining / AVERAGE_WALKING_SPEED_MPS),
+      currentInstruction: initialGuidance.currentInstruction,
+      nextInstruction: initialGuidance.nextInstruction,
       consecutiveOffRouteCount: 0,
       lastRerouteTimestamp: Date.now(),
       activeRequestId: state.activeRequestId + 1,
@@ -164,7 +204,7 @@ export const useNavigationStore = create<NavigationSessionState>((set, get) => (
     }));
   },
 
-  updateGpsProgress: (gpsLat, gpsLng, matchedNode, publishedNodes, recalculateRouteFn) => {
+  updateGpsProgress: (gpsLat, gpsLng, matchedNode, publishedNodes, recalculateRouteFn, options) => {
     const state = get();
     const { status, activeRoute, destination, lastRerouteTimestamp, consecutiveOffRouteCount, activeRequestId } = state;
 
@@ -182,42 +222,70 @@ export const useNavigationStore = create<NavigationSessionState>((set, get) => (
       set({ status: "NAVIGATING" });
     }
 
-    const destNode = publishedNodes.find((n) => n.id === destination.nodeId);
-    const destLat = destNode?.lat ?? destination.x;
-    const destLng = destNode?.lng ?? destination.y;
+    // Determine live physical user coordinates
+    let ux = options?.canvasPos?.x;
+    let uy = options?.canvasPos?.y;
+    const floorId = options?.canvasPos?.floorId ?? matchedNode?.floorId ?? state.currentFloorId;
 
-    // 1. ARRIVAL DETECTION
-    const distToDest = (destLat && destLng)
-      ? calculateGeographicDistance(gpsLat, gpsLng, destLat, destLng)
-      : Math.hypot((matchedNode?.x ?? 0) - (destNode?.x ?? 0), (matchedNode?.y ?? 0) - (destNode?.y ?? 0));
+    if ((ux === undefined || uy === undefined || isNaN(ux) || isNaN(uy)) && gpsLat && gpsLng) {
+      const canvas = gpsToCanvas(gpsLat, gpsLng);
+      ux = canvas.x;
+      uy = canvas.y;
+    } else if (ux === undefined || uy === undefined || isNaN(ux) || isNaN(uy)) {
+      ux = matchedNode?.x ?? activeRoute.nodes[0].x;
+      uy = matchedNode?.y ?? activeRoute.nodes[0].y;
+    }
 
-    if (distToDest <= ARRIVAL_THRESHOLD_METERS || (matchedNode && matchedNode.id === destination.nodeId)) {
+    const liveUserPos: LiveUserPosition = {
+      x: ux,
+      y: uy,
+      lat: gpsLat,
+      lng: gpsLng,
+      floorId,
+      heading: options?.heading,
+      movementHeading: options?.movementHeading ?? options?.heading,
+      deviceHeading: options?.deviceHeading,
+      speed: options?.speed,
+    };
+
+    // 1. LIVE ROUTE PROJECTION & SEGMENT MATCHING
+    const projection = projectUserOntoRoute(
+      liveUserPos,
+      activeRoute.nodes,
+      activeRoute.edges,
+      state.currentSegmentIndex,
+      {
+        outdoorThresholdMeters: state.offRouteThresholdMeters,
+        indoorThresholdMeters: 10.0,
+        arrivalThresholdMeters: state.arrivalThresholdMeters,
+      }
+    );
+
+    // 2. LIVE TURN GUIDANCE & ARRIVAL DETECTION
+    const guidance = computeLiveTurnGuidance(liveUserPos, activeRoute, projection, {
+      arrivalThresholdMeters: state.arrivalThresholdMeters,
+      matchedNodeId: matchedNode?.id ?? null,
+    });
+
+    const isDirectNodeArrival = Boolean(
+      matchedNode && destination.nodeId && matchedNode.id === destination.nodeId
+    );
+
+    if (guidance.isArrived || isDirectNodeArrival) {
       set({
         status: "ARRIVED",
         navigationMode: "ARRIVED",
         distanceRemaining: 0,
         etaSeconds: 0,
         consecutiveOffRouteCount: 0,
-        currentInstruction: { text: `🎉 Arrived at ${destination.name}`, distance: 0, transition: "arrive" },
+        currentInstruction: guidance.currentInstruction ?? { text: `🎉 Arrived at ${destination.name}`, distance: 0, transition: "arrive", icon: "arrive" },
         nextInstruction: null,
       });
       return;
     }
 
-    // 2. ROUTE PROGRESS & SEGMENT MATCHING
-    const userPos = {
-      x: matchedNode?.x ?? activeRoute.nodes[0].x,
-      y: matchedNode?.y ?? activeRoute.nodes[0].y,
-      floorId: matchedNode?.floorId ?? state.currentFloorId,
-    };
-
-    const deviationResult = checkRouteDeviation(userPos, activeRoute.nodes, {
-      outdoorThresholdMeters: OFF_ROUTE_THRESHOLD_METERS,
-      indoorThresholdMeters: 10.0,
-    });
-
     // 3. OFF-ROUTE DETECTION & REROUTING WITH HYSTERESIS & LOOP PROTECTION
-    if (deviationResult.isDeviated && userPos.floorId === "f-out") {
+    if (guidance.isOffRoute && floorId === "f-out") {
       const newOffRouteCount = consecutiveOffRouteCount + 1;
       const now = Date.now();
       const canReroute = now - lastRerouteTimestamp > REROUTE_COOLDOWN_MS;
@@ -240,16 +308,30 @@ export const useNavigationStore = create<NavigationSessionState>((set, get) => (
         if (get().activeRequestId !== currentReqId) return;
 
         if (newRoute && newRoute.nodes.length > 0) {
-          const instructions = newRoute.instructions || [];
+          const newProjection = projectUserOntoRoute(
+            liveUserPos,
+            newRoute.nodes,
+            newRoute.edges,
+            0,
+            {
+              outdoorThresholdMeters: state.offRouteThresholdMeters,
+              indoorThresholdMeters: 10.0,
+              arrivalThresholdMeters: state.arrivalThresholdMeters,
+            }
+          );
+          const newGuidance = computeLiveTurnGuidance(liveUserPos, newRoute, newProjection, {
+            arrivalThresholdMeters: state.arrivalThresholdMeters,
+          });
+
           set({
             status: "NAVIGATING",
             activeRoute: newRoute,
-            currentSegmentIndex: 0,
+            currentSegmentIndex: newGuidance.currentSegmentIndex,
             matchedNodeId: matchedNode.id,
-            distanceRemaining: Math.round(newRoute.distance),
-            etaSeconds: Math.round(newRoute.durationSec || newRoute.distance / AVERAGE_WALKING_SPEED_MPS),
-            currentInstruction: instructions[0] ?? null,
-            nextInstruction: instructions[1] ?? null,
+            distanceRemaining: newGuidance.distanceRemaining,
+            etaSeconds: Math.max(1, Math.round(newGuidance.distanceRemaining / AVERAGE_WALKING_SPEED_MPS)),
+            currentInstruction: newGuidance.currentInstruction,
+            nextInstruction: newGuidance.nextInstruction,
             consecutiveOffRouteCount: 0,
             lastRerouteTimestamp: Date.now(),
             errorMessage: null,
@@ -270,7 +352,7 @@ export const useNavigationStore = create<NavigationSessionState>((set, get) => (
     }
 
     // 4. ON-ROUTE UPDATE: Progress along segment & Phase 3 Indoor Mode / Floor Detection
-    const segmentIndex = Math.max(state.currentSegmentIndex, deviationResult.nearestSegmentIndex);
+    const segmentIndex = guidance.currentSegmentIndex;
     const currentNode = matchedNode ?? activeRoute.nodes[segmentIndex] ?? activeRoute.nodes[0];
 
     // Determine Phase 3 Navigation Mode & Floor Context
@@ -292,23 +374,7 @@ export const useNavigationStore = create<NavigationSessionState>((set, get) => (
       nextConfidence = "MEDIUM";
     }
 
-    // Calculate remaining distance along active route from current segment to end
-    let remainingDistance = 0;
-    for (let i = segmentIndex; i < activeRoute.nodes.length - 1; i++) {
-      const n1 = activeRoute.nodes[i];
-      const n2 = activeRoute.nodes[i + 1];
-      if (n1.lat && n1.lng && n2.lat && n2.lng) {
-        remainingDistance += calculateGeographicDistance(n1.lat, n1.lng, n2.lat, n2.lng);
-      } else {
-        remainingDistance += Math.hypot(n2.x - n1.x, n2.y - n1.y);
-      }
-    }
-
-    const etaSeconds = Math.max(1, Math.round(remainingDistance / AVERAGE_WALKING_SPEED_MPS));
-    const instructions = activeRoute.instructions || [];
-    const currentInstIndex = Math.min(segmentIndex, instructions.length - 1);
-    const currentInstruction = instructions[currentInstIndex] ?? null;
-    const nextInstruction = instructions[currentInstIndex + 1] ?? null;
+    const etaSeconds = Math.max(1, Math.round(guidance.distanceRemaining / AVERAGE_WALKING_SPEED_MPS));
 
     set({
       status: "NAVIGATING",
@@ -318,11 +384,11 @@ export const useNavigationStore = create<NavigationSessionState>((set, get) => (
       indoorPositionSource: nextSource,
       positionConfidence: nextConfidence,
       currentSegmentIndex: segmentIndex,
-      matchedNodeId: currentNode.id ?? state.matchedNodeId,
-      distanceRemaining: Math.round(remainingDistance),
+      matchedNodeId: matchedNode?.id ?? currentNode.id ?? state.matchedNodeId,
+      distanceRemaining: guidance.distanceRemaining,
       etaSeconds,
-      currentInstruction,
-      nextInstruction,
+      currentInstruction: guidance.currentInstruction,
+      nextInstruction: guidance.nextInstruction,
       consecutiveOffRouteCount: 0,
     });
   },

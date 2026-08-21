@@ -163,9 +163,14 @@ export function NavigateShell() {
       gps.lng,
       matchedNode,
       publishedData.nodes || [],
-      (fromId, toId) => shortestPath(fromId, toId, { travelMode })
+      (fromId, toId) => shortestPath(fromId, toId, { travelMode }),
+      {
+        canvasPos: gps.canvasPos,
+        heading: gps.heading,
+        speed: gps.speed,
+      }
     );
-  }, [live, gps.lat, gps.lng, gps.isGpsActive, livePos?.node, publishedData.nodes, travelMode]);
+  }, [live, gps.lat, gps.lng, gps.isGpsActive, gps.canvasPos, gps.heading, gps.speed, livePos?.node, publishedData.nodes, travelMode]);
 
   // Handle URL query parameters for deep linking (?to=dest-id or ?from=dest-id)
   useEffect(() => {
@@ -587,7 +592,7 @@ export function NavigateShell() {
       {/* Left panel */}
       <div
         className={cn(
-          "z-10 w-full shrink-0 flex-col border-r bg-[rgb(var(--card))] md:flex md:w-80 lg:w-[320px] overflow-y-auto scrollbar-thin pb-24 md:pb-4",
+          "z-10 w-full shrink-0 flex-col border-r bg-[rgb(var(--card))] md:flex md:w-80 lg:w-[320px] overflow-y-auto overscroll-contain touch-pan-y scrollbar-thin pb-24 md:pb-4",
           mobileView === "panel" ? "flex" : "hidden"
         )}
       >
@@ -677,13 +682,13 @@ export function NavigateShell() {
             {/* FROM Suggestions Dropdown */}
             <AnimatePresence>
               {fromFocus && fromSuggestions.length > 0 && !fromSelected && (
-                <motion.div
-                  initial={{ opacity: 0, y: -4 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: -4 }}
-                  transition={{ duration: 0.15 }}
-                  className="card absolute left-0 right-0 top-full z-40 mt-1 max-h-72 overflow-y-auto p-1.5 shadow-2xl border bg-[rgb(var(--card))]/98 backdrop-blur-md divide-y divide-[rgb(var(--border)/0.4)]"
-                >
+                  <motion.div
+                    initial={{ opacity: 0, y: -4 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -4 }}
+                    transition={{ duration: 0.15 }}
+                    className="card absolute left-0 right-0 top-full z-40 mt-1 max-h-72 overflow-y-auto overscroll-contain touch-pan-y p-1.5 shadow-2xl border bg-[rgb(var(--card))]/98 backdrop-blur-md divide-y divide-[rgb(var(--border)/0.4)]"
+                  >
                   {fromSuggestions.map((d) => {
                     const isBld = d.category === "Building";
                     const isLoc = d.id === YOUR_LOCATION_ID;
@@ -796,7 +801,7 @@ export function NavigateShell() {
                     animate={{ opacity: 1, y: 0 }}
                     exit={{ opacity: 0, y: -4 }}
                     transition={{ duration: 0.15 }}
-                    className="card absolute left-0 right-0 top-full z-40 mt-1 max-h-72 overflow-y-auto p-1.5 shadow-2xl border bg-[rgb(var(--card))]/98 backdrop-blur-md divide-y divide-[rgb(var(--border)/0.4)]"
+                    className="card absolute left-0 right-0 top-full z-40 mt-1 max-h-72 overflow-y-auto overscroll-contain touch-pan-y p-1.5 shadow-2xl border bg-[rgb(var(--card))]/98 backdrop-blur-md divide-y divide-[rgb(var(--border)/0.4)]"
                   >
                     {allDestinations
                       .filter((d) => d.name.toLowerCase().includes(stop.query.toLowerCase()))
@@ -866,13 +871,13 @@ export function NavigateShell() {
             {/* TO Suggestions Dropdown */}
             <AnimatePresence>
               {toFocus && toSuggestions.length > 0 && !toSelected && (
-                <motion.div
-                  initial={{ opacity: 0, y: -4 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: -4 }}
-                  transition={{ duration: 0.15 }}
-                  className="card absolute left-0 right-0 top-full z-40 mt-1 max-h-72 overflow-y-auto p-1.5 shadow-2xl border bg-[rgb(var(--card))]/98 backdrop-blur-md divide-y divide-[rgb(var(--border)/0.4)]"
-                >
+                  <motion.div
+                    initial={{ opacity: 0, y: -4 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -4 }}
+                    transition={{ duration: 0.15 }}
+                    className="card absolute left-0 right-0 top-full z-40 mt-1 max-h-72 overflow-y-auto overscroll-contain touch-pan-y p-1.5 shadow-2xl border bg-[rgb(var(--card))]/98 backdrop-blur-md divide-y divide-[rgb(var(--border)/0.4)]"
+                  >
                   {toSuggestions.map((d) => {
                     const isBld = d.category === "Building";
                     const isEnt = (d.category || "").toLowerCase().includes("entrance") || (d.category || "").toLowerCase().includes("gate");

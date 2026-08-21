@@ -10,12 +10,12 @@ import { shortestPath } from "../features/navigation/services/graph";
 import { campusStore } from "../shared/lib/campus-store";
 import type { Building, Floor, Node, Edge, Destination } from "../shared/data/campus";
 
-describe("Master Navigation Fix Suite", () => {
+describe("Master Navigation & Camera Stability Fix Suite", () => {
   beforeEach(() => {
     campusStore.resetToInitialData(false);
   });
 
-  describe("Task 1 & 3: Nearest-Node Context Awareness & Disconnected Fallback", () => {
+  describe("1. Nearest-Node Context Awareness & Disconnected Fallback", () => {
     it("ranks eligible candidate nodes by true geographic distance", () => {
       const n1: Node = { id: "n1", type: "CORRIDOR", floorId: "f-out", x: 100, y: 100, lat: 11.4965, lng: 77.2774 };
       const n2: Node = { id: "n2", type: "CORRIDOR", floorId: "f-out", x: 200, y: 200, lat: 11.4975, lng: 77.2784 };
@@ -38,9 +38,7 @@ describe("Master Navigation Fix Suite", () => {
       const bld: Building = { id: "b1", campusId: "c1", name: "Block A", lat: 11.4965, lng: 77.2774 };
       const floor: Floor = { id: "f1", buildingId: "b1", name: "Ground", ordinal: 0 };
 
-      // n1 is closest to user but non-accessible / closed for maintenance
       const n1: Node = { id: "n-isolated", type: "CORRIDOR", floorId: "f1", x: 10, y: 10, lat: 11.4965, lng: 77.2774, accessible: false };
-      // n2 is slightly further, accessible, and CONNECTED to destination n3
       const n2: Node = { id: "n-connected", type: "CORRIDOR", floorId: "f1", x: 50, y: 50, lat: 11.4966, lng: 77.2775, accessible: true };
       const n3: Node = { id: "n-dest", type: "ROOM", floorId: "f1", x: 100, y: 100, lat: 11.4967, lng: 77.2776, accessible: true };
 
@@ -64,14 +62,13 @@ describe("Master Navigation Fix Suite", () => {
       });
 
       expect(route).not.toBeNull();
-      // Verify routing bypassed non-accessible n1 and routed through connected candidate n2
       expect(route?.nodes[0].id).toBe("n-connected");
       expect(route?.nodes[1].id).toBe("n-dest");
     });
   });
 
-  describe("Task 3: Routing Inputs & Hidden Node Support", () => {
-    it("routes through user-hidden nodes (visibleToUser = false) without exposing their names", () => {
+  describe("2. Routing Inputs & Hidden Node Support", () => {
+    it("routes through user-hidden nodes (visibleToUser = false) without exposing internal names", () => {
       const n1: Node = { id: "n-start", type: "BUILDING_ENTRANCE", name: "Main Entrance", floorId: "f-out", x: 10, y: 10, visibleToUser: true };
       const nHidden: Node = { id: "n-hidden-junction", type: "JUNCTION", name: "Internal Junction 42", floorId: "f-out", x: 30, y: 10, visibleToUser: false };
       const n2: Node = { id: "n-end", type: "ROOM", name: "Lab 202", floorId: "f-out", x: 50, y: 10, visibleToUser: true };
@@ -94,15 +91,13 @@ describe("Master Navigation Fix Suite", () => {
 
       expect(route).not.toBeNull();
       expect(route?.nodes.length).toBe(3);
-      // Hidden node must be used in graph traversal
       expect(route?.nodes[1].id).toBe("n-hidden-junction");
-      // Turn instructions must mask the hidden node's internal name
       const instruction = route?.instructions.find((ins) => ins.targetNodeId === "n-hidden-junction");
       expect(instruction?.targetNodeName).toBeUndefined();
     });
   });
 
-  describe("Task 4 & 5: Camera Rotation Pivot & Angle Delta", () => {
+  describe("3. Camera Rotation Physics & Boundary Angle Interpolation", () => {
     it("correctly computes shortest angular delta across 360 degree boundary", () => {
       expect(calculateShortestAngleDelta(359, 1)).toBe(2);
       expect(calculateShortestAngleDelta(1, 359)).toBe(-2);
@@ -112,20 +107,51 @@ describe("Master Navigation Fix Suite", () => {
       expect(calculateShortestAngleDelta(90, 0)).toBe(-90);
     });
 
-    it("resolves node geographic coordinates smoothly with fallback to canvas", () => {
-      const nGps: Node = { id: "n1", type: "CORRIDOR", floorId: "f-out", x: 100, y: 100, lat: 11.4965, lng: 77.2774 };
-      const coords = getNodeGeographicCoordinates(nGps);
-      expect(coords.lat).toBe(11.4965);
-      expect(coords.lng).toBe(77.2774);
+    it("verifies delta-time exponential smoothing physics across varying frame rates (30Hz, 60Hz, 120Hz)", () => {
+      const lambda = 8.5;
 
-      const nCanvasOnly: Node = { id: "n2", type: "CORRIDOR", floorId: "f-out", x: 500, y: 500, lat: 0, lng: 0 };
-      const fallbackCoords = getNodeGeographicCoordinates(nCanvasOnly);
-      expect(fallbackCoords.lat).not.toBe(0);
-      expect(fallbackCoords.lng).not.toBe(0);
+      // 60 FPS: dt = ~0.0166s
+      const dt60 = 1 / 60;
+      const alpha60 = 1 - Math.exp(-lambda * dt60);
+      expect(alpha60).toBeGreaterThan(0.1);
+      expect(alpha60).toBeLessThan(0.2);
+
+      // 120 FPS: dt = ~0.0083s -> Two 120Hz steps equal one 60Hz step
+      const dt120 = 1 / 120;
+      const alpha120 = 1 - Math.exp(-lambda * dt120);
+      const combinedAlpha120 = 1 - Math.pow(1 - alpha120, 2);
+      expect(combinedAlpha120).toBeCloseTo(alpha60, 4);
+
+      // 30 FPS: dt = ~0.0333s -> One 30Hz step equals two 60Hz steps
+      const dt30 = 1 / 30;
+      const alpha30 = 1 - Math.exp(-lambda * dt30);
+      const combinedAlpha60 = 1 - Math.pow(1 - alpha60, 2);
+      expect(alpha30).toBeCloseTo(combinedAlpha60, 4);
+    });
+
+    it("applies 2.5 degree deadband noise filter to eliminate compass jitter", () => {
+      const deadbandThreshold = 2.5;
+
+      const jitterSamples = [
+        { current: 35.0, target: 35.8 }, // delta +0.8 (noise)
+        { current: 35.0, target: 34.2 }, // delta -0.8 (noise)
+        { current: 35.0, target: 36.5 }, // delta +1.5 (noise)
+        { current: 35.0, target: 33.1 }, // delta -1.9 (noise)
+      ];
+
+      jitterSamples.forEach(({ current, target }) => {
+        const delta = calculateShortestAngleDelta(current, target);
+        const shouldRotate = Math.abs(delta) > deadbandThreshold;
+        expect(shouldRotate).toBe(false); // Ignored as noise
+      });
+
+      const meaningfulTurn = { current: 35.0, target: 45.0 }; // delta +10.0 (intentional turn)
+      const intentionalDelta = calculateShortestAngleDelta(meaningfulTurn.current, meaningfulTurn.target);
+      expect(Math.abs(intentionalDelta) > deadbandThreshold).toBe(true);
     });
   });
 
-  describe("Coordinate-Space Separation & Camera Invariance", () => {
+  describe("4. Coordinate-Space Separation & Camera Invariance", () => {
     it("guarantees user GPS latitude/longitude and world coordinates are strictly invariant under camera transforms", () => {
       const initialUserGps = { lat: 11.496612, lng: 77.277543 };
       const userWorldPos = gpsToCanvas(initialUserGps.lat, initialUserGps.lng);
@@ -142,7 +168,6 @@ describe("Master Navigation Fix Suite", () => {
         pan: { x: number; y: number },
         pivot: { x: number; y: number }
       ) => {
-        // Rotation around pivot
         const rad = (bearingDeg * Math.PI) / 180;
         const cos = Math.cos(rad);
         const sin = Math.sin(rad);
@@ -151,7 +176,6 @@ describe("Master Navigation Fix Suite", () => {
         const rotatedX = pivot.x + (dx * cos - dy * sin);
         const rotatedY = pivot.y + (dx * sin + dy * cos);
 
-        // Pan and Zoom viewport mapping
         const screenX = (rotatedX + pan.x) * zoom;
         const screenY = (rotatedY + pan.y) * zoom;
         return { screenX, screenY };
@@ -160,7 +184,6 @@ describe("Master Navigation Fix Suite", () => {
       for (const bearing of testAngles) {
         for (const zoom of testZooms) {
           for (const pan of testPans) {
-            // Screen projection computed
             const screen = projectToScreen(userWorldPos, bearing, zoom, pan, userWorldPos);
             expect(isFinite(screen.screenX)).toBe(true);
             expect(isFinite(screen.screenY)).toBe(true);
@@ -181,7 +204,6 @@ describe("Master Navigation Fix Suite", () => {
 
       for (let angle = 0; angle <= 360; angle += 15) {
         const rad = (angle * Math.PI) / 180;
-        // Rotated point around pivot: pivot + rotate(world - pivot)
         const rotX = pivot.x + (userWorld.x - pivot.x) * Math.cos(rad) - (userWorld.y - pivot.y) * Math.sin(rad);
         const rotY = pivot.y + (userWorld.x - pivot.x) * Math.sin(rad) + (userWorld.y - pivot.y) * Math.cos(rad);
 

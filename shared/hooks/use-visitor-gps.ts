@@ -79,6 +79,7 @@ export function useVisitorGps(
   // Refs to prevent duplicate watchers and hold stable references
   const watchIdRef = useRef<number | null>(null);
   const lastPositionRef = useRef<{ latitude: number; longitude: number } | null>(null);
+  const lastMovementHeadingRef = useRef<number | null>(null);
   const isMountedRef = useRef(true);
 
   // ── Permission check on mount ───────────────────────────────────────────
@@ -172,10 +173,12 @@ export function useVisitorGps(
           return;
         }
 
-        // Calculate forward movement bearing if hardware heading is absent
+        // Calculate forward movement bearing with low-speed deadband and angular EMA smoothing
         let calculatedHeading: number | null = null;
+
         if (normalized.heading !== null && !isNaN(normalized.heading) && normalized.heading >= 0) {
           calculatedHeading = normalized.heading;
+          lastMovementHeadingRef.current = normalized.heading;
         } else if (lastPositionRef.current) {
           const moveDist = calculateGeographicDistance(
             lastPositionRef.current.latitude,
@@ -183,13 +186,28 @@ export function useVisitorGps(
             normalized.latitude,
             normalized.longitude
           );
-          if (moveDist >= 1.5) {
-            calculatedHeading = calculateGeographicBearing(
+
+          const isMoving = (normalized.speed !== null && normalized.speed >= 0.4) || moveDist >= 1.2;
+
+          if (isMoving) {
+            const rawBearing = calculateGeographicBearing(
               lastPositionRef.current.latitude,
               lastPositionRef.current.longitude,
               normalized.latitude,
               normalized.longitude
             );
+
+            if (lastMovementHeadingRef.current !== null) {
+              const delta = (((rawBearing - lastMovementHeadingRef.current + 540) % 360) - 180);
+              const smoothed = ((lastMovementHeadingRef.current + delta * 0.4) % 360 + 360) % 360;
+              calculatedHeading = Math.round(smoothed);
+            } else {
+              calculatedHeading = Math.round(rawBearing);
+            }
+            lastMovementHeadingRef.current = calculatedHeading;
+          } else {
+            // Stationary / low speed deadband: preserve previous stable heading
+            calculatedHeading = lastMovementHeadingRef.current;
           }
         }
 

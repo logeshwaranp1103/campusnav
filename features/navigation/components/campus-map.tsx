@@ -203,28 +203,47 @@ export function CampusMap({ route, livePosition, progress, gps: passedGps, onNav
   const allBuildings = publishedData.buildings;
   const allFloors = publishedData.floors;
 
-  // ── Smooth North-Up / Bearing Reset ──
-  const resetBearingToNorth = useCallback(() => {
-    setBearing((currentB) => {
-      if (Math.abs(currentB) < 0.5) return 0;
-      let diff = ((0 - currentB + 540) % 360) - 180;
-      const start = Date.now();
-      const duration = 280;
-      const initial = currentB;
+  // ── Smooth North-Up / Bearing Reset via Controlled Single RAF ──
+  const bearingAnimFrameRef = useRef<number | null>(null);
 
-      const animate = () => {
-        const elapsed = Date.now() - start;
-        const progress = Math.min(1, elapsed / duration);
-        const ease = 1 - Math.pow(1 - progress, 3);
-        const nextB = (initial + diff * ease + 360) % 360;
-        setBearing(progress >= 1 ? 0 : nextB);
-        if (progress < 1) {
-          requestAnimationFrame(animate);
-        }
-      };
-      requestAnimationFrame(animate);
-      return currentB;
-    });
+  const resetBearingToNorth = useCallback(() => {
+    if (bearingAnimFrameRef.current !== null) {
+      cancelAnimationFrame(bearingAnimFrameRef.current);
+      bearingAnimFrameRef.current = null;
+    }
+
+    const currentB = bearing;
+    if (Math.abs(currentB) < 0.5) {
+      setBearing(0);
+      return;
+    }
+
+    const diff = ((0 - currentB + 540) % 360) - 180;
+    const start = performance.now();
+    const duration = 280;
+    const initial = currentB;
+
+    const animate = (timestamp: number) => {
+      const elapsed = timestamp - start;
+      const progress = Math.min(1, elapsed / duration);
+      const ease = 1 - Math.pow(1 - progress, 3);
+      const nextB = (initial + diff * ease + 360) % 360;
+      setBearing(progress >= 1 ? 0 : nextB);
+      if (progress < 1) {
+        bearingAnimFrameRef.current = requestAnimationFrame(animate);
+      } else {
+        bearingAnimFrameRef.current = null;
+      }
+    };
+    bearingAnimFrameRef.current = requestAnimationFrame(animate);
+  }, [bearing]);
+
+  useEffect(() => {
+    return () => {
+      if (bearingAnimFrameRef.current !== null) {
+        cancelAnimationFrame(bearingAnimFrameRef.current);
+      }
+    };
   }, []);
 
   // ── Smooth North-Up Reset when Navigation Session Ends/Exits ──
@@ -627,11 +646,19 @@ function MapCanvas({
   const boundsRef = useRef(bounds);
   boundsRef.current = bounds;
 
-  // RAF loop for smooth marker gliding & continuous camera following
+  // Single Authoritative RAF loop for smooth marker gliding & continuous camera following using Delta-Time Exponential Smoothing
+  const lastTimeRef = useRef<number>(0);
+
   useEffect(() => {
     let active = true;
-    const animateMarkerAndCamera = () => {
+    lastTimeRef.current = performance.now();
+
+    const animateMarkerAndCamera = (timestamp: number) => {
       if (!active) return;
+
+      const now = timestamp || performance.now();
+      const dt = Math.min(0.064, Math.max(0.001, (now - (lastTimeRef.current || now)) / 1000));
+      lastTimeRef.current = now;
 
       if (targetGpsPos) {
         const cur = visualGpsRef.current;
@@ -641,11 +668,16 @@ function MapCanvas({
         // Circular shortest angle interpolation for heading
         const dHeading = (((targetHeading - cur.heading + 540) % 360) - 180);
 
-        if (Math.abs(dx) > 0.02 || Math.abs(dy) > 0.02 || Math.abs(dHeading) > 0.05) {
-          const nextX = cur.x + dx * 0.16;
-          const nextY = cur.y + dy * 0.16;
-          const nextHeading = (cur.heading + dHeading * 0.14 + 360) % 360;
+        // Continuous Delta-Time Exponential Smoothing
+        const gpsAlpha = 1 - Math.exp(-10.0 * dt);
+        const headingAlpha = 1 - Math.exp(-8.0 * dt);
 
+        if (Math.abs(dx) > 0.02 || Math.abs(dy) > 0.02 || Math.abs(dHeading) > 0.05) {
+          const nextX = cur.x + dx * gpsAlpha;
+          const nextY = cur.y + dy * gpsAlpha;
+          const nextHeading = (cur.heading + dHeading * headingAlpha + 360) % 360;
+
+          visualGpsRef.current = { x: nextX, y: nextY, heading: nextHeading };
           setVisualGps({
             x: nextX,
             y: nextY,
@@ -669,22 +701,28 @@ function MapCanvas({
         const panDx = targetPanX - curPan.x;
         const panDy = targetPanY - curPan.y;
 
-        if (Math.abs(panDx) > 0.05 || Math.abs(panDy) > 0.05) {
+        const panAlpha = 1 - Math.exp(-8.5 * dt);
+
+        if (Math.abs(panDx) > 0.04 || Math.abs(panDy) > 0.04) {
+          const nextPanX = curPan.x + panDx * panAlpha;
+          const nextPanY = curPan.y + panDy * panAlpha;
+          panRef.current = { x: nextPanX, y: nextPanY };
           setPan({
-            x: curPan.x + panDx * 0.12,
-            y: curPan.y + panDy * 0.12,
+            x: nextPanX,
+            y: nextPanY,
           });
         }
 
-        // Automatic Google Maps style map rotation ONLY while actively navigating and user is moving
+        // Automatic Google Maps style map rotation ONLY while actively navigating, follow mode active, and user is moving
         if (isNavigating) {
-          const isMoving = (gps?.speed !== null && gps?.speed !== undefined && gps.speed > 0.3) || (gps?.heading !== null && gps?.heading !== undefined && gps.heading >= 0);
+          const isMoving = (gps?.speed !== null && gps?.speed !== undefined && gps.speed > 0.35) || (gps?.heading !== null && gps?.heading !== undefined && gps.heading >= 0);
           if (isMoving && targetHeading >= 0) {
             const targetMapBearing = (360 - targetHeading + 360) % 360;
             const dMapBearing = calculateShortestAngleDelta(bearingRef.current, targetMapBearing);
-            // Low-pass noise filter: ignore compass jitter under 2.0 degrees
-            if (Math.abs(dMapBearing) > 2.0) {
-              const nextBearing = (bearingRef.current + dMapBearing * 0.08 + 360) % 360;
+            // Low-pass noise deadband filter: ignore compass noise under 2.5 degrees
+            if (Math.abs(dMapBearing) > 2.5) {
+              const rotateAlpha = 1 - Math.exp(-6.0 * dt);
+              const nextBearing = (bearingRef.current + dMapBearing * rotateAlpha + 360) % 360;
               bearingRef.current = nextBearing;
               onBearingChange?.(nextBearing);
             }
