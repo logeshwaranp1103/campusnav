@@ -16,6 +16,37 @@ import { DestinationDetailsDrawer } from "./destination-details-drawer";
 import { isEventActive } from "@/shared/lib/event-utils";
 import { useNavigationStore } from "@/features/navigation/navigation-store";
 
+/**
+ * Computes roof elevated points for lightweight 3D isometric building extrusion.
+ */
+function getExtrudedRoofPoints(pts: { x: number; y: number }[], height = 12) {
+  const extX = -height * 0.32;
+  const extY = -height * 0.82;
+  return pts.map((p) => ({ x: p.x + extX, y: p.y + extY }));
+}
+
+/**
+ * Generates 3D quad wall facets with directional shading between base and elevated roof polygons.
+ */
+function getWallFacets(basePts: { x: number; y: number }[], roofPts: { x: number; y: number }[]) {
+  const n = basePts.length;
+  const facets: { path: string; isShaded: boolean }[] = [];
+  for (let i = 0; i < n; i++) {
+    const nextIdx = (i + 1) % n;
+    const p1 = basePts[i];
+    const p2 = basePts[nextIdx];
+    const r1 = roofPts[i];
+    const r2 = roofPts[nextIdx];
+
+    const path = `M ${p1.x} ${p1.y} L ${p2.x} ${p2.y} L ${r2.x} ${r2.y} L ${r1.x} ${r1.y} Z`;
+    const angle = (Math.atan2(p2.y - p1.y, p2.x - p1.x) * 180) / Math.PI;
+    const isShaded = angle > -45 && angle < 135;
+
+    facets.push({ path, isShaded });
+  }
+  return facets;
+}
+
 type Props = {
   route: Route | null;
   livePosition?: Node | null;
@@ -558,11 +589,12 @@ function MapCanvas({
   const { buildings, nodes: allNodes, edges: allEdges, destinations: allDestinations, events: allEvents } = publishedData;
   const svgRef = useRef<SVGSVGElement | null>(null);
 
-  // Interactive Pan & Zoom State
+  // Interactive Pan, Zoom & Selection State
   const [internalZoom, setInternalZoom] = useState(1);
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const [isDragging, setIsDragging] = useState(false);
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
+  const [selectedBuildingId, setSelectedBuildingId] = useState<string | null>(null);
 
   // Camera Smooth Animation Refs
   const panRef = useRef(pan);
@@ -648,7 +680,9 @@ function MapCanvas({
 
   // Single Authoritative RAF loop for smooth marker gliding & continuous camera following using Delta-Time Exponential Smoothing
   const lastTimeRef = useRef<number>(0);
+  const lastReportedBearingRef = useRef<number>(bearing);
 
+  // ── Unified Master Camera & Marker Animation Controller (Single Authoritative RAF Loop) ──
   useEffect(() => {
     let active = true;
     lastTimeRef.current = performance.now();
@@ -660,6 +694,7 @@ function MapCanvas({
       const dt = Math.min(0.064, Math.max(0.001, (now - (lastTimeRef.current || now)) / 1000));
       lastTimeRef.current = now;
 
+      // 1. Visual GPS Marker Smooth Gliding
       if (targetGpsPos) {
         const cur = visualGpsRef.current;
         const dx = targetGpsPos.x - cur.x;
@@ -668,7 +703,7 @@ function MapCanvas({
         // Circular shortest angle interpolation for heading
         const dHeading = (((targetHeading - cur.heading + 540) % 360) - 180);
 
-        // Continuous Delta-Time Exponential Smoothing
+        // Continuous Delta-Time Exponential Smoothing (60Hz / 90Hz / 120Hz invariant)
         const gpsAlpha = 1 - Math.exp(-10.0 * dt);
         const headingAlpha = 1 - Math.exp(-8.0 * dt);
 
@@ -686,8 +721,25 @@ function MapCanvas({
         }
       }
 
-      // Smoothly glide camera pan & rotate map if auto-following in navigation mode (when user is not interacting)
-      if (isFollowingUser && !isInteractingRef.current) {
+      // 2. Momentum Inertia Panning (when user released gesture)
+      if (!isInteractingRef.current && (Math.abs(velocityRef.current.vx) > 0.04 || Math.abs(velocityRef.current.vy) > 0.04)) {
+        const friction = Math.pow(0.92, dt / 0.016);
+        velocityRef.current.vx *= friction;
+        velocityRef.current.vy *= friction;
+
+        if (Math.hypot(velocityRef.current.vx, velocityRef.current.vy) < 0.04) {
+          velocityRef.current = { vx: 0, vy: 0 };
+        } else {
+          const curPan = panRef.current;
+          const nextPanX = curPan.x + velocityRef.current.vx;
+          const nextPanY = curPan.y + velocityRef.current.vy;
+          panRef.current = { x: nextPanX, y: nextPanY };
+          setPan({ x: nextPanX, y: nextPanY });
+        }
+      }
+
+      // 3. Navigation Follow Mode (Glide camera pan & rotate map when user is not manually dragging)
+      if (isFollowingUser && !isInteractingRef.current && Math.hypot(velocityRef.current.vx, velocityRef.current.vy) < 0.1) {
         const curMarker = visualGpsRef.current;
         const targetFollowX = targetGpsPos ? targetGpsPos.x : curMarker.x;
         const targetFollowY = targetGpsPos ? targetGpsPos.y : curMarker.y;
@@ -719,12 +771,15 @@ function MapCanvas({
           if (isMoving && targetHeading >= 0) {
             const targetMapBearing = (360 - targetHeading + 360) % 360;
             const dMapBearing = calculateShortestAngleDelta(bearingRef.current, targetMapBearing);
-            // Low-pass noise deadband filter: ignore compass noise under 2.5 degrees
-            if (Math.abs(dMapBearing) > 2.5) {
+            // Low-pass noise deadband filter: ignore compass noise under 2.0 degrees
+            if (Math.abs(dMapBearing) > 2.0) {
               const rotateAlpha = 1 - Math.exp(-6.0 * dt);
               const nextBearing = (bearingRef.current + dMapBearing * rotateAlpha + 360) % 360;
               bearingRef.current = nextBearing;
-              onBearingChange?.(nextBearing);
+              if (Math.abs(nextBearing - lastReportedBearingRef.current) > 0.4) {
+                lastReportedBearingRef.current = nextBearing;
+                onBearingChange?.(nextBearing);
+              }
             }
           }
         }
@@ -888,26 +943,7 @@ function MapCanvas({
   const viewBoxStr = `${effectiveX} ${effectiveY} ${effectiveW} ${effectiveH}`;
 
   const stopInertia = () => {
-    if (animFrameRef.current !== null) {
-      cancelAnimationFrame(animFrameRef.current);
-      animFrameRef.current = null;
-    }
-  };
-
-  const startInertia = () => {
-    stopInertia();
-    const step = () => {
-      const { vx, vy } = velocityRef.current;
-      if (Math.hypot(vx, vy) < 0.05) {
-        animFrameRef.current = null;
-        return;
-      }
-      setPan((prev) => ({ x: prev.x + vx, y: prev.y + vy }));
-      velocityRef.current.vx *= 0.92;
-      velocityRef.current.vy *= 0.92;
-      animFrameRef.current = requestAnimationFrame(step);
-    };
-    animFrameRef.current = requestAnimationFrame(step);
+    velocityRef.current = { vx: 0, vy: 0 };
   };
 
   // Mouse Drag Handlers for Desktop with Rotation Matrix Compensation
@@ -954,9 +990,6 @@ function MapCanvas({
   const handleMouseUp = () => {
     isInteractingRef.current = false;
     setIsDragging(false);
-    if (Math.hypot(velocityRef.current.vx, velocityRef.current.vy) > 0.5) {
-      startInertia();
-    }
   };
 
   // ── Cursor-Anchored Wheel Zoom with Rotation Compensation ──
@@ -1203,9 +1236,6 @@ function MapCanvas({
       isInteractingRef.current = false;
       const gState = touchGestureRef.current;
       if (e.touches.length === 0) {
-        if (gState.mode === "PAN" && Math.hypot(velocityRef.current.vx, velocityRef.current.vy) > 0.5) {
-          startInertia();
-        }
         touchGestureRef.current = {
           mode: "NONE",
           initialDist: 0,
@@ -1294,18 +1324,22 @@ function MapCanvas({
       preserveAspectRatio="xMidYMid meet"
     >
       <defs>
-        <pattern id="grid" width="28" height="28" patternUnits="userSpaceOnUse">
+        <pattern id="grid" width="32" height="32" patternUnits="userSpaceOnUse">
           <path
-            d="M 28 0 L 0 0 0 28"
+            d="M 32 0 L 0 0 0 32"
             fill="none"
-            stroke="#cbd5e1"
-            strokeOpacity="0.5"
-            strokeWidth="0.8"
+            stroke="#e2e8f0"
+            strokeOpacity="0.75"
+            strokeWidth="0.75"
           />
         </pattern>
-        <linearGradient id="bldFillGrad" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor="#818cf8" stopOpacity="0.14" />
-          <stop offset="100%" stopColor="#3b82f6" stopOpacity="0.08" />
+        <filter id="bldShadow" x="-20%" y="-20%" width="150%" height="150%">
+          <feDropShadow dx="-4" dy="8" stdDeviation="6" floodColor="#0f172a" floodOpacity="0.18" />
+        </filter>
+        <linearGradient id="bldRoofGrad" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0%" stopColor="#ffffff" />
+          <stop offset="60%" stopColor="#f8fafc" />
+          <stop offset="100%" stopColor="#e2e8f0" />
         </linearGradient>
         <linearGradient id="routeGrad" x1="0" y1="0" x2="1" y2="0">
           <stop offset="0%" stopColor="#10b981" />
@@ -1313,7 +1347,8 @@ function MapCanvas({
         </linearGradient>
       </defs>
 
-      {/* Background grid covering all zoom levels */}
+      {/* Background terrain covering all zoom levels */}
+      <rect x="-100000" y="-100000" width="200000" height="200000" fill="#f8fafc" />
       <rect x="-100000" y="-100000" width="200000" height="200000" fill="url(#grid)" />
 
       {/* ── Main Transform Group (Supports Bearing Rotation around User Location / Camera Pivot) ── */}
@@ -1342,75 +1377,279 @@ function MapCanvas({
           </g>
         )}
 
-        {/* Buildings Footprints & Outlines */}
+        {/* ── 1. Outdoor Campus Lawns & Landscape Courtyards (Outdoor Floor View) ── */}
+        {floorId === "f-out" && buildings.map((b) => {
+          const centerPos = getBuildingCenter(b);
+          return (
+            <ellipse
+              key={`lawn-${b.id}`}
+              cx={centerPos.x}
+              cy={centerPos.y + 10}
+              rx={Math.max(70, (b.width || 120) * 0.75)}
+              ry={Math.max(50, (b.height || 90) * 0.65)}
+              fill="#ecfdf5"
+              stroke="#d1fae5"
+              strokeWidth="1.5"
+              strokeDasharray="6 4"
+              opacity="0.75"
+            />
+          );
+        })}
+
+        {/* ── 2. Parking Lots Layer ── */}
+        {scopeNodes
+          .filter((n) => n.type === "PARKING" || (n.name && n.name.toLowerCase().includes("parking")))
+          .map((pn) => (
+            <g key={`parking-bay-${pn.id}`} transform={`translate(${pn.x}, ${pn.y})`}>
+              {/* Parking Pad Area */}
+              <rect
+                x="-36"
+                y="-24"
+                width="72"
+                height="48"
+                rx="6"
+                fill="#1e293b"
+                fillOpacity="0.08"
+                stroke="#64748b"
+                strokeWidth="1.5"
+                strokeDasharray="4 3"
+              />
+              {/* Parking Stall Divider Markings */}
+              <line x1="-18" y1="-22" x2="-18" y2="22" stroke="#94a3b8" strokeWidth="1" strokeDasharray="3 3" opacity="0.6" />
+              <line x1="0" y1="-22" x2="0" y2="22" stroke="#94a3b8" strokeWidth="1" strokeDasharray="3 3" opacity="0.6" />
+              <line x1="18" y1="-22" x2="18" y2="22" stroke="#94a3b8" strokeWidth="1" strokeDasharray="3 3" opacity="0.6" />
+              {/* Distinct Parking Badge */}
+              <g transform="translate(0, -28)">
+                <rect
+                  x="-32"
+                  y="-9"
+                  width="64"
+                  height="18"
+                  rx="9"
+                  fill="#0284c7"
+                  stroke="#ffffff"
+                  strokeWidth="1.5"
+                  className="shadow-sm"
+                />
+                <text
+                  x="0"
+                  y="3"
+                  textAnchor="middle"
+                  fill="#ffffff"
+                  fontSize="8.5"
+                  fontWeight="800"
+                  letterSpacing="0.02em"
+                >
+                  🅿️ Parking
+                </text>
+              </g>
+            </g>
+          ))}
+
+        {/* ── 3. Roadway Network (Asphalt Roads with Dual Curbing & Centerline Markings) ── */}
+        {scopeEdges
+          .filter((e) => e.type === "ROAD" || e.pathType === "EV")
+          .map((e) => {
+            const from = allNodes.find((n) => n.id === e.from);
+            const to = allNodes.find((n) => n.id === e.to);
+            if (!from || !to) return null;
+
+            const baseId = e.id.replace(/_rev$/, "");
+            const isBlocked = showObstacles && (
+              blockedEdgeIds.has(e.id) ||
+              blockedEdgeIds.has(baseId) ||
+              blockedEdgeIds.has(`${baseId}_rev`)
+            );
+
+            return (
+              <g key={`road-${e.id}`}>
+                {/* Outer Curb Casing */}
+                <line
+                  x1={from.x}
+                  y1={from.y}
+                  x2={to.x}
+                  y2={to.y}
+                  stroke={isBlocked ? "#ef4444" : "#475569"}
+                  strokeWidth={isBlocked ? 14 : 12}
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  opacity={0.85}
+                />
+                {/* Asphalt Core Roadbed */}
+                <line
+                  x1={from.x}
+                  y1={from.y}
+                  x2={to.x}
+                  y2={to.y}
+                  stroke={isBlocked ? "#fee2e2" : "#1e293b"}
+                  strokeWidth={isBlocked ? 9 : 8}
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+                {/* Road Lane Centerline Divider */}
+                {!isBlocked && (
+                  <line
+                    x1={from.x}
+                    y1={from.y}
+                    x2={to.x}
+                    y2={to.y}
+                    stroke="#f8fafc"
+                    strokeWidth="1.2"
+                    strokeDasharray="4 6"
+                    strokeOpacity="0.75"
+                    strokeLinecap="round"
+                  />
+                )}
+              </g>
+            );
+          })}
+
+        {/* ── 4. Pedestrian Walking Paths (Paved Walkways) ── */}
+        {scopeEdges
+          .filter((e) => e.type !== "ROAD" && e.pathType !== "EV")
+          .map((e) => {
+            const from = allNodes.find((n) => n.id === e.from);
+            const to = allNodes.find((n) => n.id === e.to);
+            if (!from || !to) return null;
+
+            const baseId = e.id.replace(/_rev$/, "");
+            const isBlocked = showObstacles && (
+              blockedEdgeIds.has(e.id) ||
+              blockedEdgeIds.has(baseId) ||
+              blockedEdgeIds.has(`${baseId}_rev`)
+            );
+
+            return (
+              <g key={`walk-${e.id}`}>
+                {/* Outer Paver Casing */}
+                <line
+                  x1={from.x}
+                  y1={from.y}
+                  x2={to.x}
+                  y2={to.y}
+                  stroke={isBlocked ? "#ef4444" : "#cbd5e1"}
+                  strokeWidth={isBlocked ? 4.5 : 3.5}
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  opacity={0.9}
+                />
+                {/* Paved Stone Core */}
+                <line
+                  x1={from.x}
+                  y1={from.y}
+                  x2={to.x}
+                  y2={to.y}
+                  stroke={isBlocked ? "#fee2e2" : "#f1f5f9"}
+                  strokeWidth={isBlocked ? 2.5 : 2}
+                  strokeDasharray={isBlocked ? "4 3" : undefined}
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </g>
+            );
+          })}
+
+        {/* ── 5. Realistic 3D Extruded Buildings Geometry ── */}
         <g>
           {buildings.map((b) => {
             const canvasPts = getBuildingCanvasPoints(b);
-            const svgPath = getPolygonSvgPath(canvasPts);
             const centerPos = getBuildingCenter(b);
+            const bHeight = Math.min(20, Math.max(10, (b.floorsCount || 3) * 3.5));
+
+            const roofPts = getExtrudedRoofPoints(canvasPts, bHeight);
+            const baseSvgPath = getPolygonSvgPath(canvasPts);
+            const roofSvgPath = getPolygonSvgPath(roofPts);
+            const wallFacets = getWallFacets(canvasPts, roofPts);
 
             const buildingEvents = showEvents ? allEvents.filter((ev) => ev.buildingId === b.id) : [];
             const activeEvent = buildingEvents.find((ev) => isEventActive(ev, nowMs));
 
-            const strokeColor = activeEvent?.color || b.color || "#4f46e5";
+            const isSelectedBuilding = selectedBuildingId === b.id;
+            const strokeColor = activeEvent?.color || (isSelectedBuilding ? "#4f46e5" : (b.color || "#6366f1"));
             const bName = b.name;
-            const badgeWidth = Math.max(145, bName.length * 9.5 + 32);
+            const badgeWidth = Math.max(140, bName.length * 8.5 + 32);
 
             return (
-              <g key={b.id}>
-                {/* Outer Glow Polygon Outline */}
+              <g
+                key={`bld-3d-${b.id}`}
+                onClick={() => {
+                  onUserPan?.();
+                  setSelectedBuildingId((prev) => (prev === b.id ? null : b.id));
+                  const centerX = bounds.x + bounds.w / 2;
+                  const centerY = bounds.y + bounds.h / 2;
+                  setPan({ x: centerX - (centerPos.x - bHeight * 0.32), y: centerY - (centerPos.y - bHeight * 0.82) });
+                }}
+                className="cursor-pointer select-none transition-all active:scale-[0.99]"
+              >
+                {/* 1. Soft Ground Drop Shadow Under Base Footprint */}
                 <path
-                  d={svgPath}
-                  fill="none"
-                  stroke={strokeColor}
-                  strokeWidth="5"
-                  strokeOpacity="0.2"
-                  strokeLinejoin="round"
-                />
-                {/* Solid Light-Theme Building Polygon Footprint */}
-                <path
-                  d={svgPath}
-                  fill="url(#bldFillGrad)"
-                  stroke={strokeColor}
-                  strokeWidth={activeEvent ? "3" : "2.5"}
-                  strokeDasharray={floorId !== "f-out" && !isGroundFloor ? "6 4" : undefined}
-                  strokeLinejoin="round"
-                />
-                {/* Inner Architectural Accent Line */}
-                <path
-                  d={svgPath}
-                  fill="none"
-                  stroke={strokeColor}
-                  strokeWidth="1"
-                  strokeOpacity="0.25"
-                  strokeDasharray="4 4"
-                  strokeLinejoin="round"
-                  transform={`translate(${centerPos.x}, ${centerPos.y}) scale(0.92) translate(${-centerPos.x}, ${-centerPos.y})`}
+                  d={baseSvgPath}
+                  fill="#0f172a"
+                  fillOpacity={isSelectedBuilding ? "0.22" : "0.12"}
+                  filter="url(#bldShadow)"
+                  stroke="none"
                 />
 
-                {/* White Building Header Badge Centered on Centroid */}
-                <g transform={`translate(${centerPos.x}, ${centerPos.y})`}>
+                {/* 2. 3D Architectural Wall Quad Facets with Directional Shading */}
+                {wallFacets.map((facet, idx) => (
+                  <path
+                    key={`facet-${b.id}-${idx}`}
+                    d={facet.path}
+                    fill={facet.isShaded ? (isSelectedBuilding ? "#6366f1" : "#94a3b8") : (isSelectedBuilding ? "#818cf8" : "#cbd5e1")}
+                    fillOpacity={facet.isShaded ? 0.95 : 0.85}
+                    stroke={strokeColor}
+                    strokeWidth={isSelectedBuilding ? "1.25" : "0.75"}
+                    strokeOpacity={isSelectedBuilding ? 0.8 : 0.4}
+                    strokeLinejoin="round"
+                  />
+                ))}
+
+                {/* 3. Elevated 3D Rooftop Slab */}
+                <path
+                  d={roofSvgPath}
+                  fill={isSelectedBuilding ? "#f5f3ff" : "url(#bldRoofGrad)"}
+                  stroke={strokeColor}
+                  strokeWidth={isSelectedBuilding ? "3" : activeEvent ? "2.5" : "1.75"}
+                  strokeDasharray={floorId !== "f-out" && !isGroundFloor ? "6 4" : undefined}
+                  strokeLinejoin="round"
+                  className="transition-all"
+                />
+
+                {/* 4. Rooftop Inner Parapet Border Accent */}
+                <path
+                  d={roofSvgPath}
+                  fill="none"
+                  stroke={strokeColor}
+                  strokeWidth={isSelectedBuilding ? "1.25" : "0.8"}
+                  strokeOpacity={isSelectedBuilding ? 0.6 : 0.3}
+                  strokeDasharray="3 3"
+                  strokeLinejoin="round"
+                  transform={`translate(${centerPos.x - bHeight * 0.32}, ${centerPos.y - bHeight * 0.82}) scale(0.92) translate(${-(centerPos.x - bHeight * 0.32)}, ${-(centerPos.y - bHeight * 0.82)})`}
+                />
+
+                {/* 5. Clean Floating Google-Maps-Style Building Header Badge */}
+                <g transform={`translate(${centerPos.x - bHeight * 0.32}, ${centerPos.y - bHeight * 0.82})`}>
                   <rect
                     x={-badgeWidth / 2}
-                    y="-16"
+                    y="-15"
                     width={badgeWidth}
-                    height="32"
-                    rx="16"
-                    fill="#ffffff"
-                    stroke={strokeColor}
-                    strokeWidth="2"
+                    height="30"
+                    rx="15"
+                    fill={isSelectedBuilding ? "#4f46e5" : "#ffffff"}
+                    stroke={isSelectedBuilding ? "#ffffff" : strokeColor}
+                    strokeWidth={isSelectedBuilding ? "2" : "1.75"}
                     className="shadow-md"
                   />
                   <text
                     x="0"
-                    y="4.5"
+                    y="4"
                     textAnchor="middle"
-                    fill="#1e1b4b"
-                    fontSize="14"
-                    fontWeight="900"
-                    letterSpacing="0.02em"
+                    fill={isSelectedBuilding ? "#ffffff" : "#1e1b4b"}
+                    fontSize="13"
+                    fontWeight="800"
+                    letterSpacing="0.01em"
                   >
-                    <tspan fontSize="16">🏢 </tspan>
+                    <tspan fontSize="14">🏢 </tspan>
                     <tspan>{bName}</tspan>
                   </text>
                 </g>
@@ -1418,6 +1657,82 @@ function MapCanvas({
             );
           })}
         </g>
+
+        {/* ── 6. Campus Gates Layer ── */}
+        {scopeNodes
+          .filter((n) => n.type === "GATE" || (n.name && n.name.toLowerCase().includes("gate")))
+          .map((gn) => {
+            const gateName = gn.name || "Campus Gate";
+            const gateWidth = Math.max(90, gateName.length * 7 + 28);
+            return (
+              <g key={`gate-${gn.id}`} transform={`translate(${gn.x}, ${gn.y})`}>
+                {/* Gate Security Barrier Indicator */}
+                <line x1="-18" y1="0" x2="18" y2="0" stroke="#f59e0b" strokeWidth="3" strokeDasharray="4 2" strokeLinecap="round" />
+                {/* Left & Right Security Pillars */}
+                <rect x="-22" y="-5" width="6" height="10" rx="2" fill="#d97706" stroke="#ffffff" strokeWidth="1" />
+                <rect x="16" y="-5" width="6" height="10" rx="2" fill="#d97706" stroke="#ffffff" strokeWidth="1" />
+                {/* Gate Badge */}
+                <g transform="translate(0, -18)">
+                  <rect
+                    x={-gateWidth / 2}
+                    y="-10"
+                    width={gateWidth}
+                    height="20"
+                    rx="10"
+                    fill="#d97706"
+                    stroke="#ffffff"
+                    strokeWidth="1.5"
+                    className="shadow-md"
+                  />
+                  <text
+                    x="0"
+                    y="3.5"
+                    textAnchor="middle"
+                    fill="#ffffff"
+                    fontSize="9.5"
+                    fontWeight="900"
+                    letterSpacing="0.02em"
+                  >
+                    ⛩️ {gateName}
+                  </text>
+                </g>
+              </g>
+            );
+          })}
+
+        {/* ── 7. Building Entrances Layer ── */}
+        {scopeNodes
+          .filter((n) => n.type === "BUILDING_ENTRANCE" || n.isEntranceNode || (n.type === "ENTRANCE" && floorId === "f-out"))
+          .map((en) => {
+            const entranceName = en.name || "Entrance";
+            const badgeW = Math.max(75, entranceName.length * 6 + 22);
+            return (
+              <g key={`entrance-${en.id}`} transform={`translate(${en.x}, ${en.y})`}>
+                {/* Entrance Canopy Pill Badge */}
+                <rect
+                  x={-badgeW / 2}
+                  y="-9"
+                  width={badgeW}
+                  height="18"
+                  rx="9"
+                  fill="#059669"
+                  stroke="#ffffff"
+                  strokeWidth="1.5"
+                  className="shadow-sm"
+                />
+                <text
+                  x="0"
+                  y="3"
+                  textAnchor="middle"
+                  fill="#ffffff"
+                  fontSize="8.5"
+                  fontWeight="800"
+                >
+                  🚪 {entranceName}
+                </text>
+              </g>
+            );
+          })}
 
         {/* Published Obstacles / Hazards Layer */}
         {showObstacles && (
@@ -1490,34 +1805,6 @@ function MapCanvas({
               })}
           </g>
         )}
-
-        {/* Base Walkway Edges */}
-        {scopeEdges.map((e) => {
-          const from = allNodes.find((n) => n.id === e.from);
-          const to = allNodes.find((n) => n.id === e.to);
-          if (!from || !to) return null;
-
-          const baseId = e.id.replace(/_rev$/, "");
-          const isBlocked = showObstacles && (
-            blockedEdgeIds.has(e.id) ||
-            blockedEdgeIds.has(baseId) ||
-            blockedEdgeIds.has(`${baseId}_rev`)
-          );
-
-          return (
-            <line
-              key={e.id}
-              x1={from.x}
-              y1={from.y}
-              x2={to.x}
-              y2={to.y}
-              stroke={isBlocked ? "#ef4444" : "#64748b"}
-              strokeWidth={isBlocked ? 3.5 : 2.5}
-              strokeDasharray={isBlocked ? "6 4" : undefined}
-              strokeOpacity={0.8}
-            />
-          );
-        })}
 
         {/* Stable Vibrant Route Highlight Lines */}
         {routeEdges.map((e, i) => {
@@ -1607,7 +1894,7 @@ function MapCanvas({
 
         {/* Nodes & Named Labels (Render only user-visible nodes on user map) */}
         {scopeNodes
-          .filter((n) => n.visibleToUser !== false && !allDestinations.some((d) => d.nodeId === n.id))
+          .filter((n) => n.visibleToUser !== false && !allDestinations.some((d) => d.nodeId === n.id) && n.type !== "GATE" && n.type !== "PARKING" && n.type !== "BUILDING_ENTRANCE")
           .map((n) => {
           const onRoute = routeNodes.some((rn) => rn.id === n.id);
           const isDest = destination?.id === n.id;
@@ -1746,8 +2033,14 @@ function MapCanvas({
             <g
               key={d.id}
               transform={`translate(${linkedNode.x}, ${linkedNode.y})`}
-              onClick={() => onSelectDestination && onSelectDestination(d)}
-              className="cursor-pointer select-none"
+              onClick={() => {
+                onUserPan?.();
+                const centerX = bounds.x + bounds.w / 2;
+                const centerY = bounds.y + bounds.h / 2;
+                setPan({ x: centerX - linkedNode.x, y: centerY - linkedNode.y });
+                if (onSelectDestination) onSelectDestination(d);
+              }}
+              className="cursor-pointer select-none transition-transform active:scale-95"
             >
               <rect
                 x={-pillWidth / 2}

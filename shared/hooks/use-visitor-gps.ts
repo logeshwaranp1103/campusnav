@@ -79,6 +79,7 @@ export function useVisitorGps(
   // Refs to prevent duplicate watchers and hold stable references
   const watchIdRef = useRef<number | null>(null);
   const lastPositionRef = useRef<{ latitude: number; longitude: number } | null>(null);
+  const lastTimestampRef = useRef<number>(0);
   const lastMovementHeadingRef = useRef<number | null>(null);
   const isMountedRef = useRef(true);
 
@@ -156,9 +157,27 @@ export function useVisitorGps(
           return;
         }
 
-        // Reject very poor accuracy
+        // Reject very poor accuracy (> 65m)
         if (!isAccuracyAcceptable(normalized.accuracy)) {
           return;
+        }
+
+        // GPS Jump Protection: Reject impossible teleport jumps (> 30 m/s ~ 108 km/h for pedestrian navigation)
+        if (lastPositionRef.current && lastTimestampRef.current > 0) {
+          const dtSec = (normalized.timestamp - lastTimestampRef.current) / 1000;
+          if (dtSec > 0.2 && dtSec < 30) {
+            const jumpDist = calculateGeographicDistance(
+              lastPositionRef.current.latitude,
+              lastPositionRef.current.longitude,
+              normalized.latitude,
+              normalized.longitude
+            );
+            const impliedSpeed = jumpDist / dtSec;
+            if (impliedSpeed > 30 && (normalized.accuracy ?? 10) > 25) {
+              // Spurious GPS teleport jump -> ignore
+              return;
+            }
+          }
         }
 
         // Jitter filter: skip tiny movements
@@ -215,6 +234,7 @@ export function useVisitorGps(
           latitude: normalized.latitude,
           longitude: normalized.longitude,
         };
+        lastTimestampRef.current = normalized.timestamp;
 
         // Direct GPS-to-Canvas conversion: calculate canvas position directly from real GPS latitude and longitude
         const computedCanvas = gpsToCanvas(normalized.latitude, normalized.longitude);
