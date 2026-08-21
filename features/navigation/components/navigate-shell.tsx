@@ -430,6 +430,9 @@ export function NavigateShell() {
 
     setRoute(clientRoute);
     setLoading(false);
+    if (live && clientRoute) {
+      navSession.startNavigationSession(startDest, endDest, clientRoute);
+    }
 
     if (hasObstacles) {
       toast({

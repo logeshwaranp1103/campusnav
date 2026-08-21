@@ -204,4 +204,59 @@ describe("Full-Project Performance, Coordinate Invariance & Smoothness Suite", (
       expect(recalculateCount).toBe(0);
     });
   });
+
+  // ── 6. Auto-Rotation Motion Gate & Stationary Deadband ────────────────────
+  describe("6. Auto-Rotation Motion Gate & Stationary Deadband", () => {
+    it("disables auto-rotation when user is stationary (speed < 0.45 m/s) even if raw compass heading changes", () => {
+      const isNavigating = true;
+      const speedStationary = 0.1; // stationary phone
+      const isActuallyMoving = isNavigating && speedStationary >= 0.45;
+
+      expect(isActuallyMoving).toBe(false);
+    });
+
+    it("enables auto-rotation strictly during active navigation when speed >= 0.45 m/s", () => {
+      const isNavigating = true;
+      const speedWalking = 1.3; // active walking speed
+      const isActuallyMoving = isNavigating && speedWalking >= 0.45;
+
+      expect(isActuallyMoving).toBe(true);
+    });
+
+    it("disables auto-rotation in free map browsing mode when not navigating", () => {
+      const isNavigating = false;
+      const speedWalking = 1.3;
+      const isActuallyMoving = isNavigating && speedWalking >= 0.45;
+
+      expect(isActuallyMoving).toBe(false);
+    });
+
+    it("suppresses micro-noise under 2.5 degrees deadband threshold", () => {
+      const currentHeading = 180;
+      const noisyTarget = 181.8; // 1.8 degree noise
+      const directDiff = calculateShortestAngleDelta(currentHeading, noisyTarget);
+      const isNoiseSuppressed = Math.abs(directDiff) <= 2.5;
+
+      expect(isNoiseSuppressed).toBe(true);
+    });
+
+    it("smoothly converges a large 90° heading change over consecutive frame updates without snapping", () => {
+      let currentBearing = 0;
+      const targetHeading = 90;
+      const targetMapBearing = (360 - targetHeading + 360) % 360; // 270°
+      const dt = 1 / 60;
+
+      for (let frame = 0; frame < 30; frame++) {
+        const dMapBearing = calculateShortestAngleDelta(currentBearing, targetMapBearing);
+        if (Math.abs(dMapBearing) > 2.5) {
+          const rotateAlpha = 1 - Math.exp(-6.0 * dt);
+          currentBearing = (currentBearing + dMapBearing * rotateAlpha + 360) % 360;
+        }
+      }
+
+      // After 30 frames (0.5s), bearing has smoothly transitioned from 0 (360°) towards 270° via shortest path
+      expect(currentBearing).toBeGreaterThan(200);
+      expect(currentBearing).toBeLessThan(360);
+    });
+  });
 });

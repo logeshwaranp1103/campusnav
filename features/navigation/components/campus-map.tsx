@@ -791,21 +791,19 @@ function MapCanvas({
           });
         }
 
-        // Automatic Google-Maps-Style Map Auto-Rotation (Aligns map smoothly with heading)
-        if (targetHeading >= 0) {
-          const isMoving = (gps?.speed !== null && gps?.speed !== undefined && gps.speed > 0.25) || (gps?.heading !== null && gps?.heading !== undefined && gps.heading >= 0) || isNavigating;
-          if (isMoving) {
-            const targetMapBearing = (360 - targetHeading + 360) % 360;
-            const dMapBearing = calculateShortestAngleDelta(bearingRef.current, targetMapBearing);
-            // Low-pass noise deadband filter: smooth rotation without compass jitter
-            if (Math.abs(dMapBearing) > 0.5) {
-              const rotateAlpha = 1 - Math.exp(-8.0 * dt);
-              const nextBearing = (bearingRef.current + dMapBearing * rotateAlpha + 360) % 360;
-              bearingRef.current = nextBearing;
-              if (Math.abs(nextBearing - lastReportedBearingRef.current) > 0.3) {
-                lastReportedBearingRef.current = nextBearing;
-                onBearingChange?.(nextBearing);
-              }
+        // Automatic Google-Maps-Style Map Auto-Rotation (Aligns map smoothly ONLY during active navigation AND real physical motion)
+        const isActuallyMoving = isNavigating && gps?.speed !== null && gps?.speed !== undefined && gps.speed >= 0.45;
+        if (isActuallyMoving && targetHeading >= 0) {
+          const targetMapBearing = (360 - targetHeading + 360) % 360;
+          const dMapBearing = calculateShortestAngleDelta(bearingRef.current, targetMapBearing);
+          // Stationary deadband & low-pass filter: ignore micro-noise under 2.5 degrees to eliminate jitter
+          if (Math.abs(dMapBearing) > 2.5) {
+            const rotateAlpha = 1 - Math.exp(-6.0 * dt);
+            const nextBearing = (bearingRef.current + dMapBearing * rotateAlpha + 360) % 360;
+            bearingRef.current = nextBearing;
+            if (Math.abs(nextBearing - lastReportedBearingRef.current) > 0.4) {
+              lastReportedBearingRef.current = nextBearing;
+              onBearingChange?.(nextBearing);
             }
           }
         }
