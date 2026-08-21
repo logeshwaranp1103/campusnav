@@ -682,8 +682,10 @@ function MapCanvas({
           if (isMoving && targetHeading >= 0) {
             const targetMapBearing = (360 - targetHeading + 360) % 360;
             const dMapBearing = calculateShortestAngleDelta(bearingRef.current, targetMapBearing);
-            if (Math.abs(dMapBearing) > 0.15) {
-              const nextBearing = (bearingRef.current + dMapBearing * 0.10 + 360) % 360;
+            // Low-pass noise filter: ignore compass jitter under 2.0 degrees
+            if (Math.abs(dMapBearing) > 2.0) {
+              const nextBearing = (bearingRef.current + dMapBearing * 0.08 + 360) % 360;
+              bearingRef.current = nextBearing;
               onBearingChange?.(nextBearing);
             }
           }
@@ -1231,11 +1233,11 @@ function MapCanvas({
   const boundsCenterX = bounds.x + bounds.w / 2;
   const boundsCenterY = bounds.y + bounds.h / 2;
 
-  // ── Canonical Camera Center Rotation Pivot ──
-  // The camera viewport center in world coordinates is ALWAYS (boundsCenterX - pan.x, boundsCenterY - pan.y).
-  // Rotating around the camera viewport center guarantees zero visual jumping during pan, zoom, or rotation.
-  const rotationPivotX = boundsCenterX - pan.x;
-  const rotationPivotY = boundsCenterY - pan.y;
+  // ── Canonical Camera Rotation Pivot ──
+  // During navigation follow mode, pivot directly around the user's world position (visualGps.x, visualGps.y).
+  // This eliminates marker shifting across the screen when the map rotates!
+  const rotationPivotX = isFollowingUser && targetGpsPos ? visualGps.x : boundsCenterX - pan.x;
+  const rotationPivotY = isFollowingUser && targetGpsPos ? visualGps.y : boundsCenterY - pan.y;
 
   return (
     <svg

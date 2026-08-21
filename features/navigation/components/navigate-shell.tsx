@@ -1084,6 +1084,7 @@ export function NavigateShell() {
               {live && toSelected && (
                 <LiveRoutePanel
                   destinationId={toSelected.id}
+                  fromId={fromSelected?.id || (route?.nodes[0]?.id)}
                   onPosition={(p) => setLivePos(p)}
                   onArrive={() => toast({ type: "success", title: "Arrived at destination!" })}
                 />

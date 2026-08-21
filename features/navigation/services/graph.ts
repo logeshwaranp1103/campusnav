@@ -3,7 +3,7 @@ import type { Edge, Node, Obstacle } from "../../../shared/data/campus";
 import { buildAdjacencyGraph } from "../../../lib/routing/graph";
 import { findShortestPath } from "../../../lib/routing/dijkstra";
 import { calculateTurnAngle, turnIconFromAngle, getNodeVector, cleanLandmarkName, formatInstructionText, type DirectionIcon } from "../../../lib/routing/directions";
-import { calculateGeographicDistance, getNodeGeographicCoordinates } from "../../../lib/geo/haversine";
+import { calculateGeographicDistance, getNodeGeographicCoordinates, findContextAwareNearestNodes } from "../../../lib/geo/haversine";
 
 import { WALK_SPEED, EV_SPEED, type TravelMode } from "../../../lib/routing/edge-accessibility";
 import { validateCampusGraph } from "../../../shared/lib/graph-validator";
@@ -120,8 +120,27 @@ function computeShortestPathForData(
       normalized === "n-live-user" ||
       normalized === "your location"
     ) {
+      const userLoc = options?.userLocation;
+      const uLat = userLoc?.lat ?? (userLoc as any)?.latitude;
+      const uLng = userLoc?.lng ?? (userLoc as any)?.longitude;
+      const uX = (userLoc as any)?.x;
+      const uY = (userLoc as any)?.y;
+      const userCanvasPos = (typeof uX === "number" && typeof uY === "number" && !isNaN(uX) && !isNaN(uY))
+        ? { x: uX, y: uY }
+        : null;
+
+      const ranked = findContextAwareNearestNodes(uLat || 0, uLng || 0, data.nodes, {
+        isInside: false,
+        floors: data.floors,
+        userCanvasPos,
+      });
+
+      if (ranked.length > 0) {
+        return ranked.map((n) => n.id);
+      }
+
       const outdoorNodes = data.nodes.filter(
-        (n) =>
+        (n: Node) =>
           n.floorId === "f-out" ||
           n.floorId === "outdoor" ||
           n.type === "OUTDOOR" ||
@@ -131,22 +150,6 @@ function computeShortestPathForData(
           n.type === "CORRIDOR" ||
           n.isEntranceNode
       );
-
-      const userLoc = options?.userLocation;
-      if (userLoc) {
-        const uLat = userLoc.lat ?? (userLoc as any).latitude;
-        const uLng = userLoc.lng ?? (userLoc as any).longitude;
-        if (typeof uLat === "number" && typeof uLng === "number" && uLat !== 0 && uLng !== 0) {
-          const sorted = outdoorNodes.slice().sort((a, b) => {
-            const ga = getNodeGeographicCoordinates(a);
-            const gb = getNodeGeographicCoordinates(b);
-            const da = calculateGeographicDistance(uLat, uLng, ga.lat, ga.lng);
-            const db = calculateGeographicDistance(uLat, uLng, gb.lat, gb.lng);
-            return da - db;
-          });
-          if (sorted.length > 0) return sorted.map((n) => n.id);
-        }
-      }
 
       if (outdoorNodes.length > 0) return outdoorNodes.map((n) => n.id);
       if (data.nodes.length > 0) return [data.nodes[0].id];
@@ -246,7 +249,7 @@ function computeShortestPathForData(
 
   if (startNodeIds.length === 0 || endNodeIds.length === 0) return null;
 
-  // Primary search: Evaluate all candidate node combinations on obstacle-free graph
+  // Primary search: Evaluate candidate node combinations in ascending distance order
   let bestResult: ReturnType<typeof findShortestPath> = null;
   let isObstacleFree = false;
 
@@ -257,6 +260,23 @@ function computeShortestPathForData(
 
   for (const sId of startNodeIds) {
     for (const eId of endNodeIds) {
+      // Prevent routing from node to itself if alternate start nodes exist
+      if (sId === eId && startNodeIds.length > 1) {
+        continue;
+      }
+
+      const sNode = nodeMap.get(sId);
+      const uLoc = options?.userLocation;
+      if (uLoc && sNode) {
+        const sCoord = getNodeGeographicCoordinates(sNode);
+        const uLat = uLoc.lat ?? (uLoc as any).latitude;
+        const uLng = uLoc.lng ?? (uLoc as any).longitude;
+        if (typeof uLat === "number" && typeof uLng === "number" && uLat !== 0 && uLng !== 0) {
+          const candDist = calculateGeographicDistance(uLat, uLng, sCoord.lat, sCoord.lng);
+          console.debug(`[NearestNode] Evaluating start candidate ${sId} (${sNode.name || "unnamed"}) at ${candDist}m to ${eId}`);
+        }
+      }
+
       const res = findShortestPath(primaryGraph, nodeMap, sId, eId);
       if (res) {
         // If starting from Live Location, startNodeIds are already ranked in order of distance to the user!
@@ -269,6 +289,8 @@ function computeShortestPathForData(
           bestResult = res;
           isObstacleFree = true;
         }
+      } else {
+        console.debug(`[NearestNode] Candidate start node ${sId} is disconnected from destination ${eId}; trying next candidate...`);
       }
     }
     if (isStartingFromLiveLocation && bestResult) {

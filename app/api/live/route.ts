@@ -8,17 +8,40 @@ export const runtime = "nodejs";
 // as if the user is walking the route.
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
-  const from = searchParams.get("from") ?? "n-gate";
+  const fromParam = searchParams.get("from");
   const to = searchParams.get("to");
-  
-  // Look up by destination id to find the linked node, else treat `to` as a node id directly
-  const dest = to ? campusStore.getWorkingData().destinations.find((d) => d.id === to) : null;
+
+  const working = campusStore.getWorkingData();
+  const dest = to ? working.destinations.find((d) => d.id === to) : null;
   const endNodeId = dest?.nodeId ?? to ?? "";
-  const route = endNodeId ? shortestPath(from, endNodeId) : null;
+
+  let fromNodeId = fromParam ?? "n-gate";
+
+  // If start node equals destination node, pick a distinct outdoor/entrance start node
+  if (fromNodeId === endNodeId && working.nodes.length > 1) {
+    const alternateStart = working.nodes.find(
+      (n) => n.id !== endNodeId && (n.type === "BUILDING_ENTRANCE" || n.type === "GATE" || n.floorId === "f-out")
+    );
+    if (alternateStart) {
+      fromNodeId = alternateStart.id;
+    }
+  }
+
+  let route = (endNodeId && fromNodeId) ? shortestPath(fromNodeId, endNodeId) : null;
+
+  // If route is 1 node (start == end), ensure a valid multi-step route is found
+  if (route && route.nodes.length <= 1 && working.nodes.length > 1) {
+    const alternateStart = working.nodes.find(
+      (n) => n.id !== endNodeId && (n.type === "BUILDING_ENTRANCE" || n.type === "GATE" || n.floorId === "f-out")
+    );
+    if (alternateStart) {
+      route = shortestPath(alternateStart.id, endNodeId);
+    }
+  }
 
   const encoder = new TextEncoder();
 
-  if (!to || !route) {
+  if (!to || !route || route.nodes.length === 0) {
     const stream = new ReadableStream({
       start(controller) {
         controller.enqueue(

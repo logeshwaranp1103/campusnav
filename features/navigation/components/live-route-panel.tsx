@@ -9,6 +9,7 @@ import { Badge } from "@/shared/components/ui/badge";
 
 type Props = {
   destinationId: string;
+  fromId?: string;
   onArrive?: () => void;
   onPosition?: (pos: Position) => void;
 };
@@ -21,18 +22,38 @@ type Position = {
   progress: number;
 };
 
-export function LiveRoutePanel({ destinationId, onArrive, onPosition }: Props) {
+export function LiveRoutePanel({ destinationId, fromId, onArrive, onPosition }: Props) {
   const [route, setRoute] = useState<Route | null>(null);
   const [pos, setPos] = useState<Position | null>(null);
   const [arrived, setArrived] = useState(false);
   const arrivedRef = useRef(false);
+  const esRef = useRef<EventSource | null>(null);
+
+  const onArriveRef = useRef(onArrive);
+  onArriveRef.current = onArrive;
+  const onPositionRef = useRef(onPosition);
+  onPositionRef.current = onPosition;
 
   useEffect(() => {
     if (!destinationId) return;
     setArrived(false);
     arrivedRef.current = false;
-    const url = `/api/live?to=${encodeURIComponent(destinationId)}`;
+
+    // Clean up any previous EventSource instance
+    if (esRef.current) {
+      esRef.current.close();
+      esRef.current = null;
+    }
+
+    const queryParams = new URLSearchParams();
+    queryParams.set("to", destinationId);
+    if (fromId) {
+      queryParams.set("from", fromId);
+    }
+
+    const url = `/api/live?${queryParams.toString()}`;
     const es = new EventSource(url);
+    esRef.current = es;
 
     es.addEventListener("route", (e) => {
       setRoute(JSON.parse((e as MessageEvent).data));
@@ -40,21 +61,26 @@ export function LiveRoutePanel({ destinationId, onArrive, onPosition }: Props) {
     es.addEventListener("position", (e) => {
       const p = JSON.parse((e as MessageEvent).data);
       setPos(p);
-      onPosition?.(p);
+      onPositionRef.current?.(p);
     });
     es.addEventListener("arrived", () => {
       if (arrivedRef.current) return;
       arrivedRef.current = true;
       setArrived(true);
-      onArrive?.();
+      onArriveRef.current?.();
       es.close();
     });
     es.onerror = () => {
       es.close();
     };
 
-    return () => es.close();
-  }, [destinationId, onArrive, onPosition]);
+    return () => {
+      if (esRef.current) {
+        esRef.current.close();
+        esRef.current = null;
+      }
+    };
+  }, [destinationId, fromId]);
 
   const nextInstruction: RouteInstruction | undefined =
     route && pos ? route.instructions[Math.min(pos.index, route.instructions.length - 1)] : undefined;

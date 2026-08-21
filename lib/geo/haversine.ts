@@ -215,6 +215,12 @@ export function findContextAwareNearestNodes(
     return [];
   }
 
+  // Exclude explicitly non-accessible or closed nodes from candidate selection
+  const validNodes = nodes.filter((n) => n.accessible !== false);
+  if (validNodes.length === 0) {
+    return [];
+  }
+
   const getDistance = (n: Node) => {
     const g = getNodeGeographicCoordinates(n);
     if (g.lat !== 0 && g.lng !== 0) {
@@ -227,13 +233,13 @@ export function findContextAwareNearestNodes(
 
   if (context.isInside && context.buildingId && context.floorId && context.floorId !== "f-out") {
     // Priority 1: Same floor nodes
-    const sameFloorNodes = nodes.filter((n) => n.floorId === context.floorId);
+    const sameFloorNodes = validNodes.filter((n) => n.floorId === context.floorId);
     if (sameFloorNodes.length > 0) {
       candidatePool.push(...sameFloorNodes.slice().sort((a, b) => getDistance(a) - getDistance(b)));
     }
 
     // Priority 2: Same building entrance nodes
-    const buildingEntranceNodes = nodes.filter((n) => {
+    const buildingEntranceNodes = validNodes.filter((n) => {
       const isEnt = Boolean(n.isEntranceNode || n.type === "BUILDING_ENTRANCE" || (n.name && n.name.toLowerCase().includes("entrance")));
       if (!isEnt) return false;
       const nodeFloor = context.floors?.find((f) => f.id === n.floorId);
@@ -244,7 +250,7 @@ export function findContextAwareNearestNodes(
     }
 
     // Priority 3: Same building other floor nodes
-    const buildingNodes = nodes.filter((n) => {
+    const buildingNodes = validNodes.filter((n) => {
       const nodeFloor = context.floors?.find((f) => f.id === n.floorId);
       return nodeFloor?.buildingId === context.buildingId;
     });
@@ -254,7 +260,7 @@ export function findContextAwareNearestNodes(
   }
 
   // Priority 4: Outdoor / Campus walkway nodes
-  const outdoorNodes = nodes.filter((n) =>
+  const outdoorNodes = validNodes.filter((n) =>
     n.floorId === "f-out" ||
     n.floorId === "outdoor" ||
     n.type === "OUTDOOR" ||
@@ -270,7 +276,7 @@ export function findContextAwareNearestNodes(
   }
 
   // Priority 5: All remaining nodes sorted by geographic distance
-  candidatePool.push(...nodes.slice().sort((a, b) => getDistance(a) - getDistance(b)));
+  candidatePool.push(...validNodes.slice().sort((a, b) => getDistance(a) - getDistance(b)));
 
   // Deduplicate candidate list preserving priority order
   const uniqueCandidateIds = new Set<string>();
