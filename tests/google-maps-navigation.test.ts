@@ -55,15 +55,20 @@ describe("Google Maps Experience — Enhanced Navigation & Gestures Spec", () =>
       expect(route!.edges.every((e) => isEVAllowed(e))).toBe(true);
     });
 
-    it("returns null when no EV-accessible route exists (no silent fallback)", () => {
-      // n3 is only connected by WALK-only paths e2 and e3
+    it("calculates multimodal EV drive + walk route when destination is on a pedestrian-only path", () => {
+      // n3 is only connected by WALK-only paths e2 and e3.
+      // EV route drives n1 -> n2 (100m EV drive), transfers at n2, and walks n2 -> n3 (50m walk).
       const route = shortestPath("n1", "n3", {
         travelMode: "EV",
         graphData,
       });
 
-      // Must be null (not silently falling back to WALK)
-      expect(route).toBeNull();
+      expect(route).not.toBeNull();
+      expect(route?.travelMode).toBe("MULTIMODAL");
+      expect(route?.evDistance).toBe(100);
+      expect(route?.walkDistance).toBe(50);
+      expect(route?.transferNodeId).toBe("n2");
+      expect(route?.nodes.map((n) => n.id)).toEqual(["n1", "n2", "n3"]);
     });
 
     it("multi-stop routing respects the requested travel mode", () => {

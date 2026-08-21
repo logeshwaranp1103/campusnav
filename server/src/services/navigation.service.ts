@@ -14,6 +14,7 @@ export interface RouteRequest {
   endPoint?: NavigationPoint;
   accessibleOnly?: boolean;
   maxWalkingDistance?: number;
+  travelMode?: "WALK" | "EV";
 }
 
 export interface RouteStep {
@@ -113,7 +114,75 @@ export class NavigationService {
         : edges;
 
       // 4. Run Dijkstra Pathfinding
-      const pathResult = this.dijkstra(startId, endId, nodes, validEdges);
+      let pathResult = this.dijkstra(startId, endId, nodes, validEdges);
+
+      if (request.travelMode === "EV") {
+        const evEdges = validEdges.filter((e) => (e.pathType === "EV" || e.type === "ROAD"));
+        const directEvResult = this.dijkstra(startId, endId, nodes, evEdges);
+        if (directEvResult && directEvResult.pathNodes.length > 0) {
+          pathResult = directEvResult;
+        } else {
+          // Multimodal EV + Walk
+          const evNodeIds = new Set<string>();
+          evEdges.forEach((e) => {
+            evNodeIds.add(e.from);
+            evNodeIds.add(e.to);
+          });
+
+          if (evNodeIds.size > 0) {
+            let bestTransfer: { pStart: string; pEnd: string; totalCost: number } | null = null;
+            const evNodeArr = Array.from(evNodeIds);
+            const startEvs = evNodeIds.has(startId) ? [startId] : evNodeArr;
+            const endEvs = evNodeIds.has(endId) ? [endId] : evNodeArr;
+
+            for (const pStart of startEvs) {
+              const dWalkStart = pStart === startId ? 0 : (this.dijkstra(startId, pStart, nodes, validEdges)?.totalDistance ?? Infinity);
+              if (dWalkStart === Infinity) continue;
+
+              for (const pEnd of endEvs) {
+                const dWalkEnd = pEnd === endId ? 0 : (this.dijkstra(pEnd, endId, nodes, validEdges)?.totalDistance ?? Infinity);
+                if (dWalkEnd === Infinity) continue;
+
+                const dEv = pStart === pEnd ? 0 : (this.dijkstra(pStart, pEnd, nodes, evEdges)?.totalDistance ?? Infinity);
+                if (dEv === Infinity) continue;
+
+                const cost = (dWalkStart + dWalkEnd) / 1.3 + dEv / 5.5;
+                if (!bestTransfer || cost < bestTransfer.totalCost) {
+                  bestTransfer = { pStart, pEnd, totalCost: cost };
+                }
+              }
+            }
+
+            if (bestTransfer) {
+              const seg1 = bestTransfer.pStart === startId ? null : this.dijkstra(startId, bestTransfer.pStart, nodes, validEdges);
+              const seg2 = bestTransfer.pStart === bestTransfer.pEnd ? null : this.dijkstra(bestTransfer.pStart, bestTransfer.pEnd, nodes, evEdges);
+              const seg3 = bestTransfer.pEnd === endId ? null : this.dijkstra(bestTransfer.pEnd, endId, nodes, validEdges);
+
+              const stitchedNodes: Array<{ id: string; name?: string; x: number; y: number; lat?: number; lng?: number; floorId?: string }> = [];
+              const stitchedEdges: Array<{ id: string; from: string; to: string; distance: number; type?: string }> = [];
+
+              [seg1, seg2, seg3].forEach((seg) => {
+                if (!seg) return;
+                seg.pathNodes.forEach((n) => {
+                  if (stitchedNodes.length === 0 || stitchedNodes[stitchedNodes.length - 1].id !== n.id) {
+                    stitchedNodes.push(n);
+                  }
+                });
+                stitchedEdges.push(...seg.pathEdges);
+              });
+
+              if (stitchedNodes.length > 0) {
+                pathResult = {
+                  pathNodes: stitchedNodes,
+                  pathEdges: stitchedEdges,
+                  totalDistance: stitchedEdges.reduce((acc, e) => acc + e.distance, 0),
+                };
+              }
+            }
+          }
+        }
+      }
+
       if (!pathResult || pathResult.pathNodes.length === 0) {
         return {
           success: false,
@@ -129,7 +198,6 @@ export class NavigationService {
       const pathNodes = pathResult.pathNodes;
       const pathEdges = pathResult.pathEdges;
       const totalDistance = Math.round(pathResult.totalDistance);
-      // Average walking speed ~1.35 m/s
       const estimatedTimeSeconds = Math.ceil(totalDistance / 1.35);
 
       const steps = this.generateNavigationSteps(pathNodes, pathEdges);

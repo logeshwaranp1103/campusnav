@@ -1,4 +1,6 @@
 import { describe, it, expect, beforeEach } from "vitest";
+declare const beforeAll: (fn: () => any) => void;
+declare const afterAll: (fn: () => any) => void;
 import { hashPassword, verifyPassword } from "../lib/auth/auth";
 import { logAuditEvent, getAuditLogs } from "../lib/services/audit-service";
 import { publishDraftGraph } from "../lib/services/publish-service";
@@ -13,6 +15,28 @@ describe("Production Backend & API Services", () => {
   const testNodeIds = ["n-ent-clean", "n-stair-bad", "n-corr-2"];
   const testEdgeIds = ["e-test-1"];
   const testObstacleIds = ["obs-test-1"];
+
+  let savedDraftSnapshot: any = null;
+
+  beforeAll(async () => {
+    if (prisma) {
+      const draft = await prisma.draftGraph.findUnique({ where: { id: "active-draft" } });
+      savedDraftSnapshot = draft?.snapshot ?? null;
+    }
+  });
+
+  afterAll(async () => {
+    if (prisma && savedDraftSnapshot) {
+      await prisma.draftGraph.upsert({
+        where: { id: "active-draft" },
+        create: { id: "active-draft", snapshot: savedDraftSnapshot },
+        update: { snapshot: savedDraftSnapshot },
+      });
+      await prisma.publishedGraph.create({
+        data: { id: `pub-${Date.now()}`, version: 9999, snapshot: savedDraftSnapshot },
+      });
+    }
+  });
 
   const cleanupTestData = async () => {
     if (prisma) {

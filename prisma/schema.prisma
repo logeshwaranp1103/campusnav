@@ -35,16 +35,16 @@ model Session {
 }
 
 model Campus {
-  id           String         @id @default(uuid())
+  id           String        @id @default(uuid())
   name         String
-  slug         String         @unique
+  slug         String        @unique
   description  String?
   latitude     Float
   longitude    Float
   boundary     Json?
-  status       MapStatus      @default(DRAFT)
-  createdAt    DateTime       @default(now())
-  updatedAt    DateTime       @updatedAt
+  status       MapStatus     @default(DRAFT)
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
   buildings    Building[]
   destinations Destination[]
   doors        Door[]
@@ -309,6 +309,18 @@ model AuditLog {
   @@index([userId])
 }
 
+model NodePhoto {
+  id        String   @id @default(uuid())
+  nodeId    String   @unique
+  mimeType  String   @default("image/jpeg")
+  data      Bytes
+  size      Int
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([nodeId])
+}
+
 enum RoleName {
   ADMIN
   EDITOR
@@ -374,16 +386,4 @@ enum EdgeType {
 enum PathType {
   EV
   WALK
-}
-
-model NodePhoto {
-  id        String   @id @default(uuid())
-  nodeId    String   @unique
-  mimeType  String   @default("image/jpeg")
-  data      Bytes
-  size      Int
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  @@index([nodeId])
 }

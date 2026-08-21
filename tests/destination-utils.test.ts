@@ -72,11 +72,12 @@ describe("Navigation Destination Filtering Rules", () => {
     expect(names.length).toBe(2);
   });
 
-  it("ensures nodes with visibleToUser = false are strictly excluded from user search results", () => {
+  it("ensures nodes with visibleToUser = false or unnamed nodes are strictly excluded from user search results", () => {
     const nodes: Node[] = [
       { id: "n1", name: "Visible Room 101", floorId: "f1", x: 10, y: 10, type: "ROOM", visibleToUser: true },
       { id: "n2", name: "Hidden Waypoint 102", floorId: "f1", x: 20, y: 20, type: "CORRIDOR", visibleToUser: false },
       { id: "n3", name: "Default Unspecified Node", floorId: "f1", x: 30, y: 30, type: "ROOM" },
+      { id: "n4", floorId: "f1", x: 40, y: 40, type: "CORRIDOR" }, // Unnamed
     ];
 
     const result = getValidNavigationDestinations({ nodes });
@@ -84,6 +85,7 @@ describe("Navigation Destination Filtering Rules", () => {
 
     expect(resultIds).toContain("n1");
     expect(resultIds).not.toContain("n2");
-    expect(resultIds).not.toContain("n3");
+    expect(resultIds).toContain("n3");
+    expect(resultIds).not.toContain("n4");
   });
 });

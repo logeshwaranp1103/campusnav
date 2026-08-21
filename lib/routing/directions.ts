@@ -13,6 +13,9 @@ export type DirectionIcon =
   | "stairs-up"
   | "stairs-down"
   | "lift"
+  | "parking"
+  | "ev-drive"
+  | "walk"
   | "arrive";
 
 export interface DirectionStep {

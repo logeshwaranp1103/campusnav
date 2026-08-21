@@ -62,6 +62,7 @@ export function isStairOrLiftOrUnnamed(item: {
 export function getValidNavigationDestinations(
   publishedData: {
     buildings?: Building[];
+    floors?: any[];
     nodes?: Node[];
     destinations?: Destination[];
   }
@@ -69,6 +70,13 @@ export function getValidNavigationDestinations(
   const nodes = publishedData.nodes || [];
   const destinations = publishedData.destinations || [];
   const buildings = publishedData.buildings || [];
+  const floors = publishedData.floors || [];
+
+  const buildingMap = new Map<string, Building>();
+  buildings.forEach((b) => buildingMap.set(b.id, b));
+
+  const floorMap = new Map<string, any>();
+  floors.forEach((f: any) => floorMap.set(f.id, f));
 
   const nodeMap = new Map<string, Node>();
   nodes.forEach((n) => nodeMap.set(n.id, n));
@@ -96,39 +104,56 @@ export function getValidNavigationDestinations(
     validMap.set(key, d);
   });
 
-  // 2. Process all named nodes (only include nodes where Visible to User = YES)
+  // 2. Process all named nodes (include all named nodes unless explicitly hidden with visibleToUser === false)
   nodes.forEach((n) => {
     if (isStairOrLiftOrUnnamed(n)) return;
-    if (n.visibleToUser !== true) return;
+    if (n.visibleToUser === false) return;
 
     if (!validMap.has(n.id)) {
+      const floor = n.floorId ? floorMap.get(n.floorId) : undefined;
+      const bld = floor?.buildingId ? buildingMap.get(floor.buildingId) : undefined;
+
+      const isEntrance = n.type === "GATE" || n.type === "BUILDING_ENTRANCE" || n.type === "ROOM_ENTRANCE" || n.isEntranceNode || n.name!.toLowerCase().includes("entrance") || n.name!.toLowerCase().includes("gate");
+      const isRoom = n.type === "ROOM" || n.type === "LABORATORY" || n.type === "OFFICE" || n.name!.toLowerCase().includes("room") || n.name!.toLowerCase().includes("lab") || n.name!.toLowerCase().includes("class");
+
       const typeLabel =
-        n.type === "GATE"
+        n.type === "GATE" || n.name!.toLowerCase().includes("gate")
           ? "Gate / Entrance"
-          : n.type === "BUILDING_ENTRANCE" || n.type === "ROOM_ENTRANCE"
-          ? "Entrance"
-          : n.type === "RECEPTION"
+          : isEntrance
+          ? "Building Entrance"
+          : n.type === "RECEPTION" || n.name!.toLowerCase().includes("reception")
           ? "Reception"
-          : n.type === "ROOM" || n.type === "LABORATORY" || n.type === "OFFICE"
-          ? "Classroom / Room"
+          : isRoom
+          ? "Room / Lab"
           : n.type === "OUTDOOR" || n.type === "OUTDOOR_PATH" || n.type === "ROAD_JUNCTION"
           ? "Campus Landmark"
-          : "Map Location";
+          : (bld ? `${bld.name} Node` : "Campus Node");
+
+      const locationDetails = [
+        bld ? bld.name : null,
+        floor && floor.name && floor.id !== "f-out" ? floor.name : null,
+      ].filter(Boolean).join(" · ");
+
+      const categoryDisplay = locationDetails ? `${typeLabel} · ${locationDetails}` : typeLabel;
 
       validMap.set(n.id, {
         id: n.id,
         name: n.name!.trim(),
-        category: typeLabel,
+        category: categoryDisplay,
         floorId: n.floorId,
         nodeId: n.id,
         x: n.x,
         y: n.y,
+        buildingId: bld?.id,
         aliases: [
           n.name!.trim(),
           n.type,
+          ...(bld ? [bld.name, bld.shortCode || ""] : []),
           ...(n.name!.toLowerCase().includes("gate") ? ["gate", "entrance", "main gate", "a gate"] : []),
           ...(n.name!.toLowerCase().includes("entrance") ? ["entrance", "entry", "door"] : []),
-        ],
+          ...(n.name!.toLowerCase().includes("room") ? ["classroom", "room", "hall"] : []),
+          ...(n.name!.toLowerCase().includes("node") ? ["node", "waypoint"] : []),
+        ].filter(Boolean),
       });
     }
   });

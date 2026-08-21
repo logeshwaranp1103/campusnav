@@ -10,6 +10,7 @@ import { Building2, Layers, Compass, Locate, AlertTriangle, ZoomIn, ZoomOut, Max
 import { useVisitorGps } from "@/shared/hooks/use-visitor-gps";
 import { PIXELS_PER_METER, gpsToCanvas } from "@/lib/geo/projection";
 import { getBuildingCanvasPoints, getBuildingCenter, getPolygonSvgPath, isPointInsideBuilding, isPointOutsideAllBuildings } from "@/lib/geo/building-geometry";
+import { detectBuildingAtGps } from "@/lib/geo/containment";
 import { DestinationDetailsDrawer } from "./destination-details-drawer";
 import { isEventActive } from "@/shared/lib/event-utils";
 
@@ -97,7 +98,10 @@ export function CampusMap({ route, livePosition, progress, gps: passedGps, onNav
       if (!dest) return null;
       if (dest.id === "dest-live-user-location") {
         if (gps.isGpsActive && gps.lat && gps.lng) {
-          const bld = allBuildings.find((b) => isPointInsideBuilding(gps.lat, gps.lng, b));
+          const containment = detectBuildingAtGps(gps.lat, gps.lng, gps.accuracy || 10, allBuildings);
+          if (containment.isInside && containment.building) return containment.building.id;
+          const canvasPos = gps.canvasPos || gpsToCanvas(gps.lat, gps.lng);
+          const bld = allBuildings.find((b) => isPointInsideBuilding(canvasPos.x, canvasPos.y, b));
           if (bld) return bld.id;
         }
         if (livePosition) {
@@ -146,7 +150,15 @@ export function CampusMap({ route, livePosition, progress, gps: passedGps, onNav
     }
 
     if (gps.isGpsActive && gps.lat && gps.lng) {
-      const bld = allBuildings.find((b) => isPointInsideBuilding(gps.lat, gps.lng, b));
+      const containment = detectBuildingAtGps(gps.lat, gps.lng, gps.accuracy || 10, allBuildings);
+      if (containment.isInside && containment.building) {
+        return allFloors
+          .filter((f) => f.buildingId === containment.building!.id)
+          .sort((a, b) => a.ordinal - b.ordinal)
+          .map((f) => f.id);
+      }
+      const canvasPos = gps.canvasPos || gpsToCanvas(gps.lat, gps.lng);
+      const bld = allBuildings.find((b) => isPointInsideBuilding(canvasPos.x, canvasPos.y, b));
       if (bld) {
         return allFloors
           .filter((f) => f.buildingId === bld.id)
@@ -1427,6 +1439,20 @@ function MapCanvas({
             blockedEdgeIds.has(baseId) ||
             blockedEdgeIds.has(`${baseId}_rev`);
 
+          const isEvEdge = e.pathType === "EV";
+
+          const strokeGlow = isSegmentBlocked
+            ? "#ef4444"
+            : isEvEdge
+            ? "#059669"
+            : "#2563eb";
+
+          const strokeCore = isSegmentBlocked
+            ? "#ef4444"
+            : isEvEdge
+            ? "#10b981"
+            : "#3b82f6";
+
           return (
             <g key={`r-group-${e.id}-${i}`}>
               {/* Outer Glow Line */}
@@ -1435,10 +1461,10 @@ function MapCanvas({
                 y1={from.y}
                 x2={to.x}
                 y2={to.y}
-                stroke={isSegmentBlocked ? "#ef4444" : "#2563eb"}
-                strokeWidth={isSegmentBlocked ? 8 : 9}
-                strokeOpacity={isSegmentBlocked ? 0.4 : 0.35}
-                strokeDasharray={isSegmentBlocked ? "6 4" : undefined}
+                stroke={strokeGlow}
+                strokeWidth={isSegmentBlocked ? 8 : isEvEdge ? 10 : 8}
+                strokeOpacity={isSegmentBlocked ? 0.4 : isEvEdge ? 0.35 : 0.3}
+                strokeDasharray={isSegmentBlocked ? "6 4" : (!isEvEdge && route?.travelMode === "MULTIMODAL" ? "5 4" : undefined)}
                 strokeLinecap="round"
               />
               {/* Inner Solid High-Contrast Path Line */}
@@ -1447,14 +1473,45 @@ function MapCanvas({
                 y1={from.y}
                 x2={to.x}
                 y2={to.y}
-                stroke={isSegmentBlocked ? "#ef4444" : "url(#routeGrad)"}
-                strokeWidth={isSegmentBlocked ? 5 : 4.5}
-                strokeDasharray={isSegmentBlocked ? "6 4" : undefined}
+                stroke={strokeCore}
+                strokeWidth={isSegmentBlocked ? 5 : isEvEdge ? 5.5 : 4}
+                strokeDasharray={isSegmentBlocked ? "6 4" : (!isEvEdge && route?.travelMode === "MULTIMODAL" ? "5 4" : undefined)}
                 strokeLinecap="round"
               />
             </g>
           );
         })}
+
+        {/* Multimodal Transfer Node Badge */}
+        {route?.transferNodeId && (() => {
+          const transNode = allNodes.find((n) => n.id === route.transferNodeId);
+          if (!transNode || (transNode.floorId !== floorId && floorId !== "f-out")) return null;
+          return (
+            <g transform={`translate(${transNode.x}, ${transNode.y - 18})`}>
+              <rect
+                x="-52"
+                y="-10"
+                width="104"
+                height="20"
+                rx="10"
+                fill="#059669"
+                stroke="#ffffff"
+                strokeWidth="1.5"
+                className="shadow-lg"
+              />
+              <text
+                x="0"
+                y="3.5"
+                textAnchor="middle"
+                fill="#ffffff"
+                fontSize="9"
+                fontWeight="800"
+              >
+                🅿️ Park & Walk
+              </text>
+            </g>
+          );
+        })()}
 
         {/* Nodes & Named Labels */}
         {scopeNodes.map((n) => {

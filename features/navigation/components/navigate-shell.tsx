@@ -17,6 +17,8 @@ import {
   Check,
   Camera,
   AlertTriangle,
+  DoorOpen,
+  DoorClosed,
 } from "lucide-react";
 import { campusStore } from "@/shared/lib/campus-store";
 import type { Destination, Node as CampusNode, Edge } from "@/shared/data/campus";
@@ -29,6 +31,8 @@ import { Badge } from "@/shared/components/ui/badge";
 import { useVisitorGps } from "@/shared/hooks/use-visitor-gps";
 import { findContextAwareNearestNode } from "@/lib/geo/haversine";
 import { isPointInsideBuilding } from "@/lib/geo/building-geometry";
+import { detectBuildingAtGps } from "@/lib/geo/containment";
+import { gpsToCanvas } from "@/lib/geo/projection";
 import { useNavigationStore } from "@/features/navigation/navigation-store";
 import { CampusMap } from "./campus-map";
 import { LiveRoutePanel } from "./live-route-panel";
@@ -135,8 +139,13 @@ export function NavigateShell() {
   const detectedBuilding = useMemo(() => {
     if (!gps.isGpsActive || !gps.lat || !gps.lng) return null;
     const blds = publishedData.buildings || [];
-    return blds.find((b) => isPointInsideBuilding(gps.lat, gps.lng, b)) || null;
-  }, [gps.isGpsActive, gps.lat, gps.lng, publishedData.buildings]);
+    const containment = detectBuildingAtGps(gps.lat, gps.lng, gps.accuracy || 10, blds);
+    if (containment.isInside && containment.building) {
+      return containment.building;
+    }
+    const canvasPos = gps.canvasPos || gpsToCanvas(gps.lat, gps.lng);
+    return blds.find((b) => isPointInsideBuilding(canvasPos.x, canvasPos.y, b)) || null;
+  }, [gps.isGpsActive, gps.lat, gps.lng, gps.accuracy, gps.canvasPos, publishedData.buildings]);
 
   // Check if detected building has multiple floors
   const hasMultipleFloors = useMemo(() => {
@@ -191,24 +200,56 @@ export function NavigateShell() {
   const fromSuggestions = useMemo(() => {
     const q = fromQuery.trim().toLowerCase();
     const list = [YOUR_LOCATION_DEST, ...allDestinations];
-    if (!q) return list;
-    return list.filter((d) => {
-      const nameMatch = d.name.toLowerCase().includes(q);
-      const catMatch = (d.category ?? "").toLowerCase().includes(q);
-      const aliasMatch = (d.aliases ?? []).some((a) => a.toLowerCase().includes(q));
-      return nameMatch || catMatch || aliasMatch;
+    const filtered = !q
+      ? list
+      : list.filter((d) => {
+          const nameMatch = d.name.toLowerCase().includes(q);
+          const catMatch = (d.category ?? "").toLowerCase().includes(q);
+          const aliasMatch = (d.aliases ?? []).some((a) => a.toLowerCase().includes(q));
+          return nameMatch || catMatch || aliasMatch;
+        });
+
+    return [...filtered].sort((a, b) => {
+      if (a.id === YOUR_LOCATION_ID) return -1;
+      if (b.id === YOUR_LOCATION_ID) return 1;
+      if (q) {
+        const aStarts = a.name.toLowerCase().startsWith(q);
+        const bStarts = b.name.toLowerCase().startsWith(q);
+        if (aStarts && !bStarts) return -1;
+        if (!aStarts && bStarts) return 1;
+      }
+      const aIsBld = a.category === "Building";
+      const bIsBld = b.category === "Building";
+      if (!aIsBld && bIsBld) return -1;
+      if (aIsBld && !bIsBld) return 1;
+      return a.name.localeCompare(b.name);
     });
   }, [fromQuery, allDestinations]);
 
   // Suggestions for TO
   const toSuggestions = useMemo(() => {
     const q = toQuery.trim().toLowerCase();
-    if (!q) return allDestinations;
-    return allDestinations.filter((d) => {
-      const nameMatch = d.name.toLowerCase().includes(q);
-      const catMatch = (d.category ?? "").toLowerCase().includes(q);
-      const aliasMatch = (d.aliases ?? []).some((a) => a.toLowerCase().includes(q));
-      return nameMatch || catMatch || aliasMatch;
+    const filtered = !q
+      ? allDestinations
+      : allDestinations.filter((d) => {
+          const nameMatch = d.name.toLowerCase().includes(q);
+          const catMatch = (d.category ?? "").toLowerCase().includes(q);
+          const aliasMatch = (d.aliases ?? []).some((a) => a.toLowerCase().includes(q));
+          return nameMatch || catMatch || aliasMatch;
+        });
+
+    return [...filtered].sort((a, b) => {
+      if (q) {
+        const aStarts = a.name.toLowerCase().startsWith(q);
+        const bStarts = b.name.toLowerCase().startsWith(q);
+        if (aStarts && !bStarts) return -1;
+        if (!aStarts && bStarts) return 1;
+      }
+      const aIsBld = a.category === "Building";
+      const bIsBld = b.category === "Building";
+      if (!aIsBld && bIsBld) return -1;
+      if (aIsBld && !bIsBld) return 1;
+      return a.name.localeCompare(b.name);
     });
   }, [toQuery, allDestinations]);
 
@@ -317,6 +358,11 @@ export function NavigateShell() {
       combinedInstructions = combinedInstructions.concat(segRoute.instructions || []);
     }
 
+    const isMultimodal = combinedEdges.some((e) => e.pathType === "EV") && combinedEdges.some((e) => e.pathType === "WALK");
+    const evDist = combinedEdges.filter((e) => e.pathType === "EV").reduce((acc, e) => acc + e.distance, 0);
+    const walkDist = combinedEdges.filter((e) => e.pathType !== "EV").reduce((acc, e) => acc + e.distance, 0);
+    const lastEvEdge = combinedEdges.filter((e) => e.pathType === "EV").pop();
+
     const clientRoute: Route = {
       id: `multi-${Date.now()}`,
       nodes: combinedNodes,
@@ -324,6 +370,10 @@ export function NavigateShell() {
       distance: totalDistance,
       durationSec: totalDurationSec,
       instructions: combinedInstructions,
+      travelMode: isMultimodal ? "MULTIMODAL" : mode,
+      evDistance: evDist,
+      walkDistance: walkDist,
+      transferNodeId: isMultimodal && lastEvEdge ? lastEvEdge.to : undefined,
       hasObstacles,
     };
 
@@ -338,10 +388,14 @@ export function NavigateShell() {
       });
     } else {
       const stopCount = currentStops.filter((s) => s.dest).length;
+      const modeSummary = mode === "EV"
+        ? (isMultimodal ? `🚗 ${Math.round(evDist)}m Drive + 🚶 ${Math.round(walkDist)}m Walk` : "🚗 EV Mode")
+        : "🚶 Walk Mode";
+
       toast({
         type: "success",
         title: stopCount > 0 ? `Multi-Stop Route (${stopCount + 2} waypoints)` : `Route to ${endDest.name}`,
-        description: `${Math.round(totalDistance)} m · ~${Math.round(totalDurationSec / 60)} min · ${mode === "EV" ? "🚗 EV Mode" : "🚶 Walk Mode"}`,
+        description: `${Math.round(totalDistance)} m · ~${Math.max(1, Math.round(totalDurationSec / 60))} min · ${modeSummary}`,
       });
     }
 
@@ -619,36 +673,53 @@ export function NavigateShell() {
                   animate={{ opacity: 1, y: 0 }}
                   exit={{ opacity: 0, y: -4 }}
                   transition={{ duration: 0.15 }}
-                  className="card absolute left-0 right-0 top-full z-40 mt-1 max-h-56 overflow-y-auto p-1 shadow-2xl border bg-[rgb(var(--card))]/98 backdrop-blur-md"
+                  className="card absolute left-0 right-0 top-full z-40 mt-1 max-h-72 overflow-y-auto p-1.5 shadow-2xl border bg-[rgb(var(--card))]/98 backdrop-blur-md divide-y divide-[rgb(var(--border)/0.4)]"
                 >
-                  {fromSuggestions.map((d) => (
-                    <button
-                      key={d.id}
-                      onClick={() => pickFromDestination(d)}
-                      className={cn(
-                        "flex w-full items-center gap-2.5 rounded-xl p-2 text-left transition-colors hover:bg-[rgb(var(--muted))] cursor-pointer min-h-[44px]",
-                        d.id === YOUR_LOCATION_ID && "bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/30 mb-1"
-                      )}
-                    >
-                      <div className={cn(
-                        "rounded-lg p-1.5 shrink-0",
-                        d.id === YOUR_LOCATION_ID ? "bg-emerald-500 text-white" : "bg-[rgb(var(--primary)/0.1)] text-[rgb(var(--primary))]"
-                      )}>
-                        {d.id === YOUR_LOCATION_ID ? <Navigation2 className="h-3.5 w-3.5 animate-pulse" /> : <MapPin className="h-3.5 w-3.5" />}
-                      </div>
-                      <div className="min-w-0 flex-1">
-                        <div className={cn("truncate text-xs font-medium", d.id === YOUR_LOCATION_ID && "font-bold text-emerald-600 dark:text-emerald-400")}>
-                          {d.name}
+                  {fromSuggestions.map((d) => {
+                    const isBld = d.category === "Building";
+                    const isLoc = d.id === YOUR_LOCATION_ID;
+                    const isEnt = (d.category || "").toLowerCase().includes("entrance") || (d.category || "").toLowerCase().includes("gate");
+                    const isRoom = (d.category || "").toLowerCase().includes("room") || (d.category || "").toLowerCase().includes("lab");
+
+                    return (
+                      <button
+                        key={d.id}
+                        onClick={() => pickFromDestination(d)}
+                        className={cn(
+                          "flex w-full items-center gap-2.5 rounded-xl p-2 text-left transition-colors hover:bg-[rgb(var(--muted))] cursor-pointer min-h-[46px]",
+                          isLoc && "bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/30 mb-1"
+                        )}
+                      >
+                        <div className={cn(
+                          "rounded-lg p-2 shrink-0 flex items-center justify-center",
+                          isLoc ? "bg-emerald-500 text-white" :
+                          isBld ? "bg-indigo-500/15 text-indigo-600 dark:text-indigo-400" :
+                          isEnt ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400" :
+                          isRoom ? "bg-purple-500/15 text-purple-600 dark:text-purple-400" :
+                          "bg-blue-500/15 text-blue-600 dark:text-blue-400"
+                        )}>
+                          {isLoc ? <Navigation2 className="h-3.5 w-3.5 animate-pulse" /> :
+                           isBld ? <Building2 className="h-3.5 w-3.5" /> :
+                           isEnt ? <DoorOpen className="h-3.5 w-3.5" /> :
+                           isRoom ? <DoorClosed className="h-3.5 w-3.5" /> :
+                           <MapPin className="h-3.5 w-3.5" />}
                         </div>
-                        <div className="truncate text-[10px] text-[rgb(var(--muted-fg))]">{d.category}</div>
-                      </div>
-                      {d.id === YOUR_LOCATION_ID && (
-                        <Badge variant="success" className="shrink-0 text-[9px] px-1.5 py-0">
-                          Live GPS
-                        </Badge>
-                      )}
-                    </button>
-                  ))}
+                        <div className="min-w-0 flex-1">
+                          <div className={cn("truncate text-xs font-semibold", isLoc && "text-emerald-600 dark:text-emerald-400")}>
+                            {d.name}
+                          </div>
+                          <div className="truncate text-[10.5px] text-[rgb(var(--muted-fg))] font-medium">
+                            {d.category || "Campus Location"}
+                          </div>
+                        </div>
+                        {isLoc && (
+                          <Badge variant="success" className="shrink-0 text-[9px] px-1.5 py-0">
+                            Live GPS
+                          </Badge>
+                        )}
+                      </button>
+                    );
+                  })}
                 </motion.div>
               )}
             </AnimatePresence>
@@ -716,23 +787,40 @@ export function NavigateShell() {
                     animate={{ opacity: 1, y: 0 }}
                     exit={{ opacity: 0, y: -4 }}
                     transition={{ duration: 0.15 }}
-                    className="card absolute left-0 right-0 top-full z-40 mt-1 max-h-52 overflow-y-auto p-1 shadow-2xl border bg-[rgb(var(--card))]/98 backdrop-blur-md"
+                    className="card absolute left-0 right-0 top-full z-40 mt-1 max-h-72 overflow-y-auto p-1.5 shadow-2xl border bg-[rgb(var(--card))]/98 backdrop-blur-md divide-y divide-[rgb(var(--border)/0.4)]"
                   >
                     {allDestinations
                       .filter((d) => d.name.toLowerCase().includes(stop.query.toLowerCase()))
-                      .map((d) => (
-                        <button
-                          key={d.id}
-                          onClick={() => pickStop(idx, d)}
-                          className="flex w-full items-center gap-2.5 rounded-xl p-2 text-left text-xs hover:bg-[rgb(var(--muted))] cursor-pointer min-h-[44px]"
-                        >
-                          <MapPin className="h-3.5 w-3.5 text-amber-500 shrink-0" />
-                          <div className="min-w-0 flex-1">
-                            <div className="truncate font-medium">{d.name}</div>
-                            <div className="text-[10px] text-[rgb(var(--muted-fg))]">{d.category}</div>
-                          </div>
-                        </button>
-                      ))}
+                      .map((d) => {
+                        const isBld = d.category === "Building";
+                        const isEnt = (d.category || "").toLowerCase().includes("entrance") || (d.category || "").toLowerCase().includes("gate");
+                        const isRoom = (d.category || "").toLowerCase().includes("room") || (d.category || "").toLowerCase().includes("lab");
+
+                        return (
+                          <button
+                            key={d.id}
+                            onClick={() => pickStop(idx, d)}
+                            className="flex w-full items-center gap-2.5 rounded-xl p-2 text-left text-xs hover:bg-[rgb(var(--muted))] cursor-pointer min-h-[46px]"
+                          >
+                            <div className={cn(
+                              "rounded-lg p-2 shrink-0 flex items-center justify-center",
+                              isBld ? "bg-indigo-500/15 text-indigo-600 dark:text-indigo-400" :
+                              isEnt ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400" :
+                              isRoom ? "bg-purple-500/15 text-purple-600 dark:text-purple-400" :
+                              "bg-amber-500/15 text-amber-600 dark:text-amber-400"
+                            )}>
+                              {isBld ? <Building2 className="h-3.5 w-3.5" /> :
+                               isEnt ? <DoorOpen className="h-3.5 w-3.5" /> :
+                               isRoom ? <DoorClosed className="h-3.5 w-3.5" /> :
+                               <MapPin className="h-3.5 w-3.5" />}
+                            </div>
+                            <div className="min-w-0 flex-1">
+                              <div className="truncate font-semibold text-xs">{d.name}</div>
+                              <div className="truncate text-[10.5px] text-[rgb(var(--muted-fg))] font-medium">{d.category || "Campus Location"}</div>
+                            </div>
+                          </button>
+                        );
+                      })}
                   </motion.div>
                 )}
               </AnimatePresence>
@@ -774,23 +862,40 @@ export function NavigateShell() {
                   animate={{ opacity: 1, y: 0 }}
                   exit={{ opacity: 0, y: -4 }}
                   transition={{ duration: 0.15 }}
-                  className="card absolute left-0 right-0 top-full z-40 mt-1 max-h-56 overflow-y-auto p-1 shadow-2xl border bg-[rgb(var(--card))]/98 backdrop-blur-md"
+                  className="card absolute left-0 right-0 top-full z-40 mt-1 max-h-72 overflow-y-auto p-1.5 shadow-2xl border bg-[rgb(var(--card))]/98 backdrop-blur-md divide-y divide-[rgb(var(--border)/0.4)]"
                 >
-                  {toSuggestions.map((d) => (
-                    <button
-                      key={d.id}
-                      onClick={() => pickToDestination(d)}
-                      className="flex w-full items-center gap-2.5 rounded-xl p-2 text-left transition-colors hover:bg-[rgb(var(--muted))] cursor-pointer min-h-[44px]"
-                    >
-                      <div className="rounded-lg bg-[rgb(var(--primary)/0.1)] p-1.5 text-[rgb(var(--primary))] shrink-0">
-                        <MapPin className="h-3.5 w-3.5" />
-                      </div>
-                      <div className="min-w-0 flex-1">
-                        <div className="truncate text-xs font-medium">{d.name}</div>
-                        <div className="truncate text-[10px] text-[rgb(var(--muted-fg))]">{d.category}</div>
-                      </div>
-                    </button>
-                  ))}
+                  {toSuggestions.map((d) => {
+                    const isBld = d.category === "Building";
+                    const isEnt = (d.category || "").toLowerCase().includes("entrance") || (d.category || "").toLowerCase().includes("gate");
+                    const isRoom = (d.category || "").toLowerCase().includes("room") || (d.category || "").toLowerCase().includes("lab");
+
+                    return (
+                      <button
+                        key={d.id}
+                        onClick={() => pickToDestination(d)}
+                        className="flex w-full items-center gap-2.5 rounded-xl p-2 text-left transition-colors hover:bg-[rgb(var(--muted))] cursor-pointer min-h-[46px]"
+                      >
+                        <div className={cn(
+                          "rounded-lg p-2 shrink-0 flex items-center justify-center",
+                          isBld ? "bg-indigo-500/15 text-indigo-600 dark:text-indigo-400" :
+                          isEnt ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400" :
+                          isRoom ? "bg-purple-500/15 text-purple-600 dark:text-purple-400" :
+                          "bg-blue-500/15 text-blue-600 dark:text-blue-400"
+                        )}>
+                          {isBld ? <Building2 className="h-3.5 w-3.5" /> :
+                           isEnt ? <DoorOpen className="h-3.5 w-3.5" /> :
+                           isRoom ? <DoorClosed className="h-3.5 w-3.5" /> :
+                           <MapPin className="h-3.5 w-3.5" />}
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <div className="truncate text-xs font-semibold">{d.name}</div>
+                          <div className="truncate text-[10.5px] text-[rgb(var(--muted-fg))] font-medium">
+                            {d.category || "Campus Location"}
+                          </div>
+                        </div>
+                      </button>
+                    );
+                  })}
                 </motion.div>
               )}
             </AnimatePresence>

@@ -4,13 +4,17 @@ import { buildAdjacencyGraph } from "../../../lib/routing/graph";
 import { findShortestPath } from "../../../lib/routing/dijkstra";
 import { calculateTurnAngle, turnIconFromAngle, getNodeVector, cleanLandmarkName, formatInstructionText, type DirectionIcon } from "../../../lib/routing/directions";
 
+import { WALK_SPEED, EV_SPEED, type TravelMode } from "../../../lib/routing/edge-accessibility";
+import { validateCampusGraph } from "../../../shared/lib/graph-validator";
+
 export type RouteInstruction = {
   text: string;
   distance: number;
-  icon?: DirectionIcon;
+  icon?: DirectionIcon | "parking" | "ev-drive" | "walk";
   floor?: string;
   building?: string;
-  transition?: "outdoor->indoor" | "indoor->outdoor" | "floor" | "arrive";
+  transition?: "outdoor->indoor" | "indoor->outdoor" | "floor" | "arrive" | "ev->walk" | "walk->ev";
+  mode?: "WALK" | "EV";
   targetNodeId?: string;
   targetNodeName?: string;
   photoUrl?: string;
@@ -25,12 +29,12 @@ export type Route = {
   instructions: RouteInstruction[];
   hasObstacles?: boolean;
   obstacleWarning?: string;
+  travelMode?: TravelMode | "MULTIMODAL";
+  evDistance?: number;
+  walkDistance?: number;
+  transferNodeId?: string;
+  transferNodeName?: string;
 };
-
-const WALK_SPEED = 1.3; // m/s
-
-import { validateCampusGraph } from "../../../shared/lib/graph-validator";
-import { type TravelMode } from "../../../lib/routing/edge-accessibility";
 
 export function shortestPath(
   startId: string,
@@ -107,12 +111,18 @@ function computeShortestPathForData(
       normalized === "n-live-user" ||
       normalized === "your location"
     ) {
-      const outdoorNode = data.nodes.find(
+      const outdoorNodes = data.nodes.filter(
         (n) =>
-          n.floorId === "f-out" &&
-          (n.type === "BUILDING_ENTRANCE" || n.type === "OUTDOOR" || n.type === "OUTDOOR_PATH" || n.isEntranceNode)
+          n.floorId === "f-out" ||
+          n.floorId === "outdoor" ||
+          n.type === "OUTDOOR" ||
+          n.type === "OUTDOOR_PATH" ||
+          n.type === "BUILDING_ENTRANCE" ||
+          n.type === "GATE" ||
+          n.type === "CORRIDOR" ||
+          n.isEntranceNode
       );
-      if (outdoorNode) return [outdoorNode.id];
+      if (outdoorNodes.length > 0) return outdoorNodes.map((n) => n.id);
       if (data.nodes.length > 0) return [data.nodes[0].id];
     }
 
@@ -223,6 +233,18 @@ function computeShortestPathForData(
   }
 
   if (!bestResult) {
+    if (travelMode === "EV") {
+      const multimodalRoute = computeMultimodalEVRouteForData(
+        data,
+        startNodeIds,
+        endNodeIds,
+        obstacles
+      );
+      if (multimodalRoute) {
+        return multimodalRoute;
+      }
+    }
+
     const { graph: fallbackGraph } = buildAdjacencyGraph(data.nodes, data.edges, {
       obstacles,
       floors: data.floors,
@@ -258,6 +280,7 @@ function computeShortestPathForData(
       from: adj.from,
       to: adj.to,
       type: adj.type,
+      pathType: adj.pathType ?? original?.pathType ?? (travelMode === "EV" ? "EV" : "WALK"),
       distance: adj.distance,
       bidirectional: adj.bidirectional,
     };
@@ -268,12 +291,17 @@ function computeShortestPathForData(
     return obs.edgeIds && obs.edgeIds.some((eId) => routeEdgeIds.has(eId) || routeEdgeIds.has(`${eId}_rev`));
   });
 
+  const speed = travelMode === "EV" ? EV_SPEED : WALK_SPEED;
+
   return {
     id: `${startId}->${endId}`,
     nodes: bestResult.nodes,
     edges: rawEdges,
     distance: bestResult.totalDistance,
-    durationSec: Math.round(bestResult.totalDistance / WALK_SPEED),
+    durationSec: Math.round(bestResult.totalDistance / speed),
+    travelMode,
+    evDistance: travelMode === "EV" ? bestResult.totalDistance : 0,
+    walkDistance: travelMode === "WALK" ? bestResult.totalDistance : 0,
     hasObstacles: hasObstacleSegment,
     obstacleWarning: hasObstacleSegment
       ? "⚠️ Route passes through active hazard / construction zones. Exercise caution while navigating."
@@ -281,6 +309,175 @@ function computeShortestPathForData(
     instructions: buildInstructions(
       bestResult.nodes,
       rawEdges,
+      floorById,
+      buildingById
+    ),
+  };
+}
+
+function computeMultimodalEVRouteForData(
+  data: ReturnType<typeof campusStore.getWorkingData> | ReturnType<typeof campusStore.getPublishedData>,
+  startNodeIds: string[],
+  endNodeIds: string[],
+  obstacles: Obstacle[] = []
+): Route | null {
+  const { graph: walkGraph, nodeMap } = buildAdjacencyGraph(data.nodes, data.edges, {
+    obstacles,
+    floors: data.floors,
+    allowObstaclePenalties: false,
+    travelMode: "WALK",
+  });
+
+  const { graph: evGraph } = buildAdjacencyGraph(data.nodes, data.edges, {
+    obstacles,
+    floors: data.floors,
+    allowObstaclePenalties: false,
+    travelMode: "EV",
+  });
+
+  // Collect all nodes that have at least one EV edge
+  const evNodeIds = new Set<string>();
+  for (const [nodeId, edges] of evGraph.entries()) {
+    if (edges && edges.length > 0) {
+      evNodeIds.add(nodeId);
+    }
+  }
+
+  // If no EV roads exist in campus, fallback
+  if (evNodeIds.size === 0) {
+    return null;
+  }
+
+  const evNodeList = Array.from(evNodeIds);
+
+  interface MultimodalCandidate {
+    startId: string;
+    startEvId: string;
+    endEvId: string;
+    endId: string;
+    walkStartRes: ReturnType<typeof findShortestPath>;
+    evDriveRes: ReturnType<typeof findShortestPath>;
+    walkEndRes: ReturnType<typeof findShortestPath>;
+    totalTravelCost: number;
+    totalDistance: number;
+    evDistance: number;
+    walkDistance: number;
+  }
+
+  let bestCandidate: MultimodalCandidate | null = null;
+
+  for (const sId of startNodeIds) {
+    const isStartEv = evNodeIds.has(sId);
+    const candidateStartEvs = isStartEv ? [sId] : evNodeList;
+
+    for (const eId of endNodeIds) {
+      const isEndEv = evNodeIds.has(eId);
+      const candidateEndEvs = isEndEv ? [eId] : evNodeList;
+
+      for (const pStart of candidateStartEvs) {
+        let walkStartRes: ReturnType<typeof findShortestPath> = null;
+        let walkStartDist = 0;
+        if (sId !== pStart) {
+          walkStartRes = findShortestPath(walkGraph, nodeMap, sId, pStart);
+          if (!walkStartRes) continue;
+          walkStartDist = walkStartRes.totalDistance;
+        }
+
+        for (const pEnd of candidateEndEvs) {
+          let walkEndRes: ReturnType<typeof findShortestPath> = null;
+          let walkEndDist = 0;
+          if (pEnd !== eId) {
+            walkEndRes = findShortestPath(walkGraph, nodeMap, pEnd, eId);
+            if (!walkEndRes) continue;
+            walkEndDist = walkEndRes.totalDistance;
+          }
+
+          let evDriveRes: ReturnType<typeof findShortestPath> = null;
+          let evDriveDist = 0;
+          if (pStart !== pEnd) {
+            evDriveRes = findShortestPath(evGraph, nodeMap, pStart, pEnd);
+            if (!evDriveRes) continue;
+            evDriveDist = evDriveRes.totalDistance;
+          }
+
+          const walkTime = (walkStartDist + walkEndDist) / WALK_SPEED;
+          const evTime = evDriveDist / EV_SPEED;
+          const totalTravelCost = walkTime + evTime;
+          const totalDistance = walkStartDist + evDriveDist + walkEndDist;
+
+          if (!bestCandidate || totalTravelCost < bestCandidate.totalTravelCost) {
+            bestCandidate = {
+              startId: sId,
+              startEvId: pStart,
+              endEvId: pEnd,
+              endId: eId,
+              walkStartRes,
+              evDriveRes,
+              walkEndRes,
+              totalTravelCost,
+              totalDistance,
+              evDistance: evDriveDist,
+              walkDistance: walkStartDist + walkEndDist,
+            };
+          }
+        }
+      }
+    }
+  }
+
+  if (!bestCandidate) return null;
+
+  // Stitch combined nodes and edges
+  const combinedNodes: Node[] = [];
+  const combinedEdges: Edge[] = [];
+
+  const appendSegment = (res: ReturnType<typeof findShortestPath>, mode: "WALK" | "EV") => {
+    if (!res) return;
+    for (let i = 0; i < res.nodes.length; i++) {
+      if (combinedNodes.length === 0 || combinedNodes[combinedNodes.length - 1].id !== res.nodes[i].id) {
+        combinedNodes.push(res.nodes[i]);
+      }
+    }
+    for (const adj of res.edges) {
+      const original = data.edges.find((e) => e.id === adj.edgeId || `${e.id}_rev` === adj.edgeId);
+      combinedEdges.push({
+        id: original?.id ?? adj.edgeId,
+        from: adj.from,
+        to: adj.to,
+        type: adj.type,
+        pathType: mode,
+        distance: adj.distance,
+        bidirectional: adj.bidirectional,
+      });
+    }
+  };
+
+  appendSegment(bestCandidate.walkStartRes, "WALK");
+  appendSegment(bestCandidate.evDriveRes, "EV");
+  appendSegment(bestCandidate.walkEndRes, "WALK");
+
+  const floorById = (id: string) => data.floors.find((f) => f.id === id);
+  const buildingById = (id: string) => data.buildings.find((b) => b.id === id);
+
+  const transferNode = nodeMap.get(bestCandidate.endEvId);
+  const totalDurationSec = Math.round(
+    bestCandidate.evDistance / EV_SPEED + bestCandidate.walkDistance / WALK_SPEED
+  );
+
+  return {
+    id: `${startNodeIds[0]}->${endNodeIds[0]}`,
+    nodes: combinedNodes,
+    edges: combinedEdges,
+    distance: bestCandidate.totalDistance,
+    durationSec: totalDurationSec,
+    travelMode: bestCandidate.evDistance > 0 && bestCandidate.walkDistance > 0 ? "MULTIMODAL" : "EV",
+    evDistance: bestCandidate.evDistance,
+    walkDistance: bestCandidate.walkDistance,
+    transferNodeId: bestCandidate.walkDistance > 0 && bestCandidate.evDistance > 0 ? bestCandidate.endEvId : undefined,
+    transferNodeName: transferNode?.name || undefined,
+    instructions: buildInstructions(
+      combinedNodes,
+      combinedEdges,
       floorById,
       buildingById
     ),
@@ -368,6 +565,7 @@ function buildInstructions(
 
   for (let i = 0; i < es.length; i++) {
     const edge = es[i];
+    const prevEdge = i > 0 ? es[i - 1] : null;
     const fromNode = ns[i];
     const to = ns[i + 1];
     if (!to || !fromNode) continue;
@@ -392,7 +590,21 @@ function buildInstructions(
     const isOutdoorToIndoor = isFromOutdoor && !isToOutdoor;
     const isIndoorToOutdoor = !isFromOutdoor && isToOutdoor;
 
-    if (edge.type === "LIFT") {
+    // Check for EV <-> Walk mode transition
+    const isEvToWalk = prevEdge && prevEdge.pathType === "EV" && edge.pathType === "WALK";
+    const isWalkToEv = prevEdge && prevEdge.pathType === "WALK" && edge.pathType === "EV";
+
+    if (isEvToWalk) {
+      text = `🅿️ Park EV at ${fromNode.name || "drop-off point"} · Continue on foot`;
+      transitionType = "ev->walk";
+      icon = "parking";
+      prevVector = currentVector;
+    } else if (isWalkToEv) {
+      text = `🚗 Board EV at ${fromNode.name || "pickup point"} · Drive along road`;
+      transitionType = "walk->ev";
+      icon = "ev-drive";
+      prevVector = currentVector;
+    } else if (edge.type === "LIFT") {
       text = `Take lift to ${floor?.name ?? "next floor"}`;
       transitionType = "floor";
       icon = "lift";
@@ -434,6 +646,7 @@ function buildInstructions(
       floor: floor?.name,
       building: bld?.name,
       transition: transitionType,
+      mode: edge.pathType === "EV" ? "EV" : "WALK",
       targetNodeId: to.id,
       targetNodeName: to.name,
       photoUrl: to.photoUrl,

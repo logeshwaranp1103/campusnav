@@ -2,6 +2,9 @@ import type { Edge, PathType } from "@/shared/data/campus";
 
 export type TravelMode = "WALK" | "EV";
 
+export const WALK_SPEED = 1.3; // m/s (~4.7 km/h)
+export const EV_SPEED = 5.5;   // m/s (~20 km/h)
+
 /**
  * Normalizes and extracts the canonical PathType for an edge.
  * Legacy/fallback migration: if pathType is missing, ROAD edges default to "EV", others default to "WALK".

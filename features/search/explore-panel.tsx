@@ -113,9 +113,9 @@ export function ExplorePanel() {
         eventTitle: ev.title,
       }));
 
-    // Named Nodes (Gates, Entrances, Landmarks) from store (strictly require visibleToUser === true)
+    // Named Nodes (Gates, Entrances, Landmarks) from store
     const namedNodeItems = (storeData.nodes || [])
-      .filter((n) => n.name && n.name.trim().length > 0 && n.visibleToUser === true && !isStairOrLiftOrUnnamed(n))
+      .filter((n) => n.name && n.name.trim().length > 0 && n.visibleToUser !== false && !isStairOrLiftOrUnnamed(n))
       .map((n) => {
         const category =
           n.type === "GATE"

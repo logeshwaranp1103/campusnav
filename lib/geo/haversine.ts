@@ -239,31 +239,40 @@ export function findContextAwareNearestNode(
         }
       }
 
-      // 3. Fallback to nearest Entrance node globally (calculated by distance, not array index 0)
-      const allEntrances = nodes.filter((n) => n.isEntranceNode || n.type === "BUILDING_ENTRANCE" || n.name?.toLowerCase().includes("entrance"));
-      if (allEntrances.length > 0) {
-        let nearestGlobalEnt: Node | null = null;
-        let minGlobalDist = Infinity;
-        allEntrances.forEach((n) => {
-          let nLat = n.lat ?? (n.x !== undefined && n.y !== undefined ? canvasToGps(n.x, n.y).lat : NaN);
-          let nLng = n.lng ?? (n.x !== undefined && n.y !== undefined ? canvasToGps(n.x, n.y).lng : NaN);
-          if (!isNaN(nLat) && !isNaN(nLng)) {
-            const dist = calculateGeographicDistance(lat, lng, nLat, nLng);
-            if (dist < minGlobalDist) {
-              minGlobalDist = dist;
-              nearestGlobalEnt = n;
-            }
+      // 3. Fallback: If building has no indoor/entrance nodes mapped, find the nearest node geographically
+      const fallbackNodes = nodes.filter((n) =>
+        n.floorId === "f-out" ||
+        n.floorId === "outdoor" ||
+        n.type === "OUTDOOR" ||
+        n.type === "OUTDOOR_PATH" ||
+        n.type === "ROAD_JUNCTION" ||
+        n.type === "BUILDING_ENTRANCE" ||
+        n.type === "GATE" ||
+        n.type === "CORRIDOR" ||
+        n.isEntranceNode
+      );
+      const candidates = fallbackNodes.length > 0 ? fallbackNodes : nodes;
+      let nearestCandidate: Node | null = null;
+      let minCandidateDist = Infinity;
+      candidates.forEach((n) => {
+        let nLat = n.lat ?? (n.x !== undefined && n.y !== undefined ? canvasToGps(n.x, n.y).lat : NaN);
+        let nLng = n.lng ?? (n.x !== undefined && n.y !== undefined ? canvasToGps(n.x, n.y).lng : NaN);
+        if (!isNaN(nLat) && !isNaN(nLng)) {
+          const dist = calculateGeographicDistance(lat, lng, nLat, nLng);
+          if (dist < minCandidateDist) {
+            minCandidateDist = dist;
+            nearestCandidate = n;
           }
-        });
-        if (nearestGlobalEnt) {
-          return {
-            node: nearestGlobalEnt,
-            distanceMeters: minGlobalDist,
-            floorId: (nearestGlobalEnt as Node).floorId || "f-out",
-            buildingId: context.buildingId,
-            isIndoor: true,
-          };
         }
+      });
+      if (nearestCandidate) {
+        return {
+          node: nearestCandidate,
+          distanceMeters: minCandidateDist,
+          floorId: (nearestCandidate as Node).floorId || targetFloorId,
+          buildingId: context.buildingId,
+          isIndoor: true,
+        };
       }
 
       return {
@@ -321,6 +330,7 @@ export function findContextAwareNearestNode(
       n.type === "ROAD_JUNCTION" ||
       n.type === "BUILDING_ENTRANCE" ||
       n.type === "GATE" ||
+      n.type === "CORRIDOR" ||
       n.isEntranceNode
     );
   });

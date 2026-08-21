@@ -9,6 +9,7 @@ import {
 } from "../lib/routing/edge-accessibility";
 import { buildAdjacencyGraph } from "../lib/routing/graph";
 import { findShortestPath } from "../lib/routing/dijkstra";
+import { shortestPath } from "../features/navigation/services/graph";
 import { campusStore } from "../shared/lib/campus-store";
 import type { Node, Edge } from "../shared/data/campus";
 
@@ -102,7 +103,7 @@ describe("Routing Engine with Travel Modes (Walking vs EV)", () => {
     expect(result?.totalDistance).toBe(160);
   });
 
-  it("returns null for EV when only a WALK-only path connects endpoints", () => {
+  it("returns null for EV on strict EV graph when only a WALK-only path connects endpoints", () => {
     const isolatedEdges: Edge[] = [
       { id: "e-AB", from: "A", to: "B", type: "ROAD", pathType: "EV", distance: 50, bidirectional: true },
       { id: "e-BC", from: "B", to: "C", type: "WALK", pathType: "WALK", distance: 50, bidirectional: true },
@@ -114,10 +115,37 @@ describe("Routing Engine with Travel Modes (Walking vs EV)", () => {
     expect(walkResult).not.toBeNull();
     expect(walkResult?.nodes.map((n) => n.id)).toEqual(["A", "B", "C"]);
 
-    // EV cannot reach C because B -> C is WALK only
+    // Strict EV graph cannot reach C directly because B -> C is WALK only
     const evGraph = buildAdjacencyGraph(nodes, isolatedEdges, { travelMode: "EV" });
     const evResult = findShortestPath(evGraph.graph, evGraph.nodeMap, "A", "C");
     expect(evResult).toBeNull();
+  });
+
+  it("calculates multimodal EV + Walk route when destination is only reachable on foot", () => {
+    const isolatedEdges: Edge[] = [
+      { id: "e-AB", from: "A", to: "B", type: "ROAD", pathType: "EV", distance: 50, bidirectional: true },
+      { id: "e-BC", from: "B", to: "C", type: "WALK", pathType: "WALK", distance: 50, bidirectional: true },
+    ];
+
+    const route = shortestPath("A", "C", {
+      travelMode: "EV",
+      graphData: {
+        nodes,
+        edges: isolatedEdges,
+        floors: [],
+        buildings: [],
+        destinations: [],
+        obstacles: [],
+      },
+    });
+
+    expect(route).not.toBeNull();
+    expect(route?.travelMode).toBe("MULTIMODAL");
+    expect(route?.nodes.map((n) => n.id)).toEqual(["A", "B", "C"]);
+    expect(route?.evDistance).toBe(50);
+    expect(route?.walkDistance).toBe(50);
+    expect(route?.transferNodeId).toBe("B");
+    expect(route?.instructions.some((ins) => ins.transition === "ev->walk" || ins.icon === "parking")).toBe(true);
   });
 });
 
