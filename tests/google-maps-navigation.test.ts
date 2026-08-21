@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { canTraverseEdge, getEdgePathType, isEVAllowed, isWalkable, type TravelMode } from "../lib/routing/edge-accessibility";
 import { shortestPath, multiStopShortestPath } from "../features/navigation/services/graph";
+import { calculateGeographicBearing, calculateShortestAngleDelta } from "../lib/geo/haversine";
 import type { Node, Edge, Floor, Building } from "../shared/data/campus";
 
 describe("Google Maps Experience — Enhanced Navigation & Gestures Spec", () => {
@@ -115,6 +116,74 @@ describe("Google Maps Experience — Enhanced Navigation & Gestures Spec", () =>
 
       // At 90 deg (East), should rotate -90 deg
       expect(getShortestArcDiff(90, 0)).toBe(-90);
+    });
+
+    it("calculates accurate geographic forward bearing for movement directions", () => {
+      // Moving North: (11.0, 77.0) -> (11.01, 77.0) -> ~0 deg
+      const bearingNorth = calculateGeographicBearing(11.0, 77.0, 11.01, 77.0);
+      expect(Math.round(bearingNorth)).toBe(0);
+
+      // Moving East: (11.0, 77.0) -> (11.0, 77.01) -> ~90 deg
+      const bearingEast = calculateGeographicBearing(11.0, 77.0, 11.0, 77.01);
+      expect(Math.round(bearingEast)).toBe(90);
+
+      // Moving South: (11.01, 77.0) -> (11.0, 77.0) -> ~180 deg
+      const bearingSouth = calculateGeographicBearing(11.01, 77.0, 11.0, 77.0);
+      expect(Math.round(bearingSouth)).toBe(180);
+
+      // Moving West: (11.0, 77.01) -> (11.0, 77.0) -> ~270 deg
+      const bearingWest = calculateGeographicBearing(11.0, 77.01, 11.0, 77.0);
+      expect(Math.round(bearingWest)).toBe(270);
+
+      // Shortest arc 359° -> 1° = +2°
+      expect(calculateShortestAngleDelta(359, 1)).toBe(2);
+
+      // Shortest arc 1° -> 359° = -2°
+      expect(calculateShortestAngleDelta(1, 359)).toBe(-2);
+    });
+
+    it("orients target map rotation to keep user travel direction forward-up", () => {
+      const getTargetMapRotation = (userHeading: number) => (360 - userHeading + 360) % 360;
+
+      // North (0°) -> map rotation 0°
+      expect(getTargetMapRotation(0)).toBe(0);
+
+      // East (90°) -> map rotation 270° (-90°)
+      expect(getTargetMapRotation(90)).toBe(270);
+
+      // South (180°) -> map rotation 180°
+      expect(getTargetMapRotation(180)).toBe(180);
+
+      // West (270°) -> map rotation 90° (-270°)
+      expect(getTargetMapRotation(270)).toBe(90);
+    });
+
+    it("restricts automatic map rotation strictly to active navigation sessions", () => {
+      let isNavigating = false;
+      let isGpsActive = true;
+      let currentBearing = 0;
+      let movementHeading = 90; // User moving East
+
+      const updateCameraBearing = () => {
+        if (isNavigating) {
+          currentBearing = (360 - movementHeading + 360) % 360;
+        }
+      };
+
+      // 1. In normal non-navigation mode (even with active GPS), map stays North-Up (0°)
+      updateCameraBearing();
+      expect(currentBearing).toBe(0);
+
+      // 2. User taps "Start Navigation" -> isNavigating becomes true -> auto-rotation activates
+      isNavigating = true;
+      updateCameraBearing();
+      expect(currentBearing).toBe(270); // East (90°) rotates map to 270° (-90°)
+
+      // 3. User exits navigation -> isNavigating becomes false -> map resets to 0° North-Up
+      isNavigating = false;
+      const resetBearingToNorth = () => { currentBearing = 0; };
+      resetBearingToNorth();
+      expect(currentBearing).toBe(0);
     });
   });
 

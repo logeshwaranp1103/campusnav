@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-import { findNearestNodeByGps } from "@/lib/geo/haversine";
+import { findNearestNodeByGps, calculateGeographicBearing, calculateGeographicDistance } from "@/lib/geo/haversine";
 import { gpsToCanvas, MAP_ORIGIN } from "@/lib/geo/projection";
 import { campusStore } from "@/shared/lib/campus-store";
 import type { GPSLocation, GPSStatus, GPSPermissionState, GPSError } from "@/features/location/types";
@@ -172,6 +172,27 @@ export function useVisitorGps(
           return;
         }
 
+        // Calculate forward movement bearing if hardware heading is absent
+        let calculatedHeading: number | null = null;
+        if (normalized.heading !== null && !isNaN(normalized.heading) && normalized.heading >= 0) {
+          calculatedHeading = normalized.heading;
+        } else if (lastPositionRef.current) {
+          const moveDist = calculateGeographicDistance(
+            lastPositionRef.current.latitude,
+            lastPositionRef.current.longitude,
+            normalized.latitude,
+            normalized.longitude
+          );
+          if (moveDist >= 1.5) {
+            calculatedHeading = calculateGeographicBearing(
+              lastPositionRef.current.latitude,
+              lastPositionRef.current.longitude,
+              normalized.latitude,
+              normalized.longitude
+            );
+          }
+        }
+
         lastPositionRef.current = {
           latitude: normalized.latitude,
           longitude: normalized.longitude,
@@ -180,7 +201,7 @@ export function useVisitorGps(
         // Direct GPS-to-Canvas conversion: calculate canvas position directly from real GPS latitude and longitude
         const computedCanvas = gpsToCanvas(normalized.latitude, normalized.longitude);
         const nodes = campusStore.getPublishedData().nodes || [];
-        const nearestMatch = nodes.length > 0 ? findNearestNodeByGps(normalized.latitude, normalized.longitude, nodes) : { node: null, distance: Infinity };
+        const nearestMatch = nodes.length > 0 ? findNearestNodeByGps(normalized.latitude, normalized.longitude, nodes) : { node: null, distanceMeters: Infinity };
         const nearestNode = nearestMatch.node;
 
         let floorId = "f-out";
@@ -190,14 +211,13 @@ export function useVisitorGps(
 
         const nextCanvasPos = { x: computedCanvas.x, y: computedCanvas.y, floorId };
 
-
         // Sync to Zustand location store
         useLocationStore.getState().setLocationState({
           location: normalized,
           lat: normalized.latitude,
           lng: normalized.longitude,
           accuracy: normalized.accuracy ?? 10,
-          heading: normalized.heading !== null && !isNaN(normalized.heading) ? normalized.heading : 0,
+          heading: calculatedHeading ?? 0,
           speed: normalized.speed,
           timestamp: normalized.timestamp,
           canvasPos: nextCanvasPos,
@@ -215,10 +235,7 @@ export function useVisitorGps(
           lat: normalized.latitude,
           lng: normalized.longitude,
           accuracy: normalized.accuracy ?? 10,
-          heading:
-            normalized.heading !== null && !isNaN(normalized.heading)
-              ? normalized.heading
-              : prev.heading,
+          heading: calculatedHeading ?? prev.heading,
           speed: normalized.speed,
           canvasPos: nextCanvasPos,
           isGpsActive: true,

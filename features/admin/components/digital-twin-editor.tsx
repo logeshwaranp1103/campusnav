@@ -1165,10 +1165,18 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
     activeFloorId === "f-all-g" ||
     activeFloorObj?.ordinal === 0;
 
+  // Helper to reliably check if a node or target floor belongs to the ground floor level
+  const isGroundFloorEntity = (floorId?: string) => {
+    if (!floorId || floorId === "f-out" || floorId === "outdoor") return true;
+    if (floorId.includes("gnd") || floorId.includes("-g") || floorId.includes("-0") || floorId.includes("ground")) return true;
+    const fl = storeData.floors.find((f) => f.id === floorId);
+    return fl ? fl.ordinal === 0 : true; // Default to true if floor record is missing so nodes never disappear
+  };
+
   // Truly Outdoor nodes (campus walkways, roads, building entrances, outdoor corner nodes)
   const isOutdoorNode = (n: any) => {
     if (!n) return false;
-    if (n.floorId === "f-out" || n.floorId === "outdoor") return true;
+    if (n.floorId === "f-out" || n.floorId === "outdoor" || !n.floorId) return true;
     if (
       n.type === "OUTDOOR" ||
       n.type === "OUTDOOR_PATH" ||
@@ -1192,21 +1200,23 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
   };
 
   const floorNodes = storeData.nodes.filter((n) => {
+    // Keep currently dragged or selected node always visible on canvas
+    if (draggingId?.id === n.id || selectedElement?.id === n.id) return true;
+
     // 1. Nodes belonging to current active floor (e.g. Basement f-sf-b1)
     if (n.floorId === activeFloorId) return true;
 
     // 2. Outdoor Campus nodes & border entrances show for ALL floor views
     if (isOutdoorNode(n)) return true;
 
-    // 3. Ground floor INDOOR & STAIR nodes show ONLY when viewing Ground Floor view!
+    // 3. Ground floor INDOOR & STAIR nodes show when viewing Ground Floor view!
     if (isGroundFloorView) {
-      const fl = storeData.floors.find((f) => f.id === n.floorId);
-      if (n.floorId.includes("gnd") || fl?.ordinal === 0) return true;
+      if (isGroundFloorEntity(n.floorId)) return true;
     }
 
     if (activeFloorId === "f-all-1") {
       const fl = storeData.floors.find((f) => f.id === n.floorId);
-      return fl?.ordinal === 1;
+      return fl?.ordinal === 1 || n.floorId.includes("-1");
     }
     if (activeFloorId === "f-all") return true;
     return false;
@@ -1239,9 +1249,7 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
 
     // Ground floor indoor edges show ONLY when viewing Ground Floor
     if (isGroundFloorView) {
-      const fl1 = storeData.floors.find((f) => f.id === fromN.floorId);
-      const fl2 = storeData.floors.find((f) => f.id === toN.floorId);
-      if (fl1?.ordinal === 0 || fl2?.ordinal === 0 || fromN.floorId.includes("gnd") || toN.floorId.includes("gnd")) {
+      if (isGroundFloorEntity(fromN.floorId) || isGroundFloorEntity(toN.floorId)) {
         return true;
       }
     }
@@ -1249,13 +1257,22 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
     if (activeFloorId === "f-all-1") {
       const fl1 = storeData.floors.find((f) => f.id === fromN.floorId);
       const fl2 = storeData.floors.find((f) => f.id === toN.floorId);
-      return fl1?.ordinal === 1 || fl2?.ordinal === 1;
+      return fl1?.ordinal === 1 || fl2?.ordinal === 1 || fromN.floorId.includes("-1") || toN.floorId.includes("-1");
     }
     if (activeFloorId === "f-all") return true;
     return false;
   });
 
   const floorDestinations = storeData.destinations.filter((d) => {
+    // Keep currently dragged or selected destination or destination for dragged node always visible
+    if (
+      draggingId?.id === d.id ||
+      selectedElement?.id === d.id ||
+      (d.nodeId && (draggingId?.id === d.nodeId || selectedElement?.id === d.nodeId))
+    ) {
+      return true;
+    }
+
     const node = storeData.nodes.find((n) => n.id === d.nodeId);
     const targetFloorId = d.floorId || node?.floorId;
     if (targetFloorId === activeFloorId) return true;
@@ -1264,27 +1281,23 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
     if (
       targetFloorId === "f-out" ||
       targetFloorId === "outdoor" ||
+      !targetFloorId ||
       (node && isOutdoorNode(node)) ||
       (d.name && /entrance|gate/i.test(d.name))
     ) {
-      const fl = storeData.floors.find((f) => f.id === targetFloorId);
-      const isGroundIndoor =
-        targetFloorId !== "f-out" &&
-        Boolean(d.nodeId) &&
-        (targetFloorId?.includes("gnd") || fl?.ordinal === 0) &&
-        !/entrance|gate/i.test(d.name);
-      if (!isGroundFloorView && isGroundIndoor) return false;
+      if (!isGroundFloorView && targetFloorId && targetFloorId !== "f-out" && !isGroundFloorEntity(targetFloorId)) {
+        return false;
+      }
       return true;
     }
 
     if (isGroundFloorView) {
-      const fl = storeData.floors.find((f) => f.id === targetFloorId);
-      return targetFloorId?.includes("gnd") || fl?.ordinal === 0;
+      return isGroundFloorEntity(targetFloorId);
     }
 
     if (activeFloorId === "f-all-1") {
       const fl = storeData.floors.find((f) => f.id === targetFloorId);
-      return fl?.ordinal === 1;
+      return fl?.ordinal === 1 || (targetFloorId ? targetFloorId.includes("-1") : false);
     }
     if (activeFloorId === "f-all") return true;
     return false;
@@ -1607,6 +1620,7 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
         x,
         y,
         searchable: true,
+        visibleToUser: true,
       };
       campusStore.addNode(newNode, false); // Never auto-add edges when node is added
       setSelectedElement({ type: "node", id: newNodeId });
@@ -1639,6 +1653,8 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
         floorId: floorIdToAssign,
         x: x + 15,
         y: y + 15,
+        searchable: true,
+        visibleToUser: true,
       };
       campusStore.addNode(roomNode, false);
 
@@ -2803,6 +2819,7 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
                   const isEdgeStart = edgeStartNodeId === n.id;
                   const isStair = n.type === "STAIR" || (n.name && n.name.toLowerCase().includes("stair"));
                   const isLift = n.type === "LIFT" || (n.name && n.name.toLowerCase().includes("lift"));
+                  const isRoom = n.type === "ROOM" || n.type === "LABORATORY" || n.type === "OFFICE" || n.type === "WASHROOM";
                   const isStairOrLift = isStair || isLift;
 
                   const nodeColor = isSelected
@@ -2813,9 +2830,11 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
                     ? "#f59e0b"
                     : n.type === "ENTRANCE" || n.type === "OUTDOOR" || n.type === "BUILDING_ENTRANCE"
                     ? "#10b981"
+                    : isRoom
+                    ? "#8b5cf6"
                     : "#64748b";
 
-                  const nodeRadius = isSelected ? 8 : isEdgeStart ? 9 : isStairOrLift ? 7 : 4.5;
+                  const nodeRadius = isSelected ? 8 : isEdgeStart ? 9 : isStairOrLift ? 7 : isRoom ? 6 : 4.5;
                   const rawName = n.name || "";
                   const displayName = isStair ? `𓊍 ${rawName}` : isLift ? `🛗 ${rawName}` : rawName;
                   const labelWidth = Math.max(70, displayName.length * 7 + (isStair ? 20 : 16));
@@ -2831,6 +2850,11 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
 
                   if (shouldRenderBadge) {
                     renderedBadgePositions.add(posKey);
+                  }
+
+                  const isLinkedToRoom = visibleLayers.rooms && roomLinkedNodeIds.has(n.id);
+                  if (isLinkedToRoom) {
+                    return null;
                   }
 
                   return (
@@ -2914,8 +2938,6 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
               {/* Render Rooms / Destinations */}
               {visibleLayers.rooms &&
                 (() => {
-                  const coordDestCount: Record<string, number> = {};
-                  
                   return floorDestinations.map((d) => {
                     const linkedNode = storeData.nodes.find((n) => n.id === d.nodeId);
                     if (!linkedNode) return null;
@@ -2954,19 +2976,18 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
                     : "🚪";
 
                   const nameStr = `${icon} ${d.name}${d.roomNumber ? ` (#${d.roomNumber})` : ""}`;
-                  const pillWidth = Math.max(42, nameStr.length * 5.2 + 10);
-
-                  const coordKey = `${linkedNode.x},${linkedNode.y}`;
-                  const offsetIndex = coordDestCount[coordKey] || 0;
-                  coordDestCount[coordKey] = offsetIndex + 1;
-                  const yOffset = -15 - (offsetIndex * 19);
+                  const pillWidth = Math.max(48, nameStr.length * 5.8 + 14);
 
                   return (
                     <g
                       key={d.id}
-                      transform={`translate(${linkedNode.x}, ${linkedNode.y + yOffset})`}
+                      transform={`translate(${linkedNode.x}, ${linkedNode.y})`}
                       onClick={(e) => {
                         e.stopPropagation();
+                        if (activeTool === "EDGE") {
+                          handleNodeClick(linkedNode, e);
+                          return;
+                        }
                         setSelectedElement({ type: "destination", id: d.id });
                       }}
                       onMouseDown={(e) => {
@@ -2980,23 +3001,23 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
                     >
                       <rect
                         x={-pillWidth / 2}
-                        y="-9"
+                        y="-10"
                         width={pillWidth}
-                        height="17"
-                        rx="4"
+                        height="20"
+                        rx="5"
                         fill={isSelected ? "#4f46e5" : "rgb(var(--card))"}
-                        fillOpacity={isSelected ? 0.95 : 0.88}
-                        stroke={isSelected ? "#818cf8" : "#4f46e5"}
-                        strokeWidth={isSelected ? 2 : 1}
-                        className="shadow-2xs transition-all hover:brightness-110"
+                        fillOpacity={isSelected ? 0.95 : 0.92}
+                        stroke={isSelected ? "#818cf8" : "#8b5cf6"}
+                        strokeWidth={isSelected ? 2 : 1.5}
+                        className="shadow-sm transition-all hover:brightness-105"
                       />
                       <text
                         x="0"
-                        y="3"
+                        y="3.5"
                         textAnchor="middle"
                         fill={isSelected ? "#ffffff" : "currentColor"}
-                        fontSize="8.5"
-                        fontWeight={isSelected ? "700" : "600"}
+                        fontSize="9"
+                        fontWeight={isSelected ? "800" : "700"}
                         className="text-[rgb(var(--fg))]"
                       >
                         {nameStr}
@@ -3200,7 +3221,7 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
                       fillOpacity="0.95"
                       stroke={isSelected ? "#ffffff" : color}
                       strokeWidth={isSelected ? 2 : 1}
-                      className="shadow-md transition-all hover:scale-105"
+                      className="shadow-md transition-all hover:brightness-105"
                     />
                     <text
                       x="0"

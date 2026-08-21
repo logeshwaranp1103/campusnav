@@ -146,6 +146,9 @@ function computeShortestPathForData(
       (d) => d.id === paramId || d.name.trim().toLowerCase() === normalized
     );
     if (exactDest) {
+      if (exactDest.nodeId && nodeMap.has(exactDest.nodeId)) {
+        return [exactDest.nodeId];
+      }
       const matchingGroundNode = data.nodes.find((n) => {
         const isSameName = n.name && n.name.trim().toLowerCase() === exactDest.name.trim().toLowerCase();
         const floor = data.floors.find((f) => f.id === n.floorId);
@@ -154,8 +157,11 @@ function computeShortestPathForData(
       if (matchingGroundNode) {
         return [matchingGroundNode.id];
       }
-      if (exactDest.nodeId && nodeMap.has(exactDest.nodeId)) {
-        return [exactDest.nodeId];
+      if (exactDest.x !== undefined && exactDest.y !== undefined && data.nodes.length > 0) {
+        const sorted = data.nodes
+          .slice()
+          .sort((a, b) => Math.hypot(a.x - exactDest.x!, a.y - exactDest.y!) - Math.hypot(b.x - exactDest.x!, b.y - exactDest.y!));
+        if (sorted[0]) return [sorted[0].id];
       }
     }
 

@@ -381,6 +381,46 @@ export function buildAdjacencyGraph(
     }
   });
 
+  // ── Auto-Bridge Isolated / Unconnected Nodes to Nearest Adjacent Node on same floor/campus ──
+  if (travelMode === "WALK") {
+    nodes.forEach((n) => {
+      const currentEdges = graph.get(n.id) || [];
+      if (currentEdges.length === 0) {
+        // Find nearest candidate nodes on same floor or outdoor
+        const candidates = nodes.filter((m) => {
+          if (m.id === n.id) return false;
+          const sameFloor = m.floorId === n.floorId;
+          const bothGroundOrOutdoor =
+            (m.floorId === "f-out" || m.floorId === "outdoor" || getNodeFloorRank(m) === 0) &&
+            (n.floorId === "f-out" || n.floorId === "outdoor" || getNodeFloorRank(n) === 0);
+          return sameFloor || bothGroundOrOutdoor;
+        });
+
+        const pool = candidates.length > 0 ? candidates : nodes.filter((m) => m.id !== n.id);
+        if (pool.length > 0) {
+          const sorted = pool
+            .map((m) => {
+              const dist = Math.hypot(m.x - n.x, m.y - n.y);
+              return { node: m, dist };
+            })
+            .sort((a, b) => a.dist - b.dist);
+
+          const nearestNeighbors = sorted.slice(0, 1);
+          nearestNeighbors.forEach(({ node: target, dist: canvasDist }) => {
+            const nGps = n.lat && n.lng ? { lat: n.lat, lng: n.lng } : canvasToGps(n.x, n.y);
+            const tGps = target.lat && target.lng ? { lat: target.lat, lng: target.lng } : canvasToGps(target.x, target.y);
+            const geoDist = calculateHaversineDistance(nGps.lat, nGps.lng, tGps.lat, tGps.lng);
+            const dist = Math.max(1, Math.round(geoDist || canvasDist / 10 || 5));
+            const bridgeId = `e-auto-bridge-${n.id}-${target.id}`;
+
+            addDirectedEdge(n.id, target.id, bridgeId, "WALK", dist, dist, true, "WALK");
+            addDirectedEdge(target.id, n.id, `${bridgeId}_rev`, "WALK", dist, dist, true, "WALK");
+          });
+        }
+      }
+    });
+  }
+
   return { graph, nodeMap };
 }
 

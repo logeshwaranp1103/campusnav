@@ -156,6 +156,7 @@ class CampusStore {
   private listeners = new Set<() => void>();
   private isInitialized = false;
   private isSyncing = false;
+  private syncPromise: Promise<boolean> | null = null;
   private syncTimeout: ReturnType<typeof setTimeout> | null = null;
   private broadcastChannel: BroadcastChannel | null = null;
 
@@ -1065,6 +1066,9 @@ class CampusStore {
 
   public addNode(node: Node, autoSuggestConnections = false) {
     this.saveSnapshotToUndo(`Added ${node.type} Node "${node.name ?? node.id}"`);
+    if (node.visibleToUser === undefined) {
+      node.visibleToUser = true;
+    }
     if (!node.lat || !node.lng || node.lat === 12.9716 || node.lat === 0) {
       const building = this.getBuildingForNode(node);
       const affine = building ? this.getBuildingAffineMatrix(building.id) : null;
@@ -1194,6 +1198,22 @@ class CampusStore {
         if (n.stairGroupId === updatedNode.stairGroupId && n.id !== id) {
           this.nodes[i] = { ...n, x: newX, y: newY, lat: newLat, lng: newLng };
         }
+      });
+    }
+
+    // Synchronize linked destinations if room node moved
+    if (patch.x !== undefined || patch.y !== undefined) {
+      const newX = updatedNode.x;
+      const newY = updatedNode.y;
+      this.destinations = this.destinations.map((dest) => {
+        if (dest.nodeId === id) {
+          return {
+            ...dest,
+            x: newX,
+            y: newY,
+          };
+        }
+        return dest;
       });
     }
 
@@ -2415,7 +2435,18 @@ class CampusStore {
   }
 
   public async syncWithServer(): Promise<boolean> {
-    if (typeof window === "undefined" || this.isSyncing) return false;
+    if (typeof window === "undefined") return false;
+    if (this.syncPromise) {
+      return this.syncPromise;
+    }
+    this.syncPromise = this.performSyncWithServer().finally(() => {
+      this.syncPromise = null;
+    });
+    return this.syncPromise;
+  }
+
+  private async performSyncWithServer(): Promise<boolean> {
+    if (this.isSyncing) return false;
     this.isSyncing = true;
     const isAdmin = typeof window !== "undefined" && window.location.pathname.startsWith("/admin");
     try {

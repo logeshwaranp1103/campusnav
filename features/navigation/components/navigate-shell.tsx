@@ -29,7 +29,7 @@ import { Input } from "@/shared/components/ui/input";
 import { Button } from "@/shared/components/ui/button";
 import { Badge } from "@/shared/components/ui/badge";
 import { useVisitorGps } from "@/shared/hooks/use-visitor-gps";
-import { findContextAwareNearestNode } from "@/lib/geo/haversine";
+import { findContextAwareNearestNode, findContextAwareNearestNodes } from "@/lib/geo/haversine";
 import { isPointInsideBuilding } from "@/lib/geo/building-geometry";
 import { detectBuildingAtGps } from "@/lib/geo/containment";
 import { gpsToCanvas } from "@/lib/geo/projection";
@@ -272,11 +272,11 @@ export function NavigateShell() {
     setLive(false);
     setLivePos(null);
 
-    // If startDest is Live Location, resolve context-aware nearest node
-    let liveStartNodeId: string | null = null;
+    // If startDest is Live Location, resolve context-aware candidate start nodes
+    let liveStartCandidates: CampusNode[] = [];
     if (startDest.id === YOUR_LOCATION_ID) {
       const isInsideBld = Boolean(currentBuildingId && currentFloorId !== "f-out");
-      const nearestResult = findContextAwareNearestNode(
+      liveStartCandidates = findContextAwareNearestNodes(
         gps.lat,
         gps.lng,
         publishedData.nodes || [],
@@ -288,16 +288,15 @@ export function NavigateShell() {
         }
       );
 
-      if (!nearestResult.node) {
+      if (liveStartCandidates.length === 0) {
         setLoading(false);
         toast({
           type: "error",
           title: "Floor Navigation Unavailable",
-          description: nearestResult.error || "No navigation nodes are available on this floor.",
+          description: "No navigation nodes are available near your current location.",
         });
         return null;
       }
-      liveStartNodeId = nearestResult.node.id;
     }
 
     // Build ordered waypoints: start → stop1 → stop2 → ... → end
@@ -319,16 +318,25 @@ export function NavigateShell() {
       const segStart = waypoints[i];
       const segEnd = waypoints[i + 1];
 
-      const segStartId =
-        segStart.id === YOUR_LOCATION_ID
-          ? (liveStartNodeId || segStart.nodeId || "n1")
-          : (segStart.nodeId || segStart.id);
       const segEndId =
         segEnd.id === YOUR_LOCATION_ID
-          ? (liveStartNodeId || segEnd.nodeId || "n1")
+          ? (liveStartCandidates[0]?.id || segEnd.nodeId || "n1")
           : (segEnd.nodeId || segEnd.id);
 
-      const segRoute = shortestPath(segStartId, segEndId, { travelMode: mode });
+      let segRoute: Route | null = null;
+      if (segStart.id === YOUR_LOCATION_ID && liveStartCandidates.length > 0) {
+        for (const candidate of liveStartCandidates) {
+          const candidateRoute = shortestPath(candidate.id, segEndId, { travelMode: mode });
+          if (candidateRoute) {
+            segRoute = candidateRoute;
+            break;
+          }
+        }
+      } else {
+        const segStartId = segStart.nodeId || segStart.id;
+        segRoute = shortestPath(segStartId, segEndId, { travelMode: mode });
+      }
+
       if (!segRoute) {
         setLoading(false);
         toast({

@@ -528,7 +528,7 @@ export async function getRelationalGraphFromDatabase(): Promise<DraftSnapshot | 
         lat: n.latitude !== undefined ? n.latitude : (n.lat !== undefined ? n.lat : undefined),
         lng: n.longitude !== undefined ? n.longitude : (n.lng !== undefined ? n.lng : undefined),
         searchable: n.searchable ?? true,
-        visibleToUser: n.visibleToUser !== undefined ? n.visibleToUser : (meta.visibleToUser !== undefined ? meta.visibleToUser : false),
+        visibleToUser: n.visibleToUser !== undefined ? n.visibleToUser : (meta.visibleToUser !== undefined ? meta.visibleToUser : true),
         photoUrl: meta.photoUrl || (hasDbPhoto ? `/api/nodes/${n.id}/photo` : (n.photoUrl || undefined)),
         storagePath: meta.storagePath || (n as any).storagePath || undefined,
         photoUploadedAt: n.photoUploadedAt || meta.photoUploadedAt || undefined,

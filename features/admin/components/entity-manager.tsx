@@ -999,12 +999,12 @@ export function EntityManager() {
           lat,
           lng,
           searchable: true,
-          visibleToUser: nodeForm.visibleToUser ?? false,
+          visibleToUser: nodeForm.visibleToUser ?? true,
         };
 
         campusStore.addNode(newNode);
         toast({ type: "success", title: "Node Created & Synced", description: `Node "${newNode.name}" added to Store & CAD Editor!` });
-        setNodeForm((prev) => ({ ...prev, name: "", lat: "11.", lng: "77.", visibleToUser: false }));
+        setNodeForm((prev) => ({ ...prev, name: "", lat: "11.", lng: "77.", visibleToUser: true }));
         setStoreData({ ...campusStore.getWorkingData() });
         break;
       }
@@ -1031,6 +1031,7 @@ export function EntityManager() {
           lat,
           lng,
           searchable: true,
+          visibleToUser: true,
         };
         campusStore.addNode(roomNode);
 

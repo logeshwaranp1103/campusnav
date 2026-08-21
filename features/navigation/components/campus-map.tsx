@@ -11,8 +11,10 @@ import { useVisitorGps } from "@/shared/hooks/use-visitor-gps";
 import { PIXELS_PER_METER, gpsToCanvas } from "@/lib/geo/projection";
 import { getBuildingCanvasPoints, getBuildingCenter, getPolygonSvgPath, isPointInsideBuilding, isPointOutsideAllBuildings } from "@/lib/geo/building-geometry";
 import { detectBuildingAtGps } from "@/lib/geo/containment";
+import { calculateShortestAngleDelta } from "@/lib/geo/haversine";
 import { DestinationDetailsDrawer } from "./destination-details-drawer";
 import { isEventActive } from "@/shared/lib/event-utils";
+import { useNavigationStore } from "@/features/navigation/navigation-store";
 
 type Props = {
   route: Route | null;
@@ -30,6 +32,10 @@ export function CampusMap({ route, livePosition, progress, gps: passedGps, onNav
   const [view, setView] = useState<string>("f-out");
   const [selectedDestForDetails, setSelectedDestForDetails] = useState<Destination | null>(null);
   const [showFloorMenuMobile, setShowFloorMenuMobile] = useState(false);
+
+  // Active navigation session state
+  const navStatus = useNavigationStore((s) => s.status);
+  const isNavigating = navStatus === "NAVIGATING" || navStatus === "OFF_ROUTE" || navStatus === "REROUTING";
 
   // Map Zoom, Bearing & Pan state passed down to MapCanvas
   const [zoomLevel, setZoomLevel] = useState(1);
@@ -221,6 +227,15 @@ export function CampusMap({ route, livePosition, progress, gps: passedGps, onNav
     });
   }, []);
 
+  // ── Smooth North-Up Reset when Navigation Session Ends/Exits ──
+  const prevNavigatingRef = useRef(isNavigating);
+  useEffect(() => {
+    if (prevNavigatingRef.current && !isNavigating) {
+      resetBearingToNorth();
+    }
+    prevNavigatingRef.current = isNavigating;
+  }, [isNavigating, resetBearingToNorth]);
+
   // ── Re-center Location Action ──
   const handleRecenter = useCallback(() => {
     if (gps && !gps.isTracking) {
@@ -256,6 +271,7 @@ export function CampusMap({ route, livePosition, progress, gps: passedGps, onNav
         externalZoom={zoomLevel}
         resetTrigger={resetTrigger}
         isFollowingUser={isFollowingUser}
+        isNavigating={isNavigating}
         onUserPan={() => setIsFollowingUser(false)}
         onSelectDestination={(dest) => setSelectedDestForDetails(dest)}
         fromSelected={fromSelected}
@@ -495,6 +511,7 @@ function MapCanvas({
   externalZoom = 1,
   resetTrigger = 0,
   isFollowingUser = true,
+  isNavigating = false,
   onUserPan,
   onSelectDestination,
   fromSelected,
@@ -513,6 +530,7 @@ function MapCanvas({
   externalZoom?: number;
   resetTrigger?: number;
   isFollowingUser?: boolean;
+  isNavigating?: boolean;
   onUserPan?: () => void;
   onSelectDestination?: (dest: Destination) => void;
   fromSelected?: Destination | null;
@@ -635,7 +653,7 @@ function MapCanvas({
         }
       }
 
-      // Smoothly glide camera pan if auto-following
+      // Smoothly glide camera pan & rotate map if auto-following in navigation mode
       if (isFollowingUser) {
         const curMarker = visualGpsRef.current;
         const targetFollowX = targetGpsPos ? targetGpsPos.x : curMarker.x;
@@ -656,6 +674,16 @@ function MapCanvas({
             y: curPan.y + panDy * 0.12,
           });
         }
+
+        // Automatic Google Maps style map rotation ONLY while actively navigating
+        if (isNavigating) {
+          const targetMapBearing = (360 - targetHeading + 360) % 360;
+          const dMapBearing = calculateShortestAngleDelta(bearingRef.current, targetMapBearing);
+          if (Math.abs(dMapBearing) > 0.1) {
+            const nextBearing = (bearingRef.current + dMapBearing * 0.12 + 360) % 360;
+            onBearingChange?.(nextBearing);
+          }
+        }
       }
 
       requestAnimationFrame(animateMarkerAndCamera);
@@ -666,7 +694,7 @@ function MapCanvas({
       active = false;
       cancelAnimationFrame(handle);
     };
-  }, [targetGpsPos, targetHeading, isFollowingUser]);
+  }, [targetGpsPos, targetHeading, isFollowingUser, isNavigating, onBearingChange]);
 
   // Recenter / Reset Action Trigger
   useEffect(() => {
@@ -762,8 +790,9 @@ function MapCanvas({
       }
       if (connectedNodeIdsToActiveFloor.has(n.id)) return true;
       if (isGroundFloor) {
+        if (!n.floorId || n.floorId.includes("gnd") || n.floorId.includes("-g") || n.floorId.includes("-0") || n.floorId.includes("ground")) return true;
         const nFloorObj = publishedData.floors.find((f) => f.id === n.floorId);
-        return nFloorObj?.ordinal === 0;
+        return nFloorObj ? nFloorObj.ordinal === 0 : true;
       }
       return false;
     },
@@ -771,7 +800,7 @@ function MapCanvas({
   );
 
   const scopeNodes = useMemo(() => {
-    return allNodes.filter((n) => isNodeOnActiveFloor(n) && (n.visibleToUser === true || Boolean(n.photoUrl)));
+    return allNodes.filter((n) => isNodeOnActiveFloor(n) && (n.visibleToUser !== false || Boolean(n.photoUrl)));
   }, [allNodes, isNodeOnActiveFloor]);
 
   const scopeEdges = useMemo(() => {
@@ -1514,11 +1543,14 @@ function MapCanvas({
         })()}
 
         {/* Nodes & Named Labels */}
-        {scopeNodes.map((n) => {
+        {scopeNodes
+          .filter((n) => !allDestinations.some((d) => d.nodeId === n.id))
+          .map((n) => {
           const onRoute = routeNodes.some((rn) => rn.id === n.id);
           const isDest = destination?.id === n.id;
           const isStair = n.type === "STAIR" || (n.name && n.name.toLowerCase().includes("stair"));
           const isLift = n.type === "LIFT" || (n.name && n.name.toLowerCase().includes("lift"));
+          const isRoom = n.type === "ROOM" || n.type === "LABORATORY" || n.type === "OFFICE" || n.type === "WASHROOM";
           const isStairOrLift = isStair || isLift;
 
           const nodeColor = isDest
@@ -1527,8 +1559,10 @@ function MapCanvas({
             ? "#f59e0b"
             : onRoute
             ? "#2563eb"
+            : isRoom
+            ? "#8b5cf6"
             : "#64748b";
-          const nodeRadius = isDest ? 9 : isStairOrLift ? 7 : onRoute ? 6.5 : 4.5;
+          const nodeRadius = isDest ? 9 : isStairOrLift ? 7 : isRoom ? 6 : onRoute ? 6.5 : 4.5;
 
           const rawName = n.name || "";
           const displayName = (n.photoUrl ? "📷 " : "") + (isStair ? `𓊍 ${rawName}` : isLift ? `🛗 ${rawName}` : rawName);
@@ -1651,32 +1685,38 @@ function MapCanvas({
         {/* Destinations Labels & Markers */}
         {allDestinations.map((d) => {
           const linkedNode = allNodes.find((n) => n.id === d.nodeId);
-          if (!linkedNode || (linkedNode.floorId !== floorId && floorId !== "f-out")) return null;
+          if (!linkedNode || (!isNodeOnActiveFloor(linkedNode) && floorId !== "f-out")) return null;
           const isSelected = toSelected?.id === d.id || toSelected?.nodeId === linkedNode.id;
+          const icon = (d.category || "").toLowerCase().includes("lab") ? "🧪" : "🚪";
+          const nameStr = `${icon} ${d.name}${d.roomNumber ? ` (#${d.roomNumber})` : ""}`;
+          const pillWidth = Math.max(50, nameStr.length * 6.2 + 18);
           return (
             <g
               key={d.id}
+              transform={`translate(${linkedNode.x}, ${linkedNode.y})`}
               onClick={() => onSelectDestination && onSelectDestination(d)}
-              className="cursor-pointer hover:scale-105 transition-transform"
+              className="cursor-pointer select-none"
             >
-              {/* Room Node-Style Dot Marker */}
-              <circle
-                cx={linkedNode.x}
-                cy={linkedNode.y}
-                r={isSelected ? 6.5 : 4.5}
-                fill={isSelected ? "#10b981" : "#64748b"}
-                stroke="#ffffff"
+              <rect
+                x={-pillWidth / 2}
+                y="-10"
+                width={pillWidth}
+                height="20"
+                rx="6"
+                fill={isSelected ? "#10b981" : "#ffffff"}
+                stroke={isSelected ? "#059669" : "#8b5cf6"}
                 strokeWidth={isSelected ? 2 : 1.5}
-                opacity={0.9}
+                className="shadow-md transition-colors hover:stroke-[#7c3aed] hover:stroke-[2px]"
               />
-              {/* Room Name Label */}
               <text
-                x={linkedNode.x + 8}
-                y={linkedNode.y - 4}
-                fill="currentColor"
-                className="text-[10px] font-extrabold text-indigo-600 dark:text-indigo-400"
+                x="0"
+                y="3.5"
+                textAnchor="middle"
+                fill={isSelected ? "#ffffff" : "#5b21b6"}
+                fontSize="9.5"
+                fontWeight="800"
               >
-                {d.name}
+                {nameStr}
               </text>
             </g>
           );
