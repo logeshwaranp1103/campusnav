@@ -345,13 +345,50 @@ export function NavigateShell() {
 
       if (!segRoute) {
         setLoading(false);
-        toast({
-          type: "error",
-          title: mode === "EV" ? "No EV-Accessible Route" : "No Route Found",
-          description: mode === "EV"
-            ? `No EV-accessible route available from "${segStart.name}" to "${segEnd.name}". Walking paths or stairs are required.`
-            : `No path from "${segStart.name}" to "${segEnd.name}".`,
-        });
+        setRoute(null);
+
+        if (mode === "EV") {
+          let walkRoute: Route | null = null;
+          if (segStart.id === YOUR_LOCATION_ID && liveStartCandidates.length > 0) {
+            for (const candidate of liveStartCandidates) {
+              const candidateRoute = shortestPath(candidate.id, segEndId, { travelMode: "WALK" });
+              if (candidateRoute) {
+                walkRoute = candidateRoute;
+                break;
+              }
+            }
+          } else {
+            const segStartId = segStart.nodeId || segStart.id;
+            walkRoute = shortestPath(segStartId, segEndId, { travelMode: "WALK" });
+          }
+
+          if (walkRoute) {
+            toast({
+              type: "warning",
+              title: "No EV Path Available",
+              description: "There is no EV path, but a walkable path is available. Would you like to continue via the walkable path?",
+              action: {
+                label: "Continue via Walk",
+                onClick: () => {
+                  setTravelMode("WALK");
+                  calculateRoute(startDest, endDest, currentStops, currentFloorId, currentBuildingId, "WALK");
+                },
+              },
+            });
+          } else {
+            toast({
+              type: "error",
+              title: "No EV Path Available",
+              description: "There is no EV path between these locations.",
+            });
+          }
+        } else {
+          toast({
+            type: "error",
+            title: "No Route Found",
+            description: `No path from "${segStart.name}" to "${segEnd.name}".`,
+          });
+        }
         return null;
       }
       totalDistance += segRoute.distance;

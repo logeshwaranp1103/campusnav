@@ -286,8 +286,35 @@ export function CampusMap({ route, livePosition, progress, gps: passedGps, onNav
     prevNavigatingRef.current = isNavigating;
   }, [isNavigating, resetBearingToNorth]);
 
-  // ── Re-center Location Action ──
+  // ── Auto-Resume Follow Mode Timer after Manual Interaction ──
+  const autoResumeTimerRef = useRef<NodeJS.Timeout | null>(null);
+
+  const handleUserPan = useCallback(() => {
+    setIsFollowingUser(false);
+    if (autoResumeTimerRef.current) {
+      clearTimeout(autoResumeTimerRef.current);
+    }
+    // Auto-resume camera follow after 5s of inactivity if live GPS is active or navigating
+    if (isNavigating || gps?.isGpsActive) {
+      autoResumeTimerRef.current = setTimeout(() => {
+        setIsFollowingUser(true);
+      }, 5000);
+    }
+  }, [isNavigating, gps?.isGpsActive]);
+
+  useEffect(() => {
+    return () => {
+      if (autoResumeTimerRef.current) {
+        clearTimeout(autoResumeTimerRef.current);
+      }
+    };
+  }, []);
+
+  // ── Re-center Location Action (Google-Maps Style) ──
   const handleRecenter = useCallback(() => {
+    if (autoResumeTimerRef.current) {
+      clearTimeout(autoResumeTimerRef.current);
+    }
     if (gps && !gps.isTracking) {
       gps.startTracking();
     }
@@ -322,7 +349,7 @@ export function CampusMap({ route, livePosition, progress, gps: passedGps, onNav
         resetTrigger={resetTrigger}
         isFollowingUser={isFollowingUser}
         isNavigating={isNavigating}
-        onUserPan={() => setIsFollowingUser(false)}
+        onUserPan={handleUserPan}
         onSelectDestination={(dest) => setSelectedDestForDetails(dest)}
         fromSelected={fromSelected}
         toSelected={toSelected}
@@ -496,14 +523,14 @@ export function CampusMap({ route, livePosition, progress, gps: passedGps, onNav
         <button
           onClick={handleRecenter}
           className={`flex h-12 w-12 items-center justify-center rounded-2xl border shadow-xl backdrop-blur-md active:scale-95 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 cursor-pointer ${
-            isFollowingUser && gps?.isGpsActive
+            isFollowingUser
               ? "bg-blue-600 text-white border-blue-500 shadow-blue-500/30"
               : "bg-[rgb(var(--card))]/95 text-[rgb(var(--fg))] border-[rgb(var(--border))] hover:bg-[rgb(var(--muted))]"
           }`}
           title="Center on My Location"
           aria-label="Center on My Location"
         >
-          <Locate className={`h-5 w-5 stroke-[2.25] ${isFollowingUser && gps?.isGpsActive ? "animate-pulse" : ""}`} />
+          <Locate className={`h-5 w-5 stroke-[2.25] ${isFollowingUser ? "animate-pulse" : ""}`} />
         </button>
       </div>
 
@@ -589,12 +616,11 @@ function MapCanvas({
   const { buildings, nodes: allNodes, edges: allEdges, destinations: allDestinations, events: allEvents } = publishedData;
   const svgRef = useRef<SVGSVGElement | null>(null);
 
-  // Interactive Pan, Zoom & Selection State
+  // Interactive Pan & Zoom State
   const [internalZoom, setInternalZoom] = useState(1);
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const [isDragging, setIsDragging] = useState(false);
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
-  const [selectedBuildingId, setSelectedBuildingId] = useState<string | null>(null);
 
   // Camera Smooth Animation Refs
   const panRef = useRef(pan);
@@ -765,18 +791,18 @@ function MapCanvas({
           });
         }
 
-        // Automatic Google Maps style map rotation ONLY while actively navigating, follow mode active, and user is moving
-        if (isNavigating) {
-          const isMoving = (gps?.speed !== null && gps?.speed !== undefined && gps.speed > 0.35) || (gps?.heading !== null && gps?.heading !== undefined && gps.heading >= 0);
-          if (isMoving && targetHeading >= 0) {
+        // Automatic Google-Maps-Style Map Auto-Rotation (Aligns map smoothly with heading)
+        if (targetHeading >= 0) {
+          const isMoving = (gps?.speed !== null && gps?.speed !== undefined && gps.speed > 0.25) || (gps?.heading !== null && gps?.heading !== undefined && gps.heading >= 0) || isNavigating;
+          if (isMoving) {
             const targetMapBearing = (360 - targetHeading + 360) % 360;
             const dMapBearing = calculateShortestAngleDelta(bearingRef.current, targetMapBearing);
-            // Low-pass noise deadband filter: ignore compass noise under 2.0 degrees
-            if (Math.abs(dMapBearing) > 2.0) {
-              const rotateAlpha = 1 - Math.exp(-6.0 * dt);
+            // Low-pass noise deadband filter: smooth rotation without compass jitter
+            if (Math.abs(dMapBearing) > 0.5) {
+              const rotateAlpha = 1 - Math.exp(-8.0 * dt);
               const nextBearing = (bearingRef.current + dMapBearing * rotateAlpha + 360) % 360;
               bearingRef.current = nextBearing;
-              if (Math.abs(nextBearing - lastReportedBearingRef.current) > 0.4) {
+              if (Math.abs(nextBearing - lastReportedBearingRef.current) > 0.3) {
                 lastReportedBearingRef.current = nextBearing;
                 onBearingChange?.(nextBearing);
               }
@@ -1377,26 +1403,7 @@ function MapCanvas({
           </g>
         )}
 
-        {/* ── 1. Outdoor Campus Lawns & Landscape Courtyards (Outdoor Floor View) ── */}
-        {floorId === "f-out" && buildings.map((b) => {
-          const centerPos = getBuildingCenter(b);
-          return (
-            <ellipse
-              key={`lawn-${b.id}`}
-              cx={centerPos.x}
-              cy={centerPos.y + 10}
-              rx={Math.max(70, (b.width || 120) * 0.75)}
-              ry={Math.max(50, (b.height || 90) * 0.65)}
-              fill="#ecfdf5"
-              stroke="#d1fae5"
-              strokeWidth="1.5"
-              strokeDasharray="6 4"
-              opacity="0.75"
-            />
-          );
-        })}
-
-        {/* ── 2. Parking Lots Layer ── */}
+        {/* ── 1. Parking Lots Layer ── */}
         {scopeNodes
           .filter((n) => n.type === "PARKING" || (n.name && n.name.toLowerCase().includes("parking")))
           .map((pn) => (
@@ -1564,28 +1571,17 @@ function MapCanvas({
             const buildingEvents = showEvents ? allEvents.filter((ev) => ev.buildingId === b.id) : [];
             const activeEvent = buildingEvents.find((ev) => isEventActive(ev, nowMs));
 
-            const isSelectedBuilding = selectedBuildingId === b.id;
-            const strokeColor = activeEvent?.color || (isSelectedBuilding ? "#4f46e5" : (b.color || "#6366f1"));
+            const strokeColor = activeEvent?.color || b.color || "#6366f1";
             const bName = b.name;
             const badgeWidth = Math.max(140, bName.length * 8.5 + 32);
 
             return (
-              <g
-                key={`bld-3d-${b.id}`}
-                onClick={() => {
-                  onUserPan?.();
-                  setSelectedBuildingId((prev) => (prev === b.id ? null : b.id));
-                  const centerX = bounds.x + bounds.w / 2;
-                  const centerY = bounds.y + bounds.h / 2;
-                  setPan({ x: centerX - (centerPos.x - bHeight * 0.32), y: centerY - (centerPos.y - bHeight * 0.82) });
-                }}
-                className="cursor-pointer select-none transition-all active:scale-[0.99]"
-              >
+              <g key={`bld-3d-${b.id}`} pointerEvents="none" className="select-none">
                 {/* 1. Soft Ground Drop Shadow Under Base Footprint */}
                 <path
                   d={baseSvgPath}
                   fill="#0f172a"
-                  fillOpacity={isSelectedBuilding ? "0.22" : "0.12"}
+                  fillOpacity="0.12"
                   filter="url(#bldShadow)"
                   stroke="none"
                 />
@@ -1595,11 +1591,11 @@ function MapCanvas({
                   <path
                     key={`facet-${b.id}-${idx}`}
                     d={facet.path}
-                    fill={facet.isShaded ? (isSelectedBuilding ? "#6366f1" : "#94a3b8") : (isSelectedBuilding ? "#818cf8" : "#cbd5e1")}
+                    fill={facet.isShaded ? "#94a3b8" : "#cbd5e1"}
                     fillOpacity={facet.isShaded ? 0.95 : 0.85}
                     stroke={strokeColor}
-                    strokeWidth={isSelectedBuilding ? "1.25" : "0.75"}
-                    strokeOpacity={isSelectedBuilding ? 0.8 : 0.4}
+                    strokeWidth="0.75"
+                    strokeOpacity="0.4"
                     strokeLinejoin="round"
                   />
                 ))}
@@ -1607,9 +1603,9 @@ function MapCanvas({
                 {/* 3. Elevated 3D Rooftop Slab */}
                 <path
                   d={roofSvgPath}
-                  fill={isSelectedBuilding ? "#f5f3ff" : "url(#bldRoofGrad)"}
+                  fill="url(#bldRoofGrad)"
                   stroke={strokeColor}
-                  strokeWidth={isSelectedBuilding ? "3" : activeEvent ? "2.5" : "1.75"}
+                  strokeWidth={activeEvent ? "2.5" : "1.75"}
                   strokeDasharray={floorId !== "f-out" && !isGroundFloor ? "6 4" : undefined}
                   strokeLinejoin="round"
                   className="transition-all"
@@ -1620,8 +1616,8 @@ function MapCanvas({
                   d={roofSvgPath}
                   fill="none"
                   stroke={strokeColor}
-                  strokeWidth={isSelectedBuilding ? "1.25" : "0.8"}
-                  strokeOpacity={isSelectedBuilding ? 0.6 : 0.3}
+                  strokeWidth="0.8"
+                  strokeOpacity="0.3"
                   strokeDasharray="3 3"
                   strokeLinejoin="round"
                   transform={`translate(${centerPos.x - bHeight * 0.32}, ${centerPos.y - bHeight * 0.82}) scale(0.92) translate(${-(centerPos.x - bHeight * 0.32)}, ${-(centerPos.y - bHeight * 0.82)})`}
@@ -1635,16 +1631,16 @@ function MapCanvas({
                     width={badgeWidth}
                     height="30"
                     rx="15"
-                    fill={isSelectedBuilding ? "#4f46e5" : "#ffffff"}
-                    stroke={isSelectedBuilding ? "#ffffff" : strokeColor}
-                    strokeWidth={isSelectedBuilding ? "2" : "1.75"}
+                    fill="#ffffff"
+                    stroke={strokeColor}
+                    strokeWidth="1.75"
                     className="shadow-md"
                   />
                   <text
                     x="0"
                     y="4"
                     textAnchor="middle"
-                    fill={isSelectedBuilding ? "#ffffff" : "#1e1b4b"}
+                    fill="#1e1b4b"
                     fontSize="13"
                     fontWeight="800"
                     letterSpacing="0.01em"
@@ -2151,16 +2147,16 @@ function MapCanvas({
               cx={livePosition.x}
               cy={livePosition.y}
               r={12}
-              fill="rgb(var(--success))"
-              opacity={0.3}
-              className="pulse-dot"
+              fill="rgba(37, 99, 235, 0.18)"
+              stroke="#3b82f6"
+              strokeWidth={1}
             />
             <circle
               cx={livePosition.x}
               cy={livePosition.y}
-              r={5}
-              fill="rgb(var(--success))"
-              stroke="white"
+              r={5.5}
+              fill="#2563eb"
+              stroke="#ffffff"
               strokeWidth={2}
             />
           </g>

@@ -22,38 +22,26 @@ export function AdminGuard({ children }: { children: React.ReactNode }) {
   const { toast } = useToast();
   const isLoginPage = pathname === "/admin/login";
 
-  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(() => {
-    if (typeof window !== "undefined") {
-      if (isLoginPage) return true;
-      return (
-        sessionStorage.getItem("campusnav_admin_auth") === "true" ||
-        localStorage.getItem("campusnav_admin_auth") === "true"
-      );
-    }
-    return isLoginPage;
-  });
+  const [isMounted, setIsMounted] = useState(false);
+  const [isAuthenticated, setIsAuthenticated] = useState(isLoginPage);
 
   useEffect(() => {
+    setIsMounted(true);
     if (isLoginPage) {
       setIsAuthenticated(true);
       return;
     }
 
     const isAuthed =
-      typeof window !== "undefined" &&
-      (sessionStorage.getItem("campusnav_admin_auth") === "true" ||
-        localStorage.getItem("campusnav_admin_auth") === "true");
+      sessionStorage.getItem("campusnav_admin_auth") === "true" ||
+      localStorage.getItem("campusnav_admin_auth") === "true";
 
     if (isAuthed) {
       setIsAuthenticated(true);
     } else {
       setIsAuthenticated(false);
       const redirectTarget = `/admin/login?redirect=${encodeURIComponent(pathname || "/admin")}`;
-      if (typeof window !== "undefined") {
-        window.location.replace(redirectTarget);
-      } else {
-        router.replace(redirectTarget);
-      }
+      router.replace(redirectTarget);
     }
   }, [pathname, router, isLoginPage]);
 
@@ -75,7 +63,7 @@ export function AdminGuard({ children }: { children: React.ReactNode }) {
     }
   };
 
-  if (isLoginPage || isAuthenticated) {
+  if (isLoginPage || (isMounted && isAuthenticated)) {
     return (
       <AdminAuthContext.Provider value={{ isAuthenticated: true, logout }}>
         {children}
