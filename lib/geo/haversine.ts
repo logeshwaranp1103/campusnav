@@ -69,6 +69,55 @@ export function calculateShortestAngleDelta(currentAngle: number, targetAngle: n
 }
 
 /**
+ * Resolves reliable geographic coordinates for a campus node.
+ * Automatically falls back to canvas-to-GPS projection if lat/lng is 0, missing, or invalid.
+ */
+export function getNodeGeographicCoordinates(n: Node): { lat: number; lng: number } {
+  let nLat = typeof n.lat === "number" ? n.lat : (typeof (n as any).latitude === "number" ? (n as any).latitude : undefined);
+  let nLng = typeof n.lng === "number" ? n.lng : (typeof (n as any).longitude === "number" ? (n as any).longitude : undefined);
+
+  const isLatValid = typeof nLat === "number" && !isNaN(nLat) && nLat !== 0 && Math.abs(nLat) >= 1 && Math.abs(nLat) <= 90;
+  const isLngValid = typeof nLng === "number" && !isNaN(nLng) && nLng !== 0 && Math.abs(nLng) <= 180;
+
+  if (!isLatValid || !isLngValid) {
+    if (typeof n.x === "number" && typeof n.y === "number" && !isNaN(n.x) && !isNaN(n.y)) {
+      const coords = canvasToGps(n.x, n.y);
+      nLat = coords.lat;
+      nLng = coords.lng;
+    }
+  }
+
+  return {
+    lat: typeof nLat === "number" && !isNaN(nLat) ? nLat : 0,
+    lng: typeof nLng === "number" && !isNaN(nLng) ? nLng : 0,
+  };
+}
+
+/**
+ * Resolves reliable geographic coordinates for a user location.
+ * Automatically falls back to canvas-to-GPS projection if live GPS lat/lng is uninitialized (0 or NaN).
+ */
+export function getUserGeographicCoordinates(
+  lat?: number | null,
+  lng?: number | null,
+  canvasPos?: { x: number; y: number } | null
+): { lat: number; lng: number } {
+  const isLatValid = typeof lat === "number" && !isNaN(lat) && lat !== 0 && Math.abs(lat) >= 1 && Math.abs(lat) <= 90;
+  const isLngValid = typeof lng === "number" && !isNaN(lng) && lng !== 0 && Math.abs(lng) <= 180;
+
+  if (isLatValid && isLngValid) {
+    return { lat: lat!, lng: lng! };
+  }
+
+  if (canvasPos && typeof canvasPos.x === "number" && typeof canvasPos.y === "number" && !isNaN(canvasPos.x) && !isNaN(canvasPos.y)) {
+    const coords = canvasToGps(canvasPos.x, canvasPos.y);
+    return { lat: coords.lat, lng: coords.lng };
+  }
+
+  return { lat: 0, lng: 0 };
+}
+
+/**
  * Finds the nearest navigation node to a given (latitude, longitude) coordinate
  * matching the active floor or outdoor area.
  */
@@ -77,8 +126,11 @@ export function findNearestNodeByGps(
   lng: number,
   nodes: Node[],
   floorId = "f-out",
-  maxDistanceMeters = 300
+  maxDistanceMeters = 300,
+  userCanvasPos?: { x: number; y: number } | null
 ): { node: Node | null; distanceMeters: number } {
+  const userCoords = getUserGeographicCoordinates(lat, lng, userCanvasPos);
+
   const eligibleNodes = nodes.filter((n) => {
     if (floorId === "f-out") {
       return (
@@ -88,6 +140,7 @@ export function findNearestNodeByGps(
         n.type === "OUTDOOR_PATH" ||
         n.type === "OUTDOOR" ||
         n.type === "GATE" ||
+        n.type === "CORRIDOR" ||
         n.isEntranceNode
       );
     }
@@ -102,17 +155,9 @@ export function findNearestNodeByGps(
   let minDistance = Infinity;
 
   eligibleNodes.forEach((n) => {
-    let nLat = n.lat;
-    let nLng = n.lng;
-    if (typeof nLat !== "number" || typeof nLng !== "number" || isNaN(nLat) || isNaN(nLng)) {
-      if (typeof n.x === "number" && typeof n.y === "number") {
-        const coords = canvasToGps(n.x, n.y);
-        nLat = coords.lat;
-        nLng = coords.lng;
-      }
-    }
-    if (typeof nLat === "number" && typeof nLng === "number" && !isNaN(nLat) && !isNaN(nLng)) {
-      const dist = calculateGeographicDistance(lat, lng, nLat, nLng);
+    const nCoords = getNodeGeographicCoordinates(n);
+    if (nCoords.lat !== 0 && nCoords.lng !== 0) {
+      const dist = calculateGeographicDistance(userCoords.lat, userCoords.lng, nCoords.lat, nCoords.lng);
       if (dist < minDistance) {
         minDistance = dist;
         nearestNode = n;
@@ -131,6 +176,7 @@ export interface ContextAwareNearestNodeOptions {
   buildingId?: string | null;
   floorId?: string | null;
   floors?: Floor[];
+  userCanvasPos?: { x: number; y: number } | null;
 }
 
 export interface NearestNodeResult {
@@ -151,6 +197,8 @@ export interface NearestNodeResult {
  *
  * OUTDOOR:
  * Filters for valid outdoor paths, gates, and building entrance nodes.
+ *
+ * Ranks all eligible candidates in strictly ascending spatial distance order.
  */
 export function findContextAwareNearestNodes(
   lat: number,
@@ -158,27 +206,19 @@ export function findContextAwareNearestNodes(
   nodes: Node[],
   context: ContextAwareNearestNodeOptions
 ): Node[] {
-  if (!lat || !lng || isNaN(lat) || isNaN(lng) || !nodes || nodes.length === 0) {
+  if (!nodes || nodes.length === 0) {
     return [];
   }
 
-  const getNodeGps = (n: Node) => {
-    let nLat = n.lat;
-    let nLng = n.lng;
-    if (typeof nLat !== "number" || typeof nLng !== "number" || isNaN(nLat) || isNaN(nLng)) {
-      if (typeof n.x === "number" && typeof n.y === "number") {
-        const gps = canvasToGps(n.x, n.y);
-        nLat = gps.lat;
-        nLng = gps.lng;
-      }
-    }
-    return { lat: nLat, lng: nLng };
-  };
+  const userCoords = getUserGeographicCoordinates(lat, lng, context.userCanvasPos);
+  if (userCoords.lat === 0 && userCoords.lng === 0) {
+    return [];
+  }
 
   const getDistance = (n: Node) => {
-    const g = getNodeGps(n);
-    if (typeof g.lat === "number" && typeof g.lng === "number" && !isNaN(g.lat) && !isNaN(g.lng)) {
-      return calculateGeographicDistance(lat, lng, g.lat, g.lng);
+    const g = getNodeGeographicCoordinates(n);
+    if (g.lat !== 0 && g.lng !== 0) {
+      return calculateGeographicDistance(userCoords.lat, userCoords.lng, g.lat, g.lng);
     }
     return Infinity;
   };
@@ -251,14 +291,26 @@ export function findContextAwareNearestNode(
   nodes: Node[],
   context: ContextAwareNearestNodeOptions
 ): NearestNodeResult {
-  if (!lat || !lng || isNaN(lat) || isNaN(lng) || !nodes || nodes.length === 0) {
+  if (!nodes || nodes.length === 0) {
     return {
       node: null,
       distanceMeters: Infinity,
       floorId: context.floorId || "f-out",
       buildingId: context.buildingId || null,
       isIndoor: Boolean(context.isInside),
-      error: "Invalid GPS coordinates or empty node graph",
+      error: "Empty node graph",
+    };
+  }
+
+  const userCoords = getUserGeographicCoordinates(lat, lng, context.userCanvasPos);
+  if (userCoords.lat === 0 && userCoords.lng === 0) {
+    return {
+      node: null,
+      distanceMeters: Infinity,
+      floorId: context.floorId || "f-out",
+      buildingId: context.buildingId || null,
+      isIndoor: Boolean(context.isInside),
+      error: "Invalid or uninitialized GPS coordinates",
     };
   }
 
@@ -278,7 +330,7 @@ export function findContextAwareNearestNode(
     }
   }
 
-  const candidates = findContextAwareNearestNodes(lat, lng, nodes, context);
+  const candidates = findContextAwareNearestNodes(userCoords.lat, userCoords.lng, nodes, context);
   if (candidates.length === 0) {
     return {
       node: null,
@@ -286,24 +338,13 @@ export function findContextAwareNearestNode(
       floorId: context.floorId || "f-out",
       buildingId: context.buildingId || null,
       isIndoor: Boolean(context.isInside),
-      error: "Invalid GPS coordinates or empty node graph",
+      error: "No eligible navigation candidates found",
     };
   }
 
   const bestNode = candidates[0];
-  let nLat = bestNode.lat;
-  let nLng = bestNode.lng;
-  if (typeof nLat !== "number" || typeof nLng !== "number" || isNaN(nLat) || isNaN(nLng)) {
-    if (typeof bestNode.x === "number" && typeof bestNode.y === "number") {
-      const gps = canvasToGps(bestNode.x, bestNode.y);
-      nLat = gps.lat;
-      nLng = gps.lng;
-    }
-  }
-
-  const distanceMeters = (typeof nLat === "number" && typeof nLng === "number" && !isNaN(nLat) && !isNaN(nLng))
-    ? calculateGeographicDistance(lat, lng, nLat, nLng)
-    : 10;
+  const nCoords = getNodeGeographicCoordinates(bestNode);
+  const distanceMeters = calculateGeographicDistance(userCoords.lat, userCoords.lng, nCoords.lat, nCoords.lng);
 
   return {
     node: bestNode,
@@ -313,3 +354,4 @@ export function findContextAwareNearestNode(
     isIndoor: Boolean(context.isInside),
   };
 }
+

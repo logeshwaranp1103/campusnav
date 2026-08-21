@@ -555,6 +555,7 @@ function MapCanvas({
 
   // Velocity tracking & Momentum Inertia Panning
   const velocityRef = useRef<{ vx: number; vy: number }>({ vx: 0, vy: 0 });
+  const isInteractingRef = useRef<boolean>(false);
   const lastTouchTimeRef = useRef<number>(0);
   const lastTouchPosRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
   const animFrameRef = useRef<number | null>(null);
@@ -653,8 +654,8 @@ function MapCanvas({
         }
       }
 
-      // Smoothly glide camera pan & rotate map if auto-following in navigation mode
-      if (isFollowingUser) {
+      // Smoothly glide camera pan & rotate map if auto-following in navigation mode (when user is not interacting)
+      if (isFollowingUser && !isInteractingRef.current) {
         const curMarker = visualGpsRef.current;
         const targetFollowX = targetGpsPos ? targetGpsPos.x : curMarker.x;
         const targetFollowY = targetGpsPos ? targetGpsPos.y : curMarker.y;
@@ -675,13 +676,16 @@ function MapCanvas({
           });
         }
 
-        // Automatic Google Maps style map rotation ONLY while actively navigating
+        // Automatic Google Maps style map rotation ONLY while actively navigating and user is moving
         if (isNavigating) {
-          const targetMapBearing = (360 - targetHeading + 360) % 360;
-          const dMapBearing = calculateShortestAngleDelta(bearingRef.current, targetMapBearing);
-          if (Math.abs(dMapBearing) > 0.1) {
-            const nextBearing = (bearingRef.current + dMapBearing * 0.12 + 360) % 360;
-            onBearingChange?.(nextBearing);
+          const isMoving = (gps?.speed !== null && gps?.speed !== undefined && gps.speed > 0.3) || (gps?.heading !== null && gps?.heading !== undefined && gps.heading >= 0);
+          if (isMoving && targetHeading >= 0) {
+            const targetMapBearing = (360 - targetHeading + 360) % 360;
+            const dMapBearing = calculateShortestAngleDelta(bearingRef.current, targetMapBearing);
+            if (Math.abs(dMapBearing) > 0.15) {
+              const nextBearing = (bearingRef.current + dMapBearing * 0.10 + 360) % 360;
+              onBearingChange?.(nextBearing);
+            }
           }
         }
       }
@@ -694,7 +698,7 @@ function MapCanvas({
       active = false;
       cancelAnimationFrame(handle);
     };
-  }, [targetGpsPos, targetHeading, isFollowingUser, isNavigating, onBearingChange]);
+  }, [targetGpsPos, targetHeading, isFollowingUser, isNavigating, onBearingChange, gps?.speed, gps?.heading]);
 
   // Recenter / Reset Action Trigger
   useEffect(() => {
@@ -750,78 +754,69 @@ function MapCanvas({
     );
     const connected = new Set<string>();
     allEdges.forEach((e) => {
-      if (activeNodes.has(e.from)) connected.add(e.to);
-      if (activeNodes.has(e.to)) connected.add(e.from);
+      const isFromActive = activeNodes.has(e.fromNodeId ?? e.from);
+      const isToActive = activeNodes.has(e.toNodeId ?? e.to);
+      if (isFromActive || isToActive) {
+        connected.add(e.fromNodeId ?? e.from);
+        connected.add(e.toNodeId ?? e.to);
+      }
     });
     return connected;
   }, [allNodes, allEdges, floorId]);
 
-  const activeFloorStairGroupIds = useMemo(() => {
-    const ids = new Set<string>();
-    allNodes.forEach((n) => {
-      if (n.floorId === floorId) {
-        if (n.stairGroupId) ids.add(n.stairGroupId);
-        if (n.liftGroupId) ids.add(n.liftGroupId);
-      }
-    });
-    return ids;
-  }, [allNodes, floorId]);
-
   const isNodeOnActiveFloor = useCallback(
-    (n?: Node | null) => {
-      if (!n) return false;
-      if (n.floorId === floorId) return true;
-      if (n.stairGroupId && activeFloorStairGroupIds.has(n.stairGroupId)) return false;
-      if (n.liftGroupId && activeFloorStairGroupIds.has(n.liftGroupId)) return false;
-      if (n.floorId === "f-out" || n.floorId === "outdoor") return true;
-      if (
-        n.type === "OUTDOOR" ||
-        n.type === "OUTDOOR_PATH" ||
+    (n: Node) => {
+      if (floorId === "f-out") {
+        return (
+          n.floorId === "f-out" ||
+          n.floorId === "outdoor" ||
+          n.floorId === undefined ||
+          n.type === "BUILDING_ENTRANCE" ||
+          n.isEntranceNode ||
+          connectedNodeIdsToActiveFloor.has(n.id)
+        );
+      }
+      return (
+        n.floorId === floorId ||
         n.type === "BUILDING_ENTRANCE" ||
-        n.type === "ENTRANCE" ||
-        n.type === "GATE" ||
-        n.type === "ROAD_JUNCTION" ||
         n.isEntranceNode ||
-        Boolean(n.outdoorNodeId) ||
-        (n.name && /entrance|gate/i.test(n.name)) ||
-        isPointOutsideAllBuildings(n.x, n.y, publishedData.buildings)
-      ) {
-        return true;
-      }
-      if (connectedNodeIdsToActiveFloor.has(n.id)) return true;
-      if (isGroundFloor) {
-        if (!n.floorId || n.floorId.includes("gnd") || n.floorId.includes("-g") || n.floorId.includes("-0") || n.floorId.includes("ground")) return true;
-        const nFloorObj = publishedData.floors.find((f) => f.id === n.floorId);
-        return nFloorObj ? nFloorObj.ordinal === 0 : true;
-      }
-      return false;
+        connectedNodeIdsToActiveFloor.has(n.id)
+      );
     },
-    [floorId, isGroundFloor, publishedData.floors, publishedData.buildings, connectedNodeIdsToActiveFloor, activeFloorStairGroupIds]
+    [floorId, connectedNodeIdsToActiveFloor]
   );
 
   const scopeNodes = useMemo(() => {
-    return allNodes.filter((n) => isNodeOnActiveFloor(n) && (n.visibleToUser !== false || Boolean(n.photoUrl)));
-  }, [allNodes, isNodeOnActiveFloor]);
+    return allNodes.filter((n) => {
+      if (floorId === "f-out") {
+        return (
+          n.floorId === "f-out" ||
+          n.floorId === "outdoor" ||
+          n.type === "BUILDING_ENTRANCE" ||
+          n.isEntranceNode
+        );
+      }
+      return n.floorId === floorId;
+    });
+  }, [allNodes, floorId]);
 
   const scopeEdges = useMemo(() => {
+    const nodeSet = new Set(scopeNodes.map((n) => n.id));
     return allEdges.filter((e) => {
-      const from = findNode(e.from);
-      const to = findNode(e.to);
-      if (!from || !to) return false;
-
-      const fromOutdoor = isNodeOnActiveFloor(from);
-      const toOutdoor = isNodeOnActiveFloor(to);
-
-      return (
-        (from.floorId === floorId && to.floorId === floorId) ||
-        (fromOutdoor && toOutdoor)
-      );
+      const from = e.fromNodeId ?? e.from;
+      const to = e.toNodeId ?? e.to;
+      return nodeSet.has(from) && nodeSet.has(to);
     });
-  }, [allEdges, findNode, isNodeOnActiveFloor, floorId]);
+  }, [allEdges, scopeNodes]);
 
   const routeNodes = useMemo(() => {
-    return route?.nodes.filter((n) => isNodeOnActiveFloor(n)) ?? [];
-  }, [route?.nodes, isNodeOnActiveFloor]);
+    return (
+      route?.nodes.filter((n) => {
+        if (floorId === "f-out") return true;
+        return isNodeOnActiveFloor(n);
+      }) ?? []
+    );
+  }, [route?.nodes, isNodeOnActiveFloor, floorId]);
 
   const routeEdges = useMemo(() => {
     return (
@@ -875,10 +870,11 @@ function MapCanvas({
     animFrameRef.current = requestAnimationFrame(step);
   };
 
-  // Mouse Drag Handlers for Desktop
+  // Mouse Drag Handlers for Desktop with Rotation Matrix Compensation
   const handleMouseDown = (e: React.MouseEvent<SVGSVGElement>) => {
     if (e.button !== 0) return;
     stopInertia();
+    isInteractingRef.current = true;
     setIsDragging(true);
     setDragStart({ x: e.clientX, y: e.clientY });
     lastTouchPosRef.current = { x: e.clientX, y: e.clientY };
@@ -890,16 +886,23 @@ function MapCanvas({
   const handleMouseMove = (e: React.MouseEvent<SVGSVGElement>) => {
     if (!isDragging || !svgRef.current) return;
     const rect = svgRef.current.getBoundingClientRect();
-    const scaleX = effectiveW / rect.width;
-    const scaleY = effectiveH / rect.height;
+    const scaleX = effectiveW / (rect.width || 1);
+    const scaleY = effectiveH / (rect.height || 1);
     const now = Date.now();
     const dt = Math.max(1, now - (lastTouchTimeRef.current || now));
 
-    const dx = (e.clientX - dragStart.x) * scaleX;
-    const dy = (e.clientY - dragStart.y) * scaleY;
+    const rawDx = (e.clientX - dragStart.x) * scaleX;
+    const rawDy = (e.clientY - dragStart.y) * scaleY;
 
-    const vx = ((e.clientX - lastTouchPosRef.current.x) * scaleX) / (dt / 16);
-    const vy = ((e.clientY - lastTouchPosRef.current.y) * scaleY) / (dt / 16);
+    // Rotate screen gesture delta by -bearing so dragging on rotated canvas matches hand movement exactly
+    const rad = (-bearingRef.current * Math.PI) / 180;
+    const dx = rawDx * Math.cos(rad) - rawDy * Math.sin(rad);
+    const dy = rawDx * Math.sin(rad) + rawDy * Math.cos(rad);
+
+    const rawVx = ((e.clientX - lastTouchPosRef.current.x) * scaleX) / (dt / 16);
+    const rawVy = ((e.clientY - lastTouchPosRef.current.y) * scaleY) / (dt / 16);
+    const vx = rawVx * Math.cos(rad) - rawVy * Math.sin(rad);
+    const vy = rawVx * Math.sin(rad) + rawVy * Math.cos(rad);
     velocityRef.current = { vx, vy };
 
     setPan((prev) => ({ x: prev.x + dx, y: prev.y + dy }));
@@ -909,13 +912,14 @@ function MapCanvas({
   };
 
   const handleMouseUp = () => {
+    isInteractingRef.current = false;
     setIsDragging(false);
     if (Math.hypot(velocityRef.current.vx, velocityRef.current.vy) > 0.5) {
       startInertia();
     }
   };
 
-  // ── Cursor-Anchored Wheel Zoom ──
+  // ── Cursor-Anchored Wheel Zoom with Rotation Compensation ──
   useEffect(() => {
     const svg = svgRef.current;
     if (!svg) return;
@@ -940,8 +944,13 @@ function MapCanvas({
       const newEffW = bW / (extZ * targetZoom);
       const newEffH = bH / (extZ * targetZoom);
 
-      const dPanX = (oldEffW - newEffW) * (0.5 - mouseRatioX);
-      const dPanY = (oldEffH - newEffH) * (0.5 - mouseRatioY);
+      const rawDPanX = (oldEffW - newEffW) * (0.5 - mouseRatioX);
+      const rawDPanY = (oldEffH - newEffH) * (0.5 - mouseRatioY);
+
+      // Rotate focal offset by -bearing
+      const rad = (-bearingRef.current * Math.PI) / 180;
+      const dPanX = rawDPanX * Math.cos(rad) - rawDPanY * Math.sin(rad);
+      const dPanY = rawDPanX * Math.sin(rad) + rawDPanY * Math.cos(rad);
 
       setPan((prev) => ({ x: prev.x + dPanX, y: prev.y + dPanY }));
       setInternalZoom(targetZoom);
@@ -988,6 +997,7 @@ function MapCanvas({
 
     const handleTouchStart = (e: TouchEvent) => {
       stopInertia();
+      isInteractingRef.current = true;
       onUserPan?.();
       const now = Date.now();
 
@@ -1008,8 +1018,12 @@ function MapCanvas({
           const oldH = bH / (extZ * curZ);
           const newW = bW / (extZ * targetZ);
           const newH = bH / (extZ * targetZ);
-          const dPanX = (oldW - newW) * (0.5 - mouseRatioX);
-          const dPanY = (oldH - newH) * (0.5 - mouseRatioY);
+
+          const rawDPanX = (oldW - newW) * (0.5 - mouseRatioX);
+          const rawDPanY = (oldH - newH) * (0.5 - mouseRatioY);
+          const rad = (-bearingRef.current * Math.PI) / 180;
+          const dPanX = rawDPanX * Math.cos(rad) - rawDPanY * Math.sin(rad);
+          const dPanY = rawDPanX * Math.sin(rad) + rawDPanY * Math.cos(rad);
 
           setPan((prev) => ({ x: prev.x + dPanX, y: prev.y + dPanY }));
           setInternalZoom(targetZ);
@@ -1098,9 +1112,12 @@ function MapCanvas({
         const newBearing = (gState.initialBearing + deltaAngle + 360) % 360;
         onBearingChange?.(newBearing);
 
-        // 3. Two-Finger Pan Midpoint Tracking
-        const dx = (currentCenter.x - gState.lastCenter.x) * scaleX;
-        const dy = (currentCenter.y - gState.lastCenter.y) * scaleY;
+        // 3. Two-Finger Pan Midpoint Tracking with Rotation Compensation
+        const rawDx = (currentCenter.x - gState.lastCenter.x) * scaleX;
+        const rawDy = (currentCenter.y - gState.lastCenter.y) * scaleY;
+        const rad = (-bearingRef.current * Math.PI) / 180;
+        const dx = rawDx * Math.cos(rad) - rawDy * Math.sin(rad);
+        const dy = rawDx * Math.sin(rad) + rawDy * Math.cos(rad);
         setPan((prev) => ({ x: prev.x + dx, y: prev.y + dy }));
         gState.lastCenter = currentCenter;
       } else if (e.touches.length === 1) {
@@ -1122,13 +1139,18 @@ function MapCanvas({
           return;
         }
 
-        const dx = (touch.clientX - gState.lastPos.x) * scaleX;
-        const dy = (touch.clientY - gState.lastPos.y) * scaleY;
+        const rawDx = (touch.clientX - gState.lastPos.x) * scaleX;
+        const rawDy = (touch.clientY - gState.lastPos.y) * scaleY;
+        const rad = (-bearingRef.current * Math.PI) / 180;
+        const dx = rawDx * Math.cos(rad) - rawDy * Math.sin(rad);
+        const dy = rawDx * Math.sin(rad) + rawDy * Math.cos(rad);
 
         setPan((prev) => ({ x: prev.x + dx, y: prev.y + dy }));
 
-        const vx = ((touch.clientX - lastTouchPosRef.current.x) * scaleX) / (dt / 16);
-        const vy = ((touch.clientY - lastTouchPosRef.current.y) * scaleY) / (dt / 16);
+        const rawVx = ((touch.clientX - lastTouchPosRef.current.x) * scaleX) / (dt / 16);
+        const rawVy = ((touch.clientY - lastTouchPosRef.current.y) * scaleY) / (dt / 16);
+        const vx = rawVx * Math.cos(rad) - rawVy * Math.sin(rad);
+        const vy = rawVx * Math.sin(rad) + rawVy * Math.cos(rad);
         velocityRef.current = { vx, vy };
 
         gState.lastPos = { x: touch.clientX, y: touch.clientY };
@@ -1138,6 +1160,7 @@ function MapCanvas({
     };
 
     const handleTouchEnd = (e: TouchEvent) => {
+      isInteractingRef.current = false;
       const gState = touchGestureRef.current;
       if (e.touches.length === 0) {
         if (gState.mode === "PAN" && Math.hypot(velocityRef.current.vx, velocityRef.current.vy) > 0.5) {
@@ -1170,6 +1193,7 @@ function MapCanvas({
     };
 
     const handleTouchCancel = () => {
+      isInteractingRef.current = false;
       touchGestureRef.current = {
         mode: "NONE",
         initialDist: 0,
@@ -1207,12 +1231,11 @@ function MapCanvas({
   const boundsCenterX = bounds.x + bounds.w / 2;
   const boundsCenterY = bounds.y + bounds.h / 2;
 
-  // ── Correct Rotation Pivot (Invariance Engine) ──
-  // When following user with active GPS or live position, pivot directly around the user's visual coordinate (visualGps.x, visualGps.y).
-  // In free-pan mode, pivot around the current screen/viewport center: (boundsCenterX - pan.x, boundsCenterY - pan.y).
-  const hasLiveTarget = Boolean(targetGpsPos || livePosition || (fromSelected && fromSelected.id === "dest-live-user-location"));
-  const rotationPivotX = (isFollowingUser && hasLiveTarget) ? visualGps.x : boundsCenterX - pan.x;
-  const rotationPivotY = (isFollowingUser && hasLiveTarget) ? visualGps.y : boundsCenterY - pan.y;
+  // ── Canonical Camera Center Rotation Pivot ──
+  // The camera viewport center in world coordinates is ALWAYS (boundsCenterX - pan.x, boundsCenterY - pan.y).
+  // Rotating around the camera viewport center guarantees zero visual jumping during pan, zoom, or rotation.
+  const rotationPivotX = boundsCenterX - pan.x;
+  const rotationPivotY = boundsCenterY - pan.y;
 
   return (
     <svg
@@ -1542,9 +1565,9 @@ function MapCanvas({
           );
         })()}
 
-        {/* Nodes & Named Labels */}
+        {/* Nodes & Named Labels (Render only user-visible nodes on user map) */}
         {scopeNodes
-          .filter((n) => !allDestinations.some((d) => d.nodeId === n.id))
+          .filter((n) => n.visibleToUser !== false && !allDestinations.some((d) => d.nodeId === n.id))
           .map((n) => {
           const onRoute = routeNodes.some((rn) => rn.id === n.id);
           const isDest = destination?.id === n.id;
@@ -1616,23 +1639,11 @@ function MapCanvas({
                     x="0"
                     y="3.5"
                     textAnchor="middle"
-                    fill={isDest ? "#065f46" : isStairOrLift ? "#b45309" : onRoute ? "#1e40af" : "#0f172a"}
-                    fontSize={isDest ? 11 : isStairOrLift ? 11 : onRoute ? 10 : 9}
-                    fontWeight="700"
+                    fill={isDest ? "#065f46" : isStairOrLift ? "#92400e" : onRoute ? "#1e40af" : "#334155"}
+                    fontSize="9.5"
+                    fontWeight="bold"
                   >
-                    {isStair ? (
-                      <>
-                        <tspan fontSize="25" fontWeight="bold">𓊍 </tspan>
-                        <tspan>{rawName}</tspan>
-                      </>
-                    ) : isLift ? (
-                      <>
-                        <tspan fontSize="14">🛗 </tspan>
-                        <tspan>{rawName}</tspan>
-                      </>
-                    ) : (
-                      displayName
-                    )}
+                    {displayName}
                   </text>
                 </g>
               )}
@@ -1686,6 +1697,7 @@ function MapCanvas({
         {allDestinations.map((d) => {
           const linkedNode = allNodes.find((n) => n.id === d.nodeId);
           if (!linkedNode || (!isNodeOnActiveFloor(linkedNode) && floorId !== "f-out")) return null;
+          if (linkedNode.visibleToUser === false) return null;
           const isSelected = toSelected?.id === d.id || toSelected?.nodeId === linkedNode.id;
           const icon = (d.category || "").toLowerCase().includes("lab") ? "🧪" : "🚪";
           const nameStr = `${icon} ${d.name}${d.roomNumber ? ` (#${d.roomNumber})` : ""}`;
@@ -1705,16 +1717,16 @@ function MapCanvas({
                 rx="6"
                 fill={isSelected ? "#10b981" : "#ffffff"}
                 stroke={isSelected ? "#059669" : "#8b5cf6"}
-                strokeWidth={isSelected ? 2 : 1.5}
-                className="shadow-md transition-colors hover:stroke-[#7c3aed] hover:stroke-[2px]"
+                strokeWidth={isSelected ? "2" : "1.5"}
+                className="shadow-md"
               />
               <text
                 x="0"
                 y="3.5"
                 textAnchor="middle"
-                fill={isSelected ? "#ffffff" : "#5b21b6"}
-                fontSize="9.5"
-                fontWeight="800"
+                fill={isSelected ? "#ffffff" : "#1e293b"}
+                fontSize="10"
+                fontWeight="700"
               >
                 {nameStr}
               </text>

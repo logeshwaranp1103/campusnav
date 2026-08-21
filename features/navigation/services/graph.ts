@@ -3,6 +3,7 @@ import type { Edge, Node, Obstacle } from "../../../shared/data/campus";
 import { buildAdjacencyGraph } from "../../../lib/routing/graph";
 import { findShortestPath } from "../../../lib/routing/dijkstra";
 import { calculateTurnAngle, turnIconFromAngle, getNodeVector, cleanLandmarkName, formatInstructionText, type DirectionIcon } from "../../../lib/routing/directions";
+import { calculateGeographicDistance, getNodeGeographicCoordinates } from "../../../lib/geo/haversine";
 
 import { WALK_SPEED, EV_SPEED, type TravelMode } from "../../../lib/routing/edge-accessibility";
 import { validateCampusGraph } from "../../../shared/lib/graph-validator";
@@ -36,17 +37,24 @@ export type Route = {
   transferNodeName?: string;
 };
 
+export type ShortestPathOptions = {
+  isDraftMode?: boolean;
+  travelMode?: TravelMode;
+  graphData?: any;
+  userLocation?: { lat?: number; lng?: number; latitude?: number; longitude?: number; x?: number; y?: number };
+};
+
 export function shortestPath(
   startId: string,
   endId: string,
-  options?: { isDraftMode?: boolean; travelMode?: TravelMode; graphData?: any }
+  options?: ShortestPathOptions
 ): Route | null {
   if (!startId || !endId) return null;
 
   const travelMode = options?.travelMode ?? "WALK";
 
   if (options?.graphData) {
-    return computeShortestPathForData(options.graphData, startId, endId, travelMode);
+    return computeShortestPathForData(options.graphData, startId, endId, travelMode, options);
   }
 
   const isDraft = options?.isDraftMode ?? false;
@@ -55,7 +63,7 @@ export function shortestPath(
   if (isDraft) {
     // Admin Draft Mode: Stay strictly in draft context to display exact error diagnostics
     if (work.nodes.length > 0) {
-      return computeShortestPathForData(work, startId, endId, travelMode);
+      return computeShortestPathForData(work, startId, endId, travelMode, options);
     }
     return null;
   }
@@ -63,14 +71,14 @@ export function shortestPath(
   // User Published Mode: Validate graph. If valid, use working data directly
   const healthReport = validateCampusGraph(work);
   if (healthReport.canPublish && work.nodes.length > 0) {
-    const workResult = computeShortestPathForData(work, startId, endId, travelMode);
+    const workResult = computeShortestPathForData(work, startId, endId, travelMode, options);
     if (workResult) return workResult;
   }
 
   // Graceful Fallback: Use last published valid snapshot if draft has critical errors
   const pub = campusStore.getPublishedData();
   if (pub.nodes.length > 0) {
-    return computeShortestPathForData(pub, startId, endId, travelMode);
+    return computeShortestPathForData(pub, startId, endId, travelMode, options);
   }
 
   return null;
@@ -80,7 +88,8 @@ function computeShortestPathForData(
   data: ReturnType<typeof campusStore.getWorkingData> | ReturnType<typeof campusStore.getPublishedData>,
   startId: string,
   endId: string,
-  travelMode: TravelMode = "WALK"
+  travelMode: TravelMode = "WALK",
+  options?: ShortestPathOptions
 ): Route | null {
   if (data.nodes.length === 0) return null;
 
@@ -122,6 +131,23 @@ function computeShortestPathForData(
           n.type === "CORRIDOR" ||
           n.isEntranceNode
       );
+
+      const userLoc = options?.userLocation;
+      if (userLoc) {
+        const uLat = userLoc.lat ?? (userLoc as any).latitude;
+        const uLng = userLoc.lng ?? (userLoc as any).longitude;
+        if (typeof uLat === "number" && typeof uLng === "number" && uLat !== 0 && uLng !== 0) {
+          const sorted = outdoorNodes.slice().sort((a, b) => {
+            const ga = getNodeGeographicCoordinates(a);
+            const gb = getNodeGeographicCoordinates(b);
+            const da = calculateGeographicDistance(uLat, uLng, ga.lat, ga.lng);
+            const db = calculateGeographicDistance(uLat, uLng, gb.lat, gb.lng);
+            return da - db;
+          });
+          if (sorted.length > 0) return sorted.map((n) => n.id);
+        }
+      }
+
       if (outdoorNodes.length > 0) return outdoorNodes.map((n) => n.id);
       if (data.nodes.length > 0) return [data.nodes[0].id];
     }
@@ -224,17 +250,29 @@ function computeShortestPathForData(
   let bestResult: ReturnType<typeof findShortestPath> = null;
   let isObstacleFree = false;
 
+  const isStartingFromLiveLocation =
+    startId.trim().toLowerCase() === "dest-live-user-location" ||
+    startId.trim().toLowerCase() === "n-live-user" ||
+    startId.trim().toLowerCase() === "your location";
+
   for (const sId of startNodeIds) {
     for (const eId of endNodeIds) {
       const res = findShortestPath(primaryGraph, nodeMap, sId, eId);
       if (res) {
-        // Compare by totalDistance (actual walking distance) to pick the genuinely shortest route,
-        // rather than totalWeight which includes artificial stair/lift penalties
-        if (!bestResult || res.totalDistance < bestResult.totalDistance) {
+        // If starting from Live Location, startNodeIds are already ranked in order of distance to the user!
+        // The first candidate that can reach the destination is the closest routable node to the user.
+        if (isStartingFromLiveLocation) {
+          bestResult = res;
+          isObstacleFree = true;
+          break;
+        } else if (!bestResult || res.totalDistance < bestResult.totalDistance) {
           bestResult = res;
           isObstacleFree = true;
         }
       }
+    }
+    if (isStartingFromLiveLocation && bestResult) {
+      break;
     }
   }
 
@@ -641,7 +679,8 @@ function buildInstructions(
       icon = "straight";
       prevVector = currentVector;
     } else {
-      text = formatInstructionText(icon, to.name);
+      const targetLandmarkName = to.visibleToUser === false ? undefined : to.name;
+      text = formatInstructionText(icon, targetLandmarkName);
       prevVector = currentVector;
     }
 
@@ -654,21 +693,21 @@ function buildInstructions(
       transition: transitionType,
       mode: edge.pathType === "EV" ? "EV" : "WALK",
       targetNodeId: to.id,
-      targetNodeName: to.name,
+      targetNodeName: to.visibleToUser === false ? undefined : to.name,
       photoUrl: to.photoUrl,
     });
     lastFloor = to.floorId;
   }
 
   const last = ns[ns.length - 1];
-  const lastLandmark = cleanLandmarkName(last?.name);
+  const lastLandmark = last?.visibleToUser === false ? null : cleanLandmarkName(last?.name);
   out.push({
     text: lastLandmark ? `You have arrived at ${lastLandmark}` : "You have arrived",
     distance: 0,
     icon: "arrive",
     transition: "arrive",
     targetNodeId: last?.id,
-    targetNodeName: last?.name,
+    targetNodeName: last?.visibleToUser === false ? undefined : last?.name,
     photoUrl: last?.photoUrl,
   });
   return out;

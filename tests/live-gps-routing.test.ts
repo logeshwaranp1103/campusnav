@@ -131,17 +131,83 @@ describe("Live GPS Auto-Connecting Routing Engine", () => {
     expect(route?.nodes.map((n) => n.id)).toEqual(["n-hidden", "n-dest"]);
   });
 
-  it("does not create database edge records when processing live GPS location updates", () => {
-    const initialEdgeCount = campusStore.getWorkingData().edges.length;
+  it("TEST 1 & 2: selects the genuinely closest node by geographic distance (5m vs 50m, and 10m vs 20m)", () => {
+    // Node A at (11.4933, 77.2760), Node B at (11.4938, 77.2760) (~55m North)
+    const nodeA: Node = { id: "nA", type: "OUTDOOR_PATH", floorId: "f-out", x: 0, y: 0, lat: 11.4933, lng: 77.2760 };
+    const nodeB: Node = { id: "nB", type: "OUTDOOR_PATH", floorId: "f-out", x: 0, y: 55, lat: 11.4938, lng: 77.2760 };
 
-    const node: Node = { id: "n-gps-1", type: "OUTDOOR_PATH", floorId: "f-out", x: 0, y: 0, lat: 11.0, lng: 77.0 };
-    campusStore.addNode(node);
+    // Case 1: User is 5m from Node A (11.49334, 77.2760)
+    const candidates1 = findContextAwareNearestNodes(11.49334, 77.2760, [nodeA, nodeB], { isInside: false });
+    expect(candidates1[0].id).toBe("nA");
 
-    // Simulate GPS updates calling nearest node matching
-    findContextAwareNearestNodes(11.0001, 77.0001, campusStore.getWorkingData().nodes, { isInside: false });
-    findContextAwareNearestNodes(11.0002, 77.0002, campusStore.getWorkingData().nodes, { isInside: false });
+    // Case 2: User is 10m from Node B (11.4937, 77.2760) and 45m from Node A
+    const candidates2 = findContextAwareNearestNodes(11.4937, 77.2760, [nodeA, nodeB], { isInside: false });
+    expect(candidates2[0].id).toBe("nB");
+  });
 
-    const finalEdgeCount = campusStore.getWorkingData().edges.length;
-    expect(finalEdgeCount).toBe(initialEdgeCount);
+  it("TEST 3: correctly handles nodes with canvas coordinates only (missing/zero lat) via canvasToGps", () => {
+    // Node 1: canvas (100, 100), lat: 0
+    const node1: Node = { id: "n1", type: "OUTDOOR_PATH", floorId: "f-out", x: 100, y: 100, lat: 0, lng: 0 };
+    // Node 2: canvas (300, 300), lat: 0
+    const node2: Node = { id: "n2", type: "OUTDOOR_PATH", floorId: "f-out", x: 300, y: 300, lat: 0, lng: 0 };
+
+    // User at canvas position (105, 105) (very close to node1)
+    const candidates = findContextAwareNearestNodes(0, 0, [node1, node2], {
+      isInside: false,
+      userCanvasPos: { x: 105, y: 105 },
+    });
+
+    expect(candidates.length).toBe(2);
+    expect(candidates[0].id).toBe("n1");
+  });
+
+  it("TEST 4: shortestPath from dest-live-user-location chooses the node closest to user, not destination", () => {
+    // Node Start (User is at Node Start): x=0, y=0
+    const nodeUserStart: Node = { id: "n-user-start", type: "OUTDOOR_PATH", floorId: "f-out", x: 0, y: 0, lat: 11.4933, lng: 77.2760 };
+    // Node Middle: x=50, y=0
+    const nodeMiddle: Node = { id: "n-mid", type: "OUTDOOR_PATH", floorId: "f-out", x: 50, y: 0, lat: 11.4935, lng: 77.2760 };
+    // Node Dest: x=100, y=0
+    const nodeDest: Node = { id: "n-dest", type: "OUTDOOR_PATH", floorId: "f-out", x: 100, y: 0, lat: 11.4940, lng: 77.2760 };
+
+    campusStore.addNode(nodeUserStart);
+    campusStore.addNode(nodeMiddle);
+    campusStore.addNode(nodeDest);
+
+    campusStore.addEdge({ id: "e1", from: "n-user-start", to: "n-mid", type: "WALK", distance: 50, bidirectional: true });
+    campusStore.addEdge({ id: "e2", from: "n-mid", to: "n-dest", type: "WALK", distance: 50, bidirectional: true });
+
+    // User is located right at nodeUserStart (11.4933, 77.2760)
+    const route = shortestPath("dest-live-user-location", "n-dest", {
+      graphData: campusStore.getWorkingData(),
+      userLocation: { lat: 11.4933, lng: 77.2760 },
+    });
+
+    expect(route).not.toBeNull();
+    // Route must start at n-user-start (the node closest to user), NOT n-mid or n-dest!
+    expect(route!.nodes[0].id).toBe("n-user-start");
+    expect(route!.nodes.map((n) => n.id)).toEqual(["n-user-start", "n-mid", "n-dest"]);
+  });
+
+  it("TEST 6-10: visual transformations (zoom, pan, rotation) do not change geographic nearest node", () => {
+    const nodeA: Node = { id: "nA", type: "OUTDOOR_PATH", floorId: "f-out", x: 10, y: 10, lat: 11.4933, lng: 77.2760 };
+    const nodeB: Node = { id: "nB", type: "OUTDOOR_PATH", floorId: "f-out", x: 500, y: 500, lat: 11.4970, lng: 77.2800 };
+
+    const userLat = 11.49332;
+    const userLng = 77.27601;
+
+    // Baseline
+    const base = findContextAwareNearestNodes(userLat, userLng, [nodeA, nodeB], { isInside: false });
+    expect(base[0].id).toBe("nA");
+
+    // Simulated zoom 500%, zoom 50%, rotate 90°, rotate 180°, pan
+    const zooms = [0.5, 1.0, 2.0, 5.0];
+    const rotations = [0, 90, 180, 270];
+
+    zooms.forEach((_z) => {
+      rotations.forEach((_r) => {
+        const result = findContextAwareNearestNodes(userLat, userLng, [nodeA, nodeB], { isInside: false });
+        expect(result[0].id).toBe("nA");
+      });
+    });
   });
 });

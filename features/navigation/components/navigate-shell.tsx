@@ -285,6 +285,7 @@ export function NavigateShell() {
           buildingId: currentBuildingId,
           floorId: isInsideBld ? currentFloorId : "f-out",
           floors: publishedData.floors,
+          userCanvasPos: gps.canvasPos,
         }
       );
 

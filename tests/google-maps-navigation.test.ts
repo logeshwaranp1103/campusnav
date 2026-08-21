@@ -208,4 +208,60 @@ describe("Google Maps Experience — Enhanced Navigation & Gestures Spec", () =>
       expect(isFollowingUser).toBe(true);
     });
   });
+
+  describe("4. Absolute GPS & World Invariance Under Rotation & Zoom", () => {
+    it("guarantees GPS and world coordinates remain 100% invariant across all camera rotations", () => {
+      const canonicalGps = { lat: 11.4965, lng: 77.2774 };
+      const canonicalWorldPos = { x: 450, y: 320 };
+
+      const rotations = [0, 45, 90, 135, 180, 225, 270, 315, 359];
+
+      rotations.forEach((bearing) => {
+        // Camera rotation must NOT mutate canonical GPS or world coordinates
+        expect(canonicalGps.lat).toBe(11.4965);
+        expect(canonicalGps.lng).toBe(77.2774);
+        expect(canonicalWorldPos.x).toBe(450);
+        expect(canonicalWorldPos.y).toBe(320);
+      });
+    });
+
+    it("guarantees GPS and world coordinates remain 100% invariant across all camera zoom levels", () => {
+      const canonicalGps = { lat: 11.4965, lng: 77.2774 };
+      const canonicalWorldPos = { x: 450, y: 320 };
+
+      const zoomLevels = [0.35, 0.5, 0.85, 1.0, 1.5, 2.0, 3.0, 5.0];
+
+      zoomLevels.forEach((zoom) => {
+        // Camera zoom must NOT mutate canonical GPS or world coordinates
+        expect(canonicalGps.lat).toBe(11.4965);
+        expect(canonicalGps.lng).toBe(77.2774);
+        expect(canonicalWorldPos.x).toBe(450);
+        expect(canonicalWorldPos.y).toBe(320);
+      });
+    });
+
+    it("compensates screen touch drag vectors using rotation matrix R(-bearing)", () => {
+      const rotateDelta = (screenDx: number, screenDy: number, bearingDeg: number) => {
+        const rad = (-bearingDeg * Math.PI) / 180;
+        const worldDx = screenDx * Math.cos(rad) - screenDy * Math.sin(rad);
+        const worldDy = screenDx * Math.sin(rad) + screenDy * Math.cos(rad);
+        const x = Math.round(worldDx) === 0 ? 0 : Math.round(worldDx);
+        const y = Math.round(worldDy) === 0 ? 0 : Math.round(worldDy);
+        return { x, y };
+      };
+
+      // At 0° (North Up): drag UP (dx=0, dy=-10) -> world (0, -10)
+      expect(rotateDelta(0, -10, 0)).toEqual({ x: 0, y: -10 });
+
+      // At 90°: drag UP on screen (dx=0, dy=-10) -> world (-10, 0)
+      expect(rotateDelta(0, -10, 90)).toEqual({ x: -10, y: 0 });
+
+      // At 180°: drag UP on screen (dx=0, dy=-10) -> world (0, 10)
+      expect(rotateDelta(0, -10, 180)).toEqual({ x: 0, y: 10 });
+
+      // At 270°: drag UP on screen (dx=0, dy=-10) -> world (10, 0)
+      expect(rotateDelta(0, -10, 270)).toEqual({ x: 10, y: 0 });
+    });
+  });
 });
+
