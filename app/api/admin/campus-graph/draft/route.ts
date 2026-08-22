@@ -2,6 +2,10 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { getActivePublishedGraph, getRelationalGraphFromDatabase, sanitizeSnapshotForPayload } from "@/lib/services/publish-service";
 
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+export const fetchCache = "force-no-store";
+
 const EMPTY_GRAPH = {
   buildings: [],
   floors: [],
@@ -17,53 +21,65 @@ const EMPTY_GRAPH = {
 
 export async function GET() {
   try {
-    if (prisma) {
-      // 1. Check if active draft overlay snapshot exists in database
-      const draftRecord = await prisma.draftGraph.findUnique({
-        where: { id: "active-draft" },
-      }).catch(() => null);
+    if (!prisma) {
+      console.warn("[DraftRoute:GET] Prisma client not available.");
+      return NextResponse.json({ error: "Database client unavailable" }, { status: 503 });
+    }
 
-      if (draftRecord && draftRecord.snapshot && typeof draftRecord.snapshot === "object") {
-        const snap = draftRecord.snapshot as any;
-        const hasSnapEntities =
-          (Array.isArray(snap.buildings) && snap.buildings.length > 0) ||
-          (Array.isArray(snap.nodes) && snap.nodes.length > 0);
+    // 1. Check if active draft overlay snapshot exists in database
+    const draftRecord = await prisma.draftGraph.findUnique({
+      where: { id: "active-draft" },
+    });
 
-        if (hasSnapEntities) {
-          return NextResponse.json({ draft: sanitizeSnapshotForPayload(snap) });
-        }
-      }
+    if (draftRecord && draftRecord.snapshot && typeof draftRecord.snapshot === "object") {
+      const snap = draftRecord.snapshot as any;
+      const hasSnapEntities =
+        (Array.isArray(snap.buildings) && snap.buildings.length > 0) ||
+        (Array.isArray(snap.nodes) && snap.nodes.length > 0);
 
-      // 2. Query PostgreSQL relational database tables
-      const relational = await getRelationalGraphFromDatabase().catch(() => null);
-      if (relational) {
-        const hasRelationalEntities =
-          (Array.isArray(relational.buildings) && relational.buildings.length > 0) ||
-          (Array.isArray(relational.nodes) && relational.nodes.length > 0);
-        if (hasRelationalEntities) {
-          return NextResponse.json({ draft: sanitizeSnapshotForPayload(relational) });
-        }
-      }
-
-      // 3. Fallback to active published graph if draft is not set
-      const published = await getActivePublishedGraph(false).catch(() => null);
-      if (published && published.snapshot) {
-        const hasPubEntities =
-          (Array.isArray(published.snapshot.buildings) && published.snapshot.buildings.length > 0) ||
-          (Array.isArray(published.snapshot.nodes) && published.snapshot.nodes.length > 0);
-        if (hasPubEntities) {
-          return NextResponse.json({ draft: sanitizeSnapshotForPayload(published.snapshot) });
-        }
+      if (hasSnapEntities) {
+        console.log(`[DraftRoute:GET] Loaded active-draft from DB: ${snap.buildings?.length ?? 0} buildings, ${snap.nodes?.length ?? 0} nodes, ${snap.edges?.length ?? 0} edges, ${snap.floors?.length ?? 0} floors, ${snap.destinations?.length ?? 0} destinations`);
+        return NextResponse.json({ draft: sanitizeSnapshotForPayload(snap) });
       }
     }
-    return NextResponse.json({ draft: EMPTY_GRAPH });
+
+    // 2. Query PostgreSQL relational database tables
+    const relational = await getRelationalGraphFromDatabase().catch(() => null);
+    if (relational) {
+      const hasRelationalEntities =
+        (Array.isArray(relational.buildings) && relational.buildings.length > 0) ||
+        (Array.isArray(relational.nodes) && relational.nodes.length > 0);
+      if (hasRelationalEntities) {
+        console.log(`[DraftRoute:GET] Loaded from relational DB tables: ${relational.buildings?.length ?? 0} buildings, ${relational.nodes?.length ?? 0} nodes`);
+        return NextResponse.json({ draft: sanitizeSnapshotForPayload(relational) });
+      }
+    }
+
+    // 3. Fallback to active published graph if draft is not set
+    const published = await getActivePublishedGraph(true).catch(() => null);
+    if (published && published.snapshot) {
+      const hasPubEntities =
+        (Array.isArray(published.snapshot.buildings) && published.snapshot.buildings.length > 0) ||
+        (Array.isArray(published.snapshot.nodes) && published.snapshot.nodes.length > 0);
+      if (hasPubEntities) {
+        console.log(`[DraftRoute:GET] Loaded from published graph: ${published.snapshot.buildings?.length ?? 0} buildings, ${published.snapshot.nodes?.length ?? 0} nodes`);
+        return NextResponse.json({ draft: sanitizeSnapshotForPayload(published.snapshot) });
+      }
+    }
+
+    console.log("[DraftRoute:GET] Database contains empty draft graph.");
+    return NextResponse.json({ draft: EMPTY_GRAPH, empty: true });
   } catch (err: unknown) {
-    console.warn("Notice: GET /api/admin/campus-graph/draft database notice:", err instanceof Error ? err.message : String(err));
-    return NextResponse.json({
-      draft: EMPTY_GRAPH,
-      offline: true,
-      message: "Database connection notice, fallback to local store",
-    });
+    const errorMsg = err instanceof Error ? err.message : String(err);
+    console.error("[DraftRoute:GET] Database error loading draft:", errorMsg);
+    return NextResponse.json(
+      {
+        error: "Database error while loading draft graph",
+        details: errorMsg,
+        draft: null,
+      },
+      { status: 500 }
+    );
   }
 }
 
@@ -73,7 +89,12 @@ export async function PUT(req: Request) {
     const snapshot = body.snapshot || body.draft;
     const isExplicitReset = Boolean(body.isExplicitReset);
 
-    if (snapshot && prisma) {
+    if (!prisma) {
+      console.warn("[DraftRoute:PUT] Prisma client not available.");
+      return NextResponse.json({ error: "Database client unavailable" }, { status: 503 });
+    }
+
+    if (snapshot) {
       // Safety Guard: Never overwrite active draft with an empty snapshot unless explicit administrative reset is confirmed
       const hasEntities =
         (Array.isArray(snapshot.buildings) && snapshot.buildings.length > 0) ||
@@ -81,7 +102,7 @@ export async function PUT(req: Request) {
         (Array.isArray(snapshot.floors) && snapshot.floors.length > 0);
 
       if (!hasEntities && !isExplicitReset) {
-        console.warn("[DraftRoute] Protected active-draft from accidental empty snapshot overwrite.");
+        console.warn("[DraftRoute:PUT] Protected active-draft from accidental empty snapshot overwrite.");
         return NextResponse.json({ success: true, protected: true });
       }
 
@@ -90,11 +111,21 @@ export async function PUT(req: Request) {
         where: { id: "active-draft" },
         update: { snapshot: snapshot as any },
         create: { id: "active-draft", snapshot: snapshot as any },
-      }).catch((e) => console.warn("Notice: DraftGraph upsert notice:", e?.message));
+      });
+
+      console.log(`[DraftRoute:PUT] Successfully saved active-draft to database: ${snapshot.buildings?.length ?? 0} buildings, ${snapshot.nodes?.length ?? 0} nodes, ${snapshot.edges?.length ?? 0} edges`);
     }
     return NextResponse.json({ success: true });
   } catch (err: unknown) {
-    console.warn("Notice: PUT /api/admin/campus-graph/draft database notice:", err instanceof Error ? err.message : String(err));
-    return NextResponse.json({ success: false, offline: true, message: "Draft stored in local memory" });
+    const errorMsg = err instanceof Error ? err.message : String(err);
+    console.error("[DraftRoute:PUT] Database error saving draft:", errorMsg);
+    return NextResponse.json(
+      {
+        success: false,
+        error: "Failed to persist draft to database",
+        details: errorMsg,
+      },
+      { status: 500 }
+    );
   }
 }

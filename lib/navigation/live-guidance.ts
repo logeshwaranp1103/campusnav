@@ -309,12 +309,9 @@ export function computeLiveTurnGuidance(
     options?.matchedNodeId && lastNode && options.matchedNodeId === lastNode.id
   );
 
-  if (
-    isMatchedAtDest ||
-    distToFinalDest <= arrivalThreshold ||
-    projection.distanceRemaining <= arrivalThreshold ||
-    segIndex >= nodes.length - 1
-  ) {
+  const isPhysicallyAtDest = Boolean(lastNode && (distToFinalDest <= arrivalThreshold || isMatchedAtDest));
+
+  if (isPhysicallyAtDest) {
     const landmark = cleanLandmarkName(lastNode?.name);
     return {
       currentInstruction: {

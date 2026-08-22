@@ -174,6 +174,7 @@ export function findNearestNodeByGps(
 export interface ContextAwareNearestNodeOptions {
   isInside: boolean;
   buildingId?: string | null;
+  buildingName?: string | null;
   floorId?: string | null;
   floors?: Floor[];
   userCanvasPos?: { x: number; y: number } | null;
@@ -191,9 +192,10 @@ export interface NearestNodeResult {
 /**
  * Context-aware nearest navigation node finder.
  *
- * INDOOR:
- * Filters strictly for nodes on the detected building and selected floor.
- * Excludes nodes from all other buildings and floors.
+ * INDOOR (User physically inside a building):
+ * 1. Prioritizes nodes on the selected floor of that building.
+ * 2. Prioritizes building entrance nodes for that building to guarantee exiting via the entrance instead of crossing exterior walls.
+ * 3. Prioritizes all other indoor nodes belonging to that building.
  *
  * OUTDOOR:
  * Filters for valid outdoor paths, gates, and building entrance nodes.
@@ -231,28 +233,42 @@ export function findContextAwareNearestNodes(
 
   const candidatePool: Node[] = [];
 
-  if (context.isInside && context.buildingId && context.floorId && context.floorId !== "f-out") {
-    // Priority 1: Same floor nodes
-    const sameFloorNodes = validNodes.filter((n) => n.floorId === context.floorId);
-    if (sameFloorNodes.length > 0) {
-      candidatePool.push(...sameFloorNodes.slice().sort((a, b) => getDistance(a) - getDistance(b)));
+  if (context.isInside && context.buildingId) {
+    const bldId = context.buildingId;
+    const bldName = (context.buildingName || "").trim().toLowerCase();
+    const bldFloorIds = new Set((context.floors || []).filter((f) => f.buildingId === bldId).map((f) => f.id));
+
+    // Priority 1: Same indoor floor nodes (when on a specific indoor level)
+    if (context.floorId && context.floorId !== "f-out") {
+      const sameFloorNodes = validNodes.filter((n) => n.floorId === context.floorId);
+      if (sameFloorNodes.length > 0) {
+        candidatePool.push(...sameFloorNodes.slice().sort((a, b) => getDistance(a) - getDistance(b)));
+      }
     }
 
-    // Priority 2: Same building entrance nodes
+    // Priority 2: Building Entrance nodes of this specific building (routes cleanly out of building without wall-crossing)
     const buildingEntranceNodes = validNodes.filter((n) => {
-      const isEnt = Boolean(n.isEntranceNode || n.type === "BUILDING_ENTRANCE" || (n.name && n.name.toLowerCase().includes("entrance")));
+      const isEnt = Boolean(
+        n.isEntranceNode ||
+        n.type === "BUILDING_ENTRANCE" ||
+        n.type === "ENTRANCE" ||
+        (n.name && n.name.toLowerCase().includes("entrance"))
+      );
       if (!isEnt) return false;
       const nodeFloor = context.floors?.find((f) => f.id === n.floorId);
-      return nodeFloor?.buildingId === context.buildingId;
+      const isFloorMatch = nodeFloor?.buildingId === bldId || (n.floorId && bldFloorIds.has(n.floorId));
+      const isNameMatch = bldName.length > 0 && n.name && n.name.toLowerCase().includes(bldName);
+      const isIdMatch = (n as any).buildingId === bldId;
+      return isFloorMatch || isNameMatch || isIdMatch;
     });
     if (buildingEntranceNodes.length > 0) {
       candidatePool.push(...buildingEntranceNodes.slice().sort((a, b) => getDistance(a) - getDistance(b)));
     }
 
-    // Priority 3: Same building other floor nodes
+    // Priority 3: All indoor nodes of this building (ground floor first)
     const buildingNodes = validNodes.filter((n) => {
       const nodeFloor = context.floors?.find((f) => f.id === n.floorId);
-      return nodeFloor?.buildingId === context.buildingId;
+      return nodeFloor?.buildingId === bldId || (n.floorId && bldFloorIds.has(n.floorId)) || (n as any).buildingId === bldId;
     });
     if (buildingNodes.length > 0) {
       candidatePool.push(...buildingNodes.slice().sort((a, b) => getDistance(a) - getDistance(b)));

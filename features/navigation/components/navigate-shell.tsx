@@ -280,15 +280,17 @@ export function NavigateShell() {
     // If startDest is Live Location, resolve context-aware candidate start nodes
     let liveStartCandidates: CampusNode[] = [];
     if (startDest.id === YOUR_LOCATION_ID) {
-      const isInsideBld = Boolean(currentBuildingId && currentFloorId !== "f-out");
+      const bld = detectedBuilding || (currentBuildingId ? (publishedData.buildings || []).find((b) => b.id === currentBuildingId) : null);
+      const isInsideBld = Boolean(bld);
       liveStartCandidates = findContextAwareNearestNodes(
         gps.lat,
         gps.lng,
         publishedData.nodes || [],
         {
           isInside: isInsideBld,
-          buildingId: currentBuildingId,
-          floorId: isInsideBld ? currentFloorId : "f-out",
+          buildingId: bld?.id,
+          buildingName: bld?.name,
+          floorId: isInsideBld && currentFloorId !== "f-out" ? currentFloorId : "f-out",
           floors: publishedData.floors,
           userCanvasPos: gps.canvasPos,
         }
@@ -347,48 +349,11 @@ export function NavigateShell() {
         setLoading(false);
         setRoute(null);
 
-        if (mode === "EV") {
-          let walkRoute: Route | null = null;
-          if (segStart.id === YOUR_LOCATION_ID && liveStartCandidates.length > 0) {
-            for (const candidate of liveStartCandidates) {
-              const candidateRoute = shortestPath(candidate.id, segEndId, { travelMode: "WALK" });
-              if (candidateRoute) {
-                walkRoute = candidateRoute;
-                break;
-              }
-            }
-          } else {
-            const segStartId = segStart.nodeId || segStart.id;
-            walkRoute = shortestPath(segStartId, segEndId, { travelMode: "WALK" });
-          }
-
-          if (walkRoute) {
-            toast({
-              type: "warning",
-              title: "No EV Path Available",
-              description: "There is no EV path, but a walkable path is available. Would you like to continue via the walkable path?",
-              action: {
-                label: "Continue via Walk",
-                onClick: () => {
-                  setTravelMode("WALK");
-                  calculateRoute(startDest, endDest, currentStops, currentFloorId, currentBuildingId, "WALK");
-                },
-              },
-            });
-          } else {
-            toast({
-              type: "error",
-              title: "No EV Path Available",
-              description: "There is no EV path between these locations.",
-            });
-          }
-        } else {
-          toast({
-            type: "error",
-            title: "No Route Found",
-            description: `No path from "${segStart.name}" to "${segEnd.name}".`,
-          });
-        }
+        toast({
+          type: "error",
+          title: "No Route Found",
+          description: `No path from "${segStart.name}" to "${segEnd.name}".`,
+        });
         return null;
       }
       totalDistance += segRoute.distance;
@@ -413,6 +378,7 @@ export function NavigateShell() {
     const evDist = combinedEdges.filter((e) => e.pathType === "EV").reduce((acc, e) => acc + e.distance, 0);
     const walkDist = combinedEdges.filter((e) => e.pathType !== "EV").reduce((acc, e) => acc + e.distance, 0);
     const lastEvEdge = combinedEdges.filter((e) => e.pathType === "EV").pop();
+    const isFallbackWalk = mode === "EV" && evDist === 0;
 
     const clientRoute: Route = {
       id: `multi-${Date.now()}`,
@@ -421,11 +387,13 @@ export function NavigateShell() {
       distance: totalDistance,
       durationSec: totalDurationSec,
       instructions: combinedInstructions,
-      travelMode: isMultimodal ? "MULTIMODAL" : mode,
+      travelMode: isFallbackWalk ? "WALK" : (isMultimodal ? "MULTIMODAL" : mode),
       evDistance: evDist,
       walkDistance: walkDist,
       transferNodeId: isMultimodal && lastEvEdge ? lastEvEdge.to : undefined,
       hasObstacles,
+      isFallbackWalk,
+      fallbackReason: isFallbackWalk ? "EV path not available, Showing walkable route" : undefined,
     };
 
     setRoute(clientRoute);
@@ -434,7 +402,13 @@ export function NavigateShell() {
       navSession.startNavigationSession(startDest, endDest, clientRoute);
     }
 
-    if (hasObstacles) {
+    if (isFallbackWalk) {
+      toast({
+        type: "warning",
+        title: "EV Path Unavailable",
+        description: "EV path not available, Showing walkable route",
+      });
+    } else if (hasObstacles) {
       toast({
         type: "warning",
         title: "All Routes Have Obstacles",
@@ -627,16 +601,26 @@ export function NavigateShell() {
     }
   }
 
+  if (!mounted) {
+    return (
+      <div className="flex flex-1 items-center justify-center gap-3 p-6 text-sm text-[rgb(var(--muted-fg))]">
+        <span className="h-4 w-4 animate-spin rounded-full border-2 border-[rgb(var(--primary))] border-t-transparent" />
+        <span>Loading navigation…</span>
+      </div>
+    );
+  }
+
   return (
     <div className="relative flex flex-1 overflow-hidden">
       {/* Left panel */}
       <div
+        suppressHydrationWarning
         className={cn(
           "z-10 w-full shrink-0 flex-col border-r bg-[rgb(var(--card))] md:flex md:w-80 lg:w-[320px] overflow-y-auto overscroll-contain touch-pan-y scrollbar-thin pb-24 md:pb-4",
           mobileView === "panel" ? "flex" : "hidden"
         )}
       >
-        <div ref={searchContainerRef} className="border-b p-3 space-y-2.5">
+        <div ref={searchContainerRef} suppressHydrationWarning className="border-b p-3 space-y-2.5">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
               <div className="flex h-6 w-6 items-center justify-center rounded-lg gradient-primary text-white">
@@ -653,7 +637,7 @@ export function NavigateShell() {
           </div>
 
           {/* Travel Mode Toggle (Walk / EV) */}
-          <div className="flex items-center rounded-xl bg-[rgb(var(--muted))] p-1 text-xs">
+          <div suppressHydrationWarning className="flex items-center rounded-xl bg-[rgb(var(--muted))] p-1 text-xs">
             <button
               type="button"
               onClick={() => {
@@ -996,8 +980,10 @@ export function NavigateShell() {
               <div className="card space-y-3 p-4">
                 <div className="flex items-start justify-between">
                   <div>
-                    <Badge variant="primary" className="mb-1 text-[10px]">
-                      {travelMode === "EV" ? "🚗 EV Route" : "🚶 Walking Route"}
+                    <Badge variant={route.isFallbackWalk ? "warning" : "primary"} className="mb-1 text-[10px]">
+                      {travelMode === "EV"
+                        ? (route.isFallbackWalk ? "🚶 Walk (EV unavailable)" : "🚗 EV Route")
+                        : "🚶 Walking Route"}
                     </Badge>
                     <h2 className="text-base font-bold text-[rgb(var(--fg))]">
                       To {toSelected?.name}
@@ -1027,6 +1013,17 @@ export function NavigateShell() {
                   <Stat icon={Ruler} label="Distance" value={`${Math.round(route.distance)} m`} />
                   <Stat icon={Timer} label="ETA" value={`${Math.round(route.durationSec / 60)} min`} />
                 </div>
+
+                {route.isFallbackWalk && (
+                  <div className="mt-3 flex items-start gap-2.5 rounded-xl border border-amber-500/40 bg-amber-500/10 p-3 text-xs shadow-xs">
+                    <AlertTriangle className="h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400 mt-0.5" />
+                    <div className="space-y-0.5">
+                      <div className="font-bold text-amber-900 dark:text-amber-200">
+                        EV path not available, Showing walkable route
+                      </div>
+                    </div>
+                  </div>
+                )}
 
                 {route.hasObstacles && (
                   <div className="mt-3 flex items-start gap-3 rounded-xl border border-[#fde047]/70 bg-[#fefce8] dark:border-[#78350f]/60 dark:bg-[#451a03]/40 p-3 shadow-xs">

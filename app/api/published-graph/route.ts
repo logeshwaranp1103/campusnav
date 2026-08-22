@@ -1,71 +1,104 @@
 import { NextResponse } from "next/server";
+import { prisma } from "@/lib/db";
 import { getActivePublishedGraph, publishDraftGraph, sanitizeSnapshotForPayload } from "@/lib/services/publish-service";
 
-export async function GET(req: Request) {
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+export const fetchCache = "force-no-store";
+
+export async function GET() {
   try {
-    const publishedServiceData = await getActivePublishedGraph(false);
+    const publishedServiceData = await getActivePublishedGraph(true);
 
-    const rawData = publishedServiceData?.snapshot ?? {
-      buildings: [],
-      floors: [],
-      nodes: [],
-      edges: [],
-      destinations: [],
-      obstacles: [],
-    };
+    if (publishedServiceData && publishedServiceData.snapshot) {
+      const data = sanitizeSnapshotForPayload(publishedServiceData.snapshot);
+      const version = publishedServiceData.version ?? 1;
+      const publishedAt = publishedServiceData.publishedAt ?? new Date();
 
-    const data = sanitizeSnapshotForPayload(rawData);
-    const version = publishedServiceData?.version ?? 1;
-    const publishedAt = publishedServiceData?.publishedAt ?? new Date();
-    const etag = `W/"v${version}-${new Date(publishedAt).getTime()}"`;
+      console.log(`[PublishedGraph:GET] Read published map from database: version v${version}, ${(data.buildings || []).length} buildings, ${(data.nodes || []).length} nodes, ${(data.edges || []).length} edges, ${(data.floors || []).length} floors, ${(data.destinations || []).length} destinations`);
 
-    // 304 Not Modified check
-    const ifNoneMatch = req.headers.get("if-none-match");
-    if (ifNoneMatch && ifNoneMatch === etag) {
-      return new NextResponse(null, {
-        status: 304,
-        headers: {
-          ETag: etag,
-          "Cache-Control": "public, max-age=10, s-maxage=60, stale-while-revalidate=86400",
+      return NextResponse.json(
+        {
+          published: true,
+          publishedAt,
+          version,
+          graph: data,
         },
-      });
+        {
+          headers: {
+            "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0, proxy-revalidate",
+            "Pragma": "no-cache",
+            "Expires": "0",
+          },
+        }
+      );
     }
 
+    console.log("[PublishedGraph:GET] No published map found in database.");
     return NextResponse.json(
       {
-        publishedAt,
-        version,
-        graph: data,
+        published: false,
+        publishedAt: null,
+        version: 0,
+        graph: null,
+        message: "No published map found in database.",
       },
       {
+        status: 200,
         headers: {
-          ETag: etag,
-          "Cache-Control": "public, max-age=10, s-maxage=60, stale-while-revalidate=86400",
+          "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
         },
       }
     );
   } catch (err: unknown) {
-    console.warn("Notice: GET /api/published-graph database error:", err instanceof Error ? err.message : String(err));
-    return NextResponse.json({
-      publishedAt: new Date(),
-      version: 1,
-      graph: { buildings: [], floors: [], nodes: [], edges: [], destinations: [], obstacles: [] },
-      offline: true,
-      error: err instanceof Error ? err.message : String(err),
-    });
+    const errorMsg = err instanceof Error ? err.message : String(err);
+    console.error("[PublishedGraph:GET] Database error:", errorMsg);
+    return NextResponse.json(
+      {
+        error: "Failed to load published map from database",
+        details: errorMsg,
+        graph: null,
+      },
+      {
+        status: 500,
+        headers: {
+          "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+        },
+      }
+    );
   }
 }
 
 export async function POST(req: Request) {
   try {
     const body = await req.json().catch(() => ({}));
-    const snapshot = body.snapshot;
+    let snapshot = body.snapshot || body.draft;
+
+    if (!snapshot || typeof snapshot !== "object" || Object.keys(snapshot).length === 0) {
+      if (prisma) {
+        const dbDraft = await prisma.draftGraph.findUnique({
+          where: { id: "active-draft" },
+        }).catch(() => null);
+        if (dbDraft && dbDraft.snapshot && typeof dbDraft.snapshot === "object") {
+          snapshot = dbDraft.snapshot;
+        }
+      }
+    }
+
+    if (!snapshot || typeof snapshot !== "object") {
+      return NextResponse.json({ error: "No snapshot available to publish." }, { status: 400 });
+    }
+
+    console.log(`[PublishedGraph:POST] Publishing map snapshot with ${(snapshot.buildings || []).length} buildings, ${(snapshot.nodes || []).length} nodes`);
 
     const result = await publishDraftGraph(snapshot, "admin-user", body.notes);
 
     if (!result.success) {
+      console.error("[PublishedGraph:POST] Publishing failed:", result.error);
       return NextResponse.json({ error: result.error, validationReport: result.validationReport }, { status: 422 });
     }
+
+    console.log(`[PublishedGraph:POST] Successfully published map v${result.version} to database at ${result.publishedAt}`);
 
     return NextResponse.json({
       success: true,
@@ -74,7 +107,8 @@ export async function POST(req: Request) {
       graph: snapshot,
     });
   } catch (err: unknown) {
-    console.warn("Notice: POST /api/published-graph database warning:", err instanceof Error ? err.message : String(err));
-    return NextResponse.json({ success: false, offline: true, error: err instanceof Error ? err.message : String(err) }, { status: 200 });
+    const errorMsg = err instanceof Error ? err.message : String(err);
+    console.error("[PublishedGraph:POST] Database error during publish:", errorMsg);
+    return NextResponse.json({ success: false, error: errorMsg }, { status: 500 });
   }
 }

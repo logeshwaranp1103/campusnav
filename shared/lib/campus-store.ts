@@ -2507,21 +2507,21 @@ class CampusStore {
               this.stairGroups = JSON.parse(JSON.stringify(this.publishedGraph.stairGroups || []));
               this.liftGroups = JSON.parse(JSON.stringify(this.publishedGraph.liftGroups || []));
               this.doors = JSON.parse(JSON.stringify(this.publishedGraph.doors || []));
-              try {
-                if (this.buildings.length === 0 && this.nodes.length === 0) {
-                  localStorage.removeItem("campusnav_working_draft_cache");
-                } else {
-                  localStorage.setItem("campusnav_working_draft_cache", JSON.stringify(this.getWorkingData()));
-                }
-              } catch (e) {}
+              // Sync draft cache into memory only
             }
           }
         }
       } else {
-        // Visitor: fetch only the published graph
+        // Visitor: fetch only the published graph from database with no-cache
         let loaded = false;
         try {
-          const resPub = await fetch("/api/published-graph", { cache: "no-store" });
+          const resPub = await fetch(`/api/published-graph?_t=${Date.now()}`, {
+            cache: "no-store",
+            headers: {
+              Pragma: "no-cache",
+              "Cache-Control": "no-cache, no-store, must-revalidate",
+            },
+          });
           if (resPub.ok) {
             const jsonPub = await resPub.json();
             const graph = jsonPub?.graph;
@@ -2561,7 +2561,13 @@ class CampusStore {
         // Fallback 1: Try /api/campus/main/graph if primary published endpoint did not return entities
         if (!loaded) {
           try {
-            const resSlug = await fetch("/api/campus/main/graph", { cache: "no-store" });
+            const resSlug = await fetch(`/api/campus/main/graph?_t=${Date.now()}`, {
+              cache: "no-store",
+              headers: {
+                Pragma: "no-cache",
+                "Cache-Control": "no-cache, no-store, must-revalidate",
+              },
+            });
             if (resSlug.ok) {
               const jsonSlug = await resSlug.json();
               const graph = jsonSlug?.data;
@@ -2600,7 +2606,13 @@ class CampusStore {
         // Fallback 2: Try /api/admin/campus-graph/draft if active published record was not yet created
         if (!loaded) {
           try {
-            const resDraft = await fetch("/api/admin/campus-graph/draft", { cache: "no-store" });
+            const resDraft = await fetch(`/api/admin/campus-graph/draft?_t=${Date.now()}`, {
+              cache: "no-store",
+              headers: {
+                Pragma: "no-cache",
+                "Cache-Control": "no-cache, no-store, must-revalidate",
+              },
+            });
             if (resDraft.ok) {
               const jsonDraft = await resDraft.json();
               const draft = jsonDraft?.draft;
@@ -2653,16 +2665,8 @@ class CampusStore {
     }
   }
 
-  public async fetchPublishedData(force = false): Promise<ReturnType<CampusStore["getPublishedData"]>> {
+  public async fetchPublishedData(force = true): Promise<ReturnType<CampusStore["getPublishedData"]>> {
     if (typeof window === "undefined") return this.getPublishedData();
-    const hasData =
-      (this.publishedGraph.buildings && this.publishedGraph.buildings.length > 0) ||
-      (this.buildings && this.buildings.length > 0);
-
-    if (hasData && !force) {
-      return this.getPublishedData();
-    }
-
     await this.syncWithServer();
     return this.getPublishedData();
   }

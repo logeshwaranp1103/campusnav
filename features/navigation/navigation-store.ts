@@ -267,11 +267,7 @@ export const useNavigationStore = create<NavigationSessionState>((set, get) => (
       matchedNodeId: matchedNode?.id ?? null,
     });
 
-    const isDirectNodeArrival = Boolean(
-      matchedNode && destination.nodeId && matchedNode.id === destination.nodeId
-    );
-
-    if (guidance.isArrived || isDirectNodeArrival) {
+    if (guidance.isArrived) {
       set({
         status: "ARRIVED",
         navigationMode: "ARRIVED",

@@ -1,6 +1,10 @@
 import { NextResponse } from "next/server";
 import { getActivePublishedGraph, sanitizeSnapshotForPayload } from "@/lib/services/publish-service";
 
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+export const fetchCache = "force-no-store";
+
 export async function GET(
   req: Request,
   { params }: { params: Promise<{ slug: string }> }
@@ -19,19 +23,6 @@ export async function GET(
 
   const data = sanitizeSnapshotForPayload(rawData);
   const version = publishedServiceData?.version ?? 1;
-  const publishedAt = publishedServiceData?.publishedAt ?? new Date();
-  const etag = `W/"v${version}-${new Date(publishedAt).getTime()}"`;
-
-  const ifNoneMatch = req.headers.get("if-none-match");
-  if (ifNoneMatch && ifNoneMatch === etag) {
-    return new NextResponse(null, {
-      status: 304,
-      headers: {
-        ETag: etag,
-        "Cache-Control": "no-cache, must-revalidate",
-      },
-    });
-  }
 
   return NextResponse.json(
     {
@@ -41,8 +32,9 @@ export async function GET(
     },
     {
       headers: {
-        ETag: etag,
-        "Cache-Control": "no-cache, must-revalidate",
+        "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0, proxy-revalidate",
+        "Pragma": "no-cache",
+        "Expires": "0",
       },
     }
   );

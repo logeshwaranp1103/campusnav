@@ -8,6 +8,9 @@ import { calculateGeographicDistance, getNodeGeographicCoordinates, findContextA
 import { WALK_SPEED, EV_SPEED, type TravelMode } from "../../../lib/routing/edge-accessibility";
 import { validateCampusGraph } from "../../../shared/lib/graph-validator";
 
+import { isPointInsideBuilding } from "../../../lib/geo/building-geometry";
+import { gpsToCanvas } from "../../../lib/geo/projection";
+
 export type RouteInstruction = {
   text: string;
   distance: number;
@@ -35,6 +38,8 @@ export type Route = {
   walkDistance?: number;
   transferNodeId?: string;
   transferNodeName?: string;
+  isFallbackWalk?: boolean;
+  fallbackReason?: string;
 };
 
 export type ShortestPathOptions = {
@@ -68,17 +73,16 @@ export function shortestPath(
     return null;
   }
 
-  // User Published Mode: Validate graph. If valid, use working data directly
-  const healthReport = validateCampusGraph(work);
-  if (healthReport.canPublish && work.nodes.length > 0) {
-    const workResult = computeShortestPathForData(work, startId, endId, travelMode, options);
-    if (workResult) return workResult;
-  }
-
-  // Graceful Fallback: Use last published valid snapshot if draft has critical errors
+  // User Published Mode: Route on the published map snapshot from database
   const pub = campusStore.getPublishedData();
   if (pub.nodes.length > 0) {
-    return computeShortestPathForData(pub, startId, endId, travelMode, options);
+    const pubResult = computeShortestPathForData(pub, startId, endId, travelMode, options);
+    if (pubResult) return pubResult;
+  }
+
+  // Fallback to working data if published snapshot is empty
+  if (work.nodes.length > 0) {
+    return computeShortestPathForData(work, startId, endId, travelMode, options);
   }
 
   return null;
@@ -127,10 +131,18 @@ function computeShortestPathForData(
       const uY = (userLoc as any)?.y;
       const userCanvasPos = (typeof uX === "number" && typeof uY === "number" && !isNaN(uX) && !isNaN(uY))
         ? { x: uX, y: uY }
-        : null;
+        : (uLat && uLng ? gpsToCanvas(uLat, uLng) : null);
+
+      // Check if user's live position is physically inside any building
+      let userBuilding: any = null;
+      if (userCanvasPos && data.buildings && data.buildings.length > 0) {
+        userBuilding = data.buildings.find((b: any) => isPointInsideBuilding(userCanvasPos.x, userCanvasPos.y, b, 8)) || null;
+      }
 
       const ranked = findContextAwareNearestNodes(uLat || 0, uLng || 0, data.nodes, {
-        isInside: false,
+        isInside: Boolean(userBuilding),
+        buildingId: userBuilding?.id,
+        buildingName: userBuilding?.name,
         floors: data.floors,
         userCanvasPos,
       });
@@ -278,7 +290,7 @@ function computeShortestPathForData(
       }
 
       const res = findShortestPath(primaryGraph, nodeMap, sId, eId);
-      if (res) {
+      if (res && res.edges.length > 0) {
         // If starting from Live Location, startNodeIds are already ranked in order of distance to the user!
         // The first candidate that can reach the destination is the closest routable node to the user.
         if (isStartingFromLiveLocation) {
@@ -306,7 +318,7 @@ function computeShortestPathForData(
         endNodeIds,
         obstacles
       );
-      if (multimodalRoute) {
+      if (multimodalRoute && (multimodalRoute.evDistance ?? 0) > 0) {
         return multimodalRoute;
       }
     }
@@ -321,13 +333,25 @@ function computeShortestPathForData(
     for (const sId of startNodeIds) {
       for (const eId of endNodeIds) {
         const res = findShortestPath(fallbackGraph, nodeMap, sId, eId);
-        if (res) {
+        if (res && res.edges.length > 0) {
           if (!bestResult || res.totalDistance < bestResult.totalDistance) {
             bestResult = res;
             isObstacleFree = false;
           }
         }
       }
+    }
+  }
+
+  // If EV mode requested but no valid EV route exists, automatically fall back to the shortest walkable route
+  if (!bestResult && travelMode === "EV") {
+    const walkFallback = computeShortestPathForData(data, startId, endId, "WALK", options);
+    if (walkFallback) {
+      return {
+        ...walkFallback,
+        isFallbackWalk: true,
+        fallbackReason: "EV path not available, Showing walkable route",
+      };
     }
   }
 
@@ -450,6 +474,9 @@ function computeMultimodalEVRouteForData(
         }
 
         for (const pEnd of candidateEndEvs) {
+          // Multimodal EV route MUST include an actual EV driving segment between different EV nodes
+          if (pStart === pEnd) continue;
+
           let walkEndRes: ReturnType<typeof findShortestPath> = null;
           let walkEndDist = 0;
           if (pEnd !== eId) {
@@ -459,12 +486,9 @@ function computeMultimodalEVRouteForData(
           }
 
           let evDriveRes: ReturnType<typeof findShortestPath> = null;
-          let evDriveDist = 0;
-          if (pStart !== pEnd) {
-            evDriveRes = findShortestPath(evGraph, nodeMap, pStart, pEnd);
-            if (!evDriveRes) continue;
-            evDriveDist = evDriveRes.totalDistance;
-          }
+          evDriveRes = findShortestPath(evGraph, nodeMap, pStart, pEnd);
+          if (!evDriveRes || evDriveRes.totalDistance <= 0) continue;
+          const evDriveDist = evDriveRes.totalDistance;
 
           const walkTime = (walkStartDist + walkEndDist) / WALK_SPEED;
           const evTime = evDriveDist / EV_SPEED;
@@ -491,7 +515,7 @@ function computeMultimodalEVRouteForData(
     }
   }
 
-  if (!bestCandidate) return null;
+  if (!bestCandidate || bestCandidate.evDistance <= 0) return null;
 
   // Stitch combined nodes and edges
   const combinedNodes: Node[] = [];
@@ -593,6 +617,8 @@ export function multiStopShortestPath(
     combinedInstructions = combinedInstructions.concat(segRoute.instructions || []);
   }
 
+  const isAnyFallback = options?.travelMode === "EV" && combinedEdges.some((e) => e.pathType !== "EV");
+
   return {
     id: `multi-${Date.now()}`,
     nodes: combinedNodes,
@@ -601,6 +627,8 @@ export function multiStopShortestPath(
     durationSec: totalDurationSec,
     instructions: combinedInstructions,
     hasObstacles,
+    isFallbackWalk: isAnyFallback,
+    fallbackReason: isAnyFallback ? "EV path not available, Showing walkable route" : undefined,
     obstacleWarning: hasObstacles
       ? "⚠️ Route passes through active hazard / construction zones. Exercise caution while navigating."
       : undefined,

@@ -1,7 +1,11 @@
 import { NextResponse } from "next/server";
 import { getCurrentAdminUser } from "@/lib/auth/auth";
-import { campusStore } from "@/shared/lib/campus-store";
+import { prisma } from "@/lib/db";
 import { publishDraftGraph } from "@/lib/services/publish-service";
+
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+export const fetchCache = "force-no-store";
 
 export async function POST(req: Request) {
   try {
@@ -9,14 +13,33 @@ export async function POST(req: Request) {
     const body = await req.json().catch(() => ({}));
 
     let draftSnapshot = body.snapshot || body.draft;
-    if (!draftSnapshot || typeof draftSnapshot !== "object") {
-      draftSnapshot = campusStore.getWorkingData();
+
+    // If snapshot is not provided in body, retrieve the authoritative active-draft directly from database
+    if (!draftSnapshot || typeof draftSnapshot !== "object" || Object.keys(draftSnapshot).length === 0) {
+      if (prisma) {
+        const dbDraft = await prisma.draftGraph.findUnique({
+          where: { id: "active-draft" },
+        }).catch(() => null);
+        if (dbDraft && dbDraft.snapshot && typeof dbDraft.snapshot === "object") {
+          draftSnapshot = dbDraft.snapshot;
+        }
+      }
     }
 
-    // Run Graph Validation Guardrails and Publish
+    if (!draftSnapshot || typeof draftSnapshot !== "object") {
+      return NextResponse.json(
+        { error: "No draft snapshot available to publish in database." },
+        { status: 400 }
+      );
+    }
+
+    console.log(`[PublishRoute:POST] Initiating publish for draft with ${(draftSnapshot.buildings || []).length} buildings, ${(draftSnapshot.nodes || []).length} nodes, ${(draftSnapshot.edges || []).length} edges`);
+
+    // Run Graph Validation Guardrails and Publish to PostgreSQL
     const result = await publishDraftGraph(draftSnapshot, user.id, body.notes);
 
     if (!result.success) {
+      console.error("[PublishRoute:POST] Publish failed:", result.error);
       return NextResponse.json(
         {
           error: result.error,
@@ -26,6 +49,8 @@ export async function POST(req: Request) {
       );
     }
 
+    console.log(`[PublishRoute:POST] Successfully published map v${result.version} to database at ${result.publishedAt}`);
+
     return NextResponse.json({
       success: true,
       version: result.version,
@@ -33,8 +58,9 @@ export async function POST(req: Request) {
       validationReport: result.validationReport,
     });
   } catch (err: unknown) {
-    console.warn("Notice: POST /api/admin/campus-graph/publish error:", err instanceof Error ? err.message : String(err));
-    return NextResponse.json({ error: (err instanceof Error ? err.message : String(err)) }, { status: 400 });
+    const errorMsg = err instanceof Error ? err.message : String(err);
+    console.error("[PublishRoute:POST] Server database error:", errorMsg);
+    return NextResponse.json({ error: errorMsg }, { status: 500 });
   }
 }
 

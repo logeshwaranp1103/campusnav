@@ -869,15 +869,22 @@ function MapCanvas({
 
   const connectedNodeIdsToActiveFloor = useMemo(() => {
     const activeNodes = new Set(
-      allNodes.filter((n) => n.floorId === floorId).map((n) => n.id)
+      allNodes.filter((n) => {
+        if (floorId === "f-out") {
+          return n.floorId === "f-out" || n.floorId === "outdoor" || !n.floorId;
+        }
+        return n.floorId === floorId;
+      }).map((n) => n.id)
     );
     const connected = new Set<string>();
     allEdges.forEach((e) => {
-      const isFromActive = activeNodes.has(e.fromNodeId ?? e.from);
-      const isToActive = activeNodes.has(e.toNodeId ?? e.to);
+      const from = e.fromNodeId ?? e.from;
+      const to = e.toNodeId ?? e.to;
+      const isFromActive = activeNodes.has(from);
+      const isToActive = activeNodes.has(to);
       if (isFromActive || isToActive) {
-        connected.add(e.fromNodeId ?? e.from);
-        connected.add(e.toNodeId ?? e.to);
+        connected.add(from);
+        connected.add(to);
       }
     });
     return connected;
@@ -890,6 +897,7 @@ function MapCanvas({
           n.floorId === "f-out" ||
           n.floorId === "outdoor" ||
           n.floorId === undefined ||
+          !n.floorId ||
           n.type === "BUILDING_ENTRANCE" ||
           n.isEntranceNode ||
           connectedNodeIdsToActiveFloor.has(n.id)
@@ -911,13 +919,16 @@ function MapCanvas({
         return (
           n.floorId === "f-out" ||
           n.floorId === "outdoor" ||
+          n.floorId === undefined ||
+          !n.floorId ||
           n.type === "BUILDING_ENTRANCE" ||
-          n.isEntranceNode
+          n.isEntranceNode ||
+          connectedNodeIdsToActiveFloor.has(n.id)
         );
       }
-      return n.floorId === floorId;
+      return n.floorId === floorId || connectedNodeIdsToActiveFloor.has(n.id);
     });
-  }, [allNodes, floorId]);
+  }, [allNodes, floorId, connectedNodeIdsToActiveFloor]);
 
   const scopeEdges = useMemo(() => {
     const nodeSet = new Set(scopeNodes.map((n) => n.id));
