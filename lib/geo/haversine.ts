@@ -213,7 +213,7 @@ export function findContextAwareNearestNodes(
   }
 
   const userCoords = getUserGeographicCoordinates(lat, lng, context.userCanvasPos);
-  if (userCoords.lat === 0 && userCoords.lng === 0) {
+  if (userCoords.lat === 0 && userCoords.lng === 0 && !context.userCanvasPos) {
     return [];
   }
 
@@ -225,8 +225,11 @@ export function findContextAwareNearestNodes(
 
   const getDistance = (n: Node) => {
     const g = getNodeGeographicCoordinates(n);
-    if (g.lat !== 0 && g.lng !== 0) {
+    if (userCoords.lat !== 0 && userCoords.lng !== 0 && g.lat !== 0 && g.lng !== 0) {
       return calculateGeographicDistance(userCoords.lat, userCoords.lng, g.lat, g.lng);
+    }
+    if (context.userCanvasPos && typeof n.x === "number" && typeof n.y === "number") {
+      return Math.hypot(context.userCanvasPos.x - n.x, context.userCanvasPos.y - n.y);
     }
     return Infinity;
   };

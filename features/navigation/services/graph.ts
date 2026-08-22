@@ -133,10 +133,10 @@ function computeShortestPathForData(
         ? { x: uX, y: uY }
         : (uLat && uLng ? gpsToCanvas(uLat, uLng) : null);
 
-      // Check if user's live position is physically inside any building
+      // Check if user's live position is physically inside any building (strict polygon boundary, 0 margin)
       let userBuilding: any = null;
       if (userCanvasPos && data.buildings && data.buildings.length > 0) {
-        userBuilding = data.buildings.find((b: any) => isPointInsideBuilding(userCanvasPos.x, userCanvasPos.y, b, 8)) || null;
+        userBuilding = data.buildings.find((b: any) => isPointInsideBuilding(userCanvasPos.x, userCanvasPos.y, b, 0)) || null;
       }
 
       const ranked = findContextAwareNearestNodes(uLat || 0, uLng || 0, data.nodes, {

@@ -495,11 +495,10 @@ export function CampusMap({ route, livePosition, progress, gps: passedGps, onNav
         <div className="flex flex-col gap-1 rounded-2xl border bg-[rgb(var(--card))]/90 p-1 shadow-lg backdrop-blur-md w-fit">
           <button
             onClick={() => setShowObstacles(!showObstacles)}
-            className={`flex h-11 w-11 items-center justify-center rounded-xl text-[11px] font-semibold active:scale-95 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500 cursor-pointer ${
-              showObstacles
+            className={`flex h-11 w-11 items-center justify-center rounded-xl text-[11px] font-semibold active:scale-95 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500 cursor-pointer ${showObstacles
                 ? "bg-red-500/15 text-red-600 dark:text-red-400 border border-red-500/30 shadow-xs"
                 : "text-[rgb(var(--muted-fg))] hover:bg-[rgb(var(--muted))]"
-            }`}
+              }`}
             title="Toggle Hazards & Obstacles"
             aria-label="Toggle Hazards"
           >
@@ -522,11 +521,10 @@ export function CampusMap({ route, livePosition, progress, gps: passedGps, onNav
 
         <button
           onClick={handleRecenter}
-          className={`flex h-12 w-12 items-center justify-center rounded-2xl border shadow-xl backdrop-blur-md active:scale-95 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 cursor-pointer ${
-            isFollowingUser
+          className={`flex h-12 w-12 items-center justify-center rounded-2xl border shadow-xl backdrop-blur-md active:scale-95 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 cursor-pointer ${isFollowingUser
               ? "bg-blue-600 text-white border-blue-500 shadow-blue-500/30"
               : "bg-[rgb(var(--card))]/95 text-[rgb(var(--fg))] border-[rgb(var(--border))] hover:bg-[rgb(var(--muted))]"
-          }`}
+            }`}
           title="Center on My Location"
           aria-label="Center on My Location"
         >
@@ -564,9 +562,8 @@ function FloorButton({
     <button
       suppressHydrationWarning
       onClick={onClick}
-      className={`flex items-center gap-1.5 rounded-xl px-3 py-2 text-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[rgb(var(--primary))] min-h-[38px] ${
-        active ? "bg-[rgb(var(--primary))] text-[rgb(var(--primary-fg))] font-bold shadow-xs" : "hover:bg-[rgb(var(--muted))] text-[rgb(var(--fg))]"
-      }`}
+      className={`flex items-center gap-1.5 rounded-xl px-3 py-2 text-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[rgb(var(--primary))] min-h-[38px] ${active ? "bg-[rgb(var(--primary))] text-[rgb(var(--primary-fg))] font-bold shadow-xs" : "hover:bg-[rgb(var(--muted))] text-[rgb(var(--fg))]"
+        }`}
     >
       {icon}
       <span>{label}</span>
@@ -1772,7 +1769,7 @@ function MapCanvas({
                   fontSize="8.5"
                   fontWeight="800"
                 >
-                  🚪 {entranceName}
+                  {entranceName}
                 </text>
               </g>
             );
@@ -1792,7 +1789,7 @@ function MapCanvas({
                 const curFloorObj = publishedData.floors.find((f) => f.id === floorId);
                 return Boolean(
                   obsFloorObj &&
-                    curFloorObj &&
+                  curFloorObj &&
                   obsFloorObj.ordinal === curFloorObj.ordinal &&
                   obsFloorObj.buildingId === curFloorObj.buildingId
                 );
@@ -1867,14 +1864,14 @@ function MapCanvas({
           const strokeGlow = isSegmentBlocked
             ? "#ef4444"
             : isEvEdge
-            ? "#059669"
-            : "#2563eb";
+              ? "#059669"
+              : "#2563eb";
 
           const strokeCore = isSegmentBlocked
             ? "#ef4444"
             : isEvEdge
-            ? "#10b981"
-            : "#3b82f6";
+              ? "#10b981"
+              : "#3b82f6";
 
           return (
             <g key={`r-group-${e.id}-${i}`}>
@@ -1930,7 +1927,7 @@ function MapCanvas({
                 fontSize="9"
                 fontWeight="800"
               >
-                🅿️ Park & Walk
+                Switch to Walk
               </text>
             </g>
           );
@@ -1940,87 +1937,87 @@ function MapCanvas({
         {scopeNodes
           .filter((n) => n.visibleToUser !== false && !allDestinations.some((d) => d.nodeId === n.id) && n.type !== "GATE" && n.type !== "PARKING" && n.type !== "BUILDING_ENTRANCE")
           .map((n) => {
-          const onRoute = routeNodes.some((rn) => rn.id === n.id);
-          const isDest = destination?.id === n.id;
-          const isStair = n.type === "STAIR" || (n.name && n.name.toLowerCase().includes("stair"));
-          const isLift = n.type === "LIFT" || (n.name && n.name.toLowerCase().includes("lift"));
-          const isRoom = n.type === "ROOM" || n.type === "LABORATORY" || n.type === "OFFICE" || n.type === "WASHROOM";
-          const isStairOrLift = isStair || isLift;
+            const onRoute = routeNodes.some((rn) => rn.id === n.id);
+            const isDest = destination?.id === n.id;
+            const isStair = n.type === "STAIR" || (n.name && n.name.toLowerCase().includes("stair"));
+            const isLift = n.type === "LIFT" || (n.name && n.name.toLowerCase().includes("lift"));
+            const isRoom = n.type === "ROOM" || n.type === "LABORATORY" || n.type === "OFFICE" || n.type === "WASHROOM";
+            const isStairOrLift = isStair || isLift;
 
-          const nodeColor = isDest
-            ? "#10b981"
-            : isStairOrLift
-            ? "#f59e0b"
-            : onRoute
-            ? "#2563eb"
-            : isRoom
-            ? "#8b5cf6"
-            : "#64748b";
-          const nodeRadius = isDest ? 9 : isStairOrLift ? 7 : isRoom ? 6 : onRoute ? 6.5 : 4.5;
+            const nodeColor = isDest
+              ? "#10b981"
+              : isStairOrLift
+                ? "#f59e0b"
+                : onRoute
+                  ? "#2563eb"
+                  : isRoom
+                    ? "#8b5cf6"
+                    : "#64748b";
+            const nodeRadius = isDest ? 9 : isStairOrLift ? 7 : isRoom ? 6 : onRoute ? 6.5 : 4.5;
 
-          const rawName = n.name || "";
-          const displayName = (n.photoUrl ? "📷 " : "") + (isStair ? `𓊍 ${rawName}` : isLift ? `🛗 ${rawName}` : rawName);
-          const labelWidth = Math.max(70, displayName.length * 7 + (isStair ? 20 : n.photoUrl ? 20 : 16));
-          const badgeHeight = isStairOrLift ? 22 : 19;
+            const rawName = n.name || "";
+            const displayName = (n.photoUrl ? "📷 " : "") + (isStair ? `𓊍 ${rawName}` : isLift ? `🛗 ${rawName}` : rawName);
+            const labelWidth = Math.max(70, displayName.length * 7 + (isStair ? 20 : n.photoUrl ? 20 : 16));
+            const badgeHeight = isStairOrLift ? 22 : 19;
 
-          const labelY = isStairOrLift
-            ? n.y - 20
-            : n.y + (isDest ? 20 : onRoute ? 17 : 14);
+            const labelY = isStairOrLift
+              ? n.y - 20
+              : n.y + (isDest ? 20 : onRoute ? 17 : 14);
 
-          return (
-            <g key={n.id}>
-              {isStairOrLift && (
+            return (
+              <g key={n.id}>
+                {isStairOrLift && (
+                  <circle
+                    cx={n.x}
+                    cy={n.y}
+                    r={10}
+                    fill="none"
+                    stroke="#f59e0b"
+                    strokeWidth="2"
+                    strokeOpacity="0.4"
+                    className="animate-pulse"
+                  />
+                )}
+
                 <circle
                   cx={n.x}
                   cy={n.y}
-                  r={10}
-                  fill="none"
-                  stroke="#f59e0b"
-                  strokeWidth="2"
-                  strokeOpacity="0.4"
-                  className="animate-pulse"
+                  r={nodeRadius}
+                  fill={nodeColor}
+                  stroke="#ffffff"
+                  strokeWidth={isDest ? 2.5 : isStairOrLift ? 2 : onRoute ? 2 : 1.5}
+                  opacity={onRoute || isDest || isStairOrLift ? 1 : 0.85}
+                  className={isDest ? "animate-pulse" : undefined}
                 />
-              )}
 
-              <circle
-                cx={n.x}
-                cy={n.y}
-                r={nodeRadius}
-                fill={nodeColor}
-                stroke="#ffffff"
-                strokeWidth={isDest ? 2.5 : isStairOrLift ? 2 : onRoute ? 2 : 1.5}
-                opacity={onRoute || isDest || isStairOrLift ? 1 : 0.85}
-                className={isDest ? "animate-pulse" : undefined}
-              />
-
-              {rawName.length > 0 && (
-                <g transform={`translate(${n.x}, ${labelY})`}>
-                  <rect
-                    x={-labelWidth / 2}
-                    y={-badgeHeight / 2}
-                    width={labelWidth}
-                    height={badgeHeight}
-                    rx="5"
-                    fill="#ffffff"
-                    stroke={isDest ? "#10b981" : isStairOrLift ? "#f59e0b" : onRoute ? "#2563eb" : "#94a3b8"}
-                    strokeWidth="1.5"
-                    className="shadow-md"
-                  />
-                  <text
-                    x="0"
-                    y="3.5"
-                    textAnchor="middle"
-                    fill={isDest ? "#065f46" : isStairOrLift ? "#92400e" : onRoute ? "#1e40af" : "#334155"}
-                    fontSize="9.5"
-                    fontWeight="bold"
-                  >
-                    {displayName}
-                  </text>
-                </g>
-              )}
-            </g>
-          );
-        })}
+                {rawName.length > 0 && (
+                  <g transform={`translate(${n.x}, ${labelY})`}>
+                    <rect
+                      x={-labelWidth / 2}
+                      y={-badgeHeight / 2}
+                      width={labelWidth}
+                      height={badgeHeight}
+                      rx="5"
+                      fill="#ffffff"
+                      stroke={isDest ? "#10b981" : isStairOrLift ? "#f59e0b" : onRoute ? "#2563eb" : "#94a3b8"}
+                      strokeWidth="1.5"
+                      className="shadow-md"
+                    />
+                    <text
+                      x="0"
+                      y="3.5"
+                      textAnchor="middle"
+                      fill={isDest ? "#065f46" : isStairOrLift ? "#92400e" : onRoute ? "#1e40af" : "#334155"}
+                      fontSize="9.5"
+                      fontWeight="bold"
+                    >
+                      {displayName}
+                    </text>
+                  </g>
+                )}
+              </g>
+            );
+          })}
 
         {/* Floor Transition Badges for Stair & Lift Nodes on Route */}
         {route &&

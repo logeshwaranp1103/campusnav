@@ -261,7 +261,7 @@ export function isPointInsideBuilding(
   x: number,
   y: number,
   building: Partial<Building>,
-  margin = 6
+  margin = 0
 ): boolean {
   if (!building) return false;
   const pts = getBuildingCanvasPoints(building);
@@ -311,7 +311,7 @@ export function isPointOutsideAllBuildings(
   x: number,
   y: number,
   buildings: Partial<Building>[],
-  margin = 6
+  margin = 0
 ): boolean {
   if (!buildings || buildings.length === 0) return true;
   return !buildings.some((b) => isPointInsideBuilding(x, y, b, margin));

@@ -242,16 +242,16 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
           n.type === "GATE"
             ? "Gate / Entrance"
             : n.type === "BUILDING_ENTRANCE" || n.type === "ROOM_ENTRANCE"
-            ? "Entrance"
-            : n.type === "STAIR" || n.type === "LIFT"
-            ? "Floor Transition"
-            : n.type === "RECEPTION"
-            ? "Reception"
-            : n.type === "ROOM" || n.type === "LABORATORY" || n.type === "OFFICE"
-            ? "Classroom / Room"
-            : n.type === "OUTDOOR" || n.type === "OUTDOOR_PATH" || n.type === "ROAD_JUNCTION"
-            ? "Campus Landmark"
-            : "Map Location";
+              ? "Entrance"
+              : n.type === "STAIR" || n.type === "LIFT"
+                ? "Floor Transition"
+                : n.type === "RECEPTION"
+                  ? "Reception"
+                  : n.type === "ROOM" || n.type === "LABORATORY" || n.type === "OFFICE"
+                    ? "Classroom / Room"
+                    : n.type === "OUTDOOR" || n.type === "OUTDOOR_PATH" || n.type === "ROAD_JUNCTION"
+                      ? "Campus Landmark"
+                      : "Map Location";
         return true;
       }
       return false;
@@ -419,13 +419,13 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
 
   useEffect(() => {
     if (hasAutoCenteredRef.current || focusParamId || !canvasRef.current) return;
-    
+
     // Collect all elements with x,y to find bounds
     const elements = [
-      ...storeData.buildings.filter(b => b.x !== undefined && b.y !== undefined).map(b => ({ x: b.x! + (b.width ?? 180)/2, y: b.y! + (b.height ?? 120)/2 })),
+      ...storeData.buildings.filter(b => b.x !== undefined && b.y !== undefined).map(b => ({ x: b.x! + (b.width ?? 180) / 2, y: b.y! + (b.height ?? 120) / 2 })),
       ...storeData.nodes.map(n => ({ x: n.x, y: n.y }))
     ];
-    
+
     if (elements.length > 0) {
       let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
       elements.forEach(el => {
@@ -434,16 +434,16 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
         if (el.y < minY) minY = el.y;
         if (el.y > maxY) maxY = el.y;
       });
-      
+
       const cx = (minX + maxX) / 2;
       const cy = (minY + maxY) / 2;
       const rect = canvasRef.current.getBoundingClientRect();
       const curZoom = 0.20;
-      
+
       setZoom(0.20);
-      setPanOffset({ 
-        x: (rect.width / 2) - cx * curZoom, 
-        y: (rect.height / 2) - cy * curZoom 
+      setPanOffset({
+        x: (rect.width / 2) - cx * curZoom,
+        y: (rect.height / 2) - cy * curZoom
       });
       hasAutoCenteredRef.current = true;
     }
@@ -699,16 +699,16 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
       const mouseY = e.clientY - rect.top;
       const currentZoom = zoomRef.current || 1;
       const currentPan = panOffsetRef.current;
-      
+
       const zoomFactor = e.deltaY < 0 ? 1.15 : 0.85;
       const nextZoom = Math.min(5.0, Math.max(0.1, Number((currentZoom * zoomFactor).toFixed(3))));
-      
+
       if (nextZoom === currentZoom) return;
 
       // Zoom centered on mouse cursor
       const newPanX = mouseX - (mouseX - currentPan.x) * (nextZoom / currentZoom);
       const newPanY = mouseY - (mouseY - currentPan.y) * (nextZoom / currentZoom);
-      
+
       panOffsetRef.current = { x: newPanX, y: newPanY };
       zoomRef.current = nextZoom;
 
@@ -952,7 +952,7 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
 
     if (nextState) {
       if (target.requestFullscreen) {
-        target.requestFullscreen().catch(() => {});
+        target.requestFullscreen().catch(() => { });
       } else if ((target as any).webkitRequestFullscreen) {
         (target as any).webkitRequestFullscreen();
       } else if ((target as any).msRequestFullscreen) {
@@ -960,7 +960,7 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
       }
     } else {
       if (document.exitFullscreen && document.fullscreenElement) {
-        document.exitFullscreen().catch(() => {});
+        document.exitFullscreen().catch(() => { });
       } else if ((document as any).webkitExitFullscreen) {
         (document as any).webkitExitFullscreen();
       } else if ((document as any).msExitFullscreen) {
@@ -1586,12 +1586,12 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
       activeFloorId === "f-out"
         ? "f-out"
         : activeFloorId === "f-all-g"
-        ? (storeData.floors.find((f) => f.ordinal === 0 || f.id.includes("gnd"))?.id || "f-out")
-        : activeFloorId === "f-all-1"
-        ? (storeData.floors.find((f) => f.ordinal === 1)?.id || storeData.floors[0]?.id || "f-out")
-        : activeFloorId.startsWith("f-all")
-        ? (storeData.floors.find((f) => f.ordinal > 0)?.id || storeData.floors[0]?.id || "f-out")
-        : activeFloorId;
+          ? (storeData.floors.find((f) => f.ordinal === 0 || f.id.includes("gnd"))?.id || "f-out")
+          : activeFloorId === "f-all-1"
+            ? (storeData.floors.find((f) => f.ordinal === 1)?.id || storeData.floors[0]?.id || "f-out")
+            : activeFloorId.startsWith("f-all")
+              ? (storeData.floors.find((f) => f.ordinal > 0)?.id || storeData.floors[0]?.id || "f-out")
+              : activeFloorId;
 
     if (activeTool === "NODE") {
       const newNodeId = `n-${Date.now().toString(36)}`;
@@ -1605,7 +1605,7 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
         );
         if (bldAtPos) {
           const bGf = storeData.floors.find((f) => f.buildingId === bldAtPos.id && f.ordinal === 0) ||
-                      storeData.floors.find((f) => f.buildingId === bldAtPos.id);
+            storeData.floors.find((f) => f.buildingId === bldAtPos.id);
           if (bGf) {
             targetFloor = bGf.id;
           }
@@ -1640,8 +1640,8 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
       );
       const floorIdToAssign = targetBuilding
         ? (storeData.floors.find((f) => f.buildingId === targetBuilding.id && f.ordinal === 0)?.id ||
-           storeData.floors.find((f) => f.buildingId === targetBuilding.id)?.id ||
-           effectiveFloorId)
+          storeData.floors.find((f) => f.buildingId === targetBuilding.id)?.id ||
+          effectiveFloorId)
         : effectiveFloorId;
 
       const name = roomNameInput.trim() || `Room ${roomNumber}`;
@@ -1683,8 +1683,8 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
       );
       const floorIdToAssign = targetBuilding
         ? (storeData.floors.find((f) => f.buildingId === targetBuilding.id && f.ordinal === 0)?.id ||
-           storeData.floors.find((f) => f.buildingId === targetBuilding.id)?.id ||
-           effectiveFloorId)
+          storeData.floors.find((f) => f.buildingId === targetBuilding.id)?.id ||
+          effectiveFloorId)
         : effectiveFloorId;
 
       campusStore.addDoor({
@@ -2275,13 +2275,12 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
           <div className="flex items-center gap-1.5 pb-3 border-b border-[rgb(var(--border))]">
             <button
               onClick={() => setShowDiagnosticsPanel(!showDiagnosticsPanel)}
-              className={`flex flex-1 items-center justify-center gap-1.5 rounded-lg px-2 py-1.5 text-xs font-semibold shadow-xs border transition-all ${
-                validationReport.status === "EXCELLENT" || validationReport.status === "GOOD"
+              className={`flex flex-1 items-center justify-center gap-1.5 rounded-lg px-2 py-1.5 text-xs font-semibold shadow-xs border transition-all ${validationReport.status === "EXCELLENT" || validationReport.status === "GOOD"
                   ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/20"
                   : validationReport.status === "WARNINGS"
-                  ? "bg-amber-500/10 border-amber-500/30 text-amber-600 dark:text-amber-400 hover:bg-amber-500/20"
-                  : "bg-red-500/10 border-red-500/30 text-red-600 dark:text-red-400 hover:bg-red-500/20 animate-pulse"
-              }`}
+                    ? "bg-amber-500/10 border-amber-500/30 text-amber-600 dark:text-amber-400 hover:bg-amber-500/20"
+                    : "bg-red-500/10 border-red-500/30 text-red-600 dark:text-red-400 hover:bg-red-500/20 animate-pulse"
+                }`}
               title="Graph Review - Click for Diagnostics"
             >
               <Activity className="h-3.5 w-3.5" />
@@ -2777,8 +2776,8 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
                           isBlockedByObstacle
                             ? "#ef4444"
                             : isSelected
-                            ? "#4f46e5"
-                            : "#64748b"
+                              ? "#4f46e5"
+                              : "#64748b"
                         }
                         strokeWidth={isSelected ? 4 : isBlockedByObstacle ? 3.5 : 2.5}
                         strokeDasharray={isBlockedByObstacle ? "6 4" : e.type === "STAIRS" ? "4 4" : undefined}
@@ -2825,14 +2824,14 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
                   const nodeColor = isSelected
                     ? "#4f46e5"
                     : isEdgeStart
-                    ? "#10b981"
-                    : isStairOrLift
-                    ? "#f59e0b"
-                    : n.type === "ENTRANCE" || n.type === "OUTDOOR" || n.type === "BUILDING_ENTRANCE"
-                    ? "#10b981"
-                    : isRoom
-                    ? "#8b5cf6"
-                    : "#64748b";
+                      ? "#10b981"
+                      : isStairOrLift
+                        ? "#f59e0b"
+                        : n.type === "ENTRANCE" || n.type === "OUTDOOR" || n.type === "BUILDING_ENTRANCE"
+                          ? "#10b981"
+                          : isRoom
+                            ? "#8b5cf6"
+                            : "#64748b";
 
                   const nodeRadius = isSelected ? 8 : isEdgeStart ? 9 : isStairOrLift ? 7 : isRoom ? 6 : 4.5;
                   const rawName = n.name || "";
@@ -2943,89 +2942,89 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
                     if (!linkedNode) return null;
 
                     // Suppress drawing duplicate room/destination pill for stair & lift nodes (node renderer handles stair badge)
-                  const isLinkedStairOrLift =
-                    linkedNode.type === "STAIR" ||
-                    linkedNode.type === "LIFT" ||
-                    Boolean(linkedNode.stairGroupId) ||
-                    Boolean(linkedNode.liftGroupId) ||
-                    (linkedNode.name && (linkedNode.name.toLowerCase().includes("stair") || linkedNode.name.toLowerCase().includes("lift"))) ||
-                    d.name.toLowerCase().includes("stair") ||
-                    d.name.toLowerCase().includes("lift");
+                    const isLinkedStairOrLift =
+                      linkedNode.type === "STAIR" ||
+                      linkedNode.type === "LIFT" ||
+                      Boolean(linkedNode.stairGroupId) ||
+                      Boolean(linkedNode.liftGroupId) ||
+                      (linkedNode.name && (linkedNode.name.toLowerCase().includes("stair") || linkedNode.name.toLowerCase().includes("lift"))) ||
+                      d.name.toLowerCase().includes("stair") ||
+                      d.name.toLowerCase().includes("lift");
 
-                  if (isLinkedStairOrLift) return null;
+                    if (isLinkedStairOrLift) return null;
 
-                  const isSelected = selectedElement?.type === "destination" && selectedElement.id === d.id;
+                    const isSelected = selectedElement?.type === "destination" && selectedElement.id === d.id;
 
-                  const nameLower = d.name.toLowerCase();
-                  const icon = nameLower.includes("atm")
-                    ? "🏧"
-                    : nameLower.includes("lab")
-                    ? "🧪"
-                    : nameLower.includes("classroom")
-                    ? "🏫"
-                    : nameLower.includes("washroom") || nameLower.includes("toilet")
-                    ? "🚻"
-                    : nameLower.includes("office")
-                    ? "💼"
-                    : nameLower.includes("canteen") || nameLower.includes("food")
-                    ? "🍽️"
-                    : nameLower.includes("library")
-                    ? "📚"
-                    : nameLower.includes("parking")
-                    ? "🅿️"
-                    : "🚪";
+                    const nameLower = d.name.toLowerCase();
+                    const icon = nameLower.includes("atm")
+                      ? "🏧"
+                      : nameLower.includes("lab")
+                        ? "🧪"
+                        : nameLower.includes("classroom")
+                          ? "🏫"
+                          : nameLower.includes("washroom") || nameLower.includes("toilet")
+                            ? "🚻"
+                            : nameLower.includes("office")
+                              ? "💼"
+                              : nameLower.includes("canteen") || nameLower.includes("food")
+                                ? "🍽️"
+                                : nameLower.includes("library")
+                                  ? "📚"
+                                  : nameLower.includes("parking")
+                                    ? "🅿️"
+                                    : "🚪";
 
-                  const nameStr = `${icon} ${d.name}${d.roomNumber ? ` (#${d.roomNumber})` : ""}`;
-                  const pillWidth = Math.max(48, nameStr.length * 5.8 + 14);
+                    const nameStr = `${icon} ${d.name}${d.roomNumber ? ` (#${d.roomNumber})` : ""}`;
+                    const pillWidth = Math.max(48, nameStr.length * 5.8 + 14);
 
-                  return (
-                    <g
-                      key={d.id}
-                      transform={`translate(${linkedNode.x}, ${linkedNode.y})`}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        if (activeTool === "EDGE") {
-                          handleNodeClick(linkedNode, e);
-                          return;
-                        }
-                        setSelectedElement({ type: "destination", id: d.id });
-                      }}
-                      onMouseDown={(e) => {
-                        e.stopPropagation();
-                        campusStore.saveSnapshotToUndo(`Moved Room "${d.name}"`);
-                        const cPos = getCanvasCoords(e);
-                        setDraggingId({ type: "node", id: linkedNode.id });
-                        setDragOffset({ x: cPos.x - linkedNode.x, y: cPos.y - linkedNode.y });
-                      }}
-                      className="cursor-pointer select-none"
-                    >
-                      <rect
-                        x={-pillWidth / 2}
-                        y="-10"
-                        width={pillWidth}
-                        height="20"
-                        rx="5"
-                        fill={isSelected ? "#4f46e5" : "rgb(var(--card))"}
-                        fillOpacity={isSelected ? 0.95 : 0.92}
-                        stroke={isSelected ? "#818cf8" : "#8b5cf6"}
-                        strokeWidth={isSelected ? 2 : 1.5}
-                        className="shadow-sm transition-all hover:brightness-105"
-                      />
-                      <text
-                        x="0"
-                        y="3.5"
-                        textAnchor="middle"
-                        fill={isSelected ? "#ffffff" : "currentColor"}
-                        fontSize="9"
-                        fontWeight={isSelected ? "800" : "700"}
-                        className="text-[rgb(var(--fg))]"
+                    return (
+                      <g
+                        key={d.id}
+                        transform={`translate(${linkedNode.x}, ${linkedNode.y})`}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (activeTool === "EDGE") {
+                            handleNodeClick(linkedNode, e);
+                            return;
+                          }
+                          setSelectedElement({ type: "destination", id: d.id });
+                        }}
+                        onMouseDown={(e) => {
+                          e.stopPropagation();
+                          campusStore.saveSnapshotToUndo(`Moved Room "${d.name}"`);
+                          const cPos = getCanvasCoords(e);
+                          setDraggingId({ type: "node", id: linkedNode.id });
+                          setDragOffset({ x: cPos.x - linkedNode.x, y: cPos.y - linkedNode.y });
+                        }}
+                        className="cursor-pointer select-none"
                       >
-                        {nameStr}
-                      </text>
-                    </g>
-                  );
-                });
-              })()}
+                        <rect
+                          x={-pillWidth / 2}
+                          y="-10"
+                          width={pillWidth}
+                          height="20"
+                          rx="5"
+                          fill={isSelected ? "#4f46e5" : "rgb(var(--card))"}
+                          fillOpacity={isSelected ? 0.95 : 0.92}
+                          stroke={isSelected ? "#818cf8" : "#8b5cf6"}
+                          strokeWidth={isSelected ? 2 : 1.5}
+                          className="shadow-sm transition-all hover:brightness-105"
+                        />
+                        <text
+                          x="0"
+                          y="3.5"
+                          textAnchor="middle"
+                          fill={isSelected ? "#ffffff" : "currentColor"}
+                          fontSize="9"
+                          fontWeight={isSelected ? "800" : "700"}
+                          className="text-[rgb(var(--fg))]"
+                        >
+                          {nameStr}
+                        </text>
+                      </g>
+                    );
+                  });
+                })()}
 
 
 
@@ -3094,9 +3093,6 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
                         stroke={isSelected ? "#ffffff" : color}
                         strokeWidth={isSelected ? 3 : 1.5}
                       />
-                      <text x="0" y="3" textAnchor="middle" fill="#ffffff" fontSize="9" fontWeight="bold">
-                        🚪
-                      </text>
                       <text x="0" y="20" textAnchor="middle" fill={color} fontSize="9" fontWeight="bold">
                         {d.name ?? d.type}
                       </text>
@@ -3175,67 +3171,67 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
                   return isEventActive(ev, nowMs) || (selectedElement?.type === "event" && selectedElement.id === ev.id);
                 })
                 .map((ev) => {
-                const isSelected = selectedElement?.type === "event" && selectedElement.id === ev.id;
-                const bld = storeData.buildings.find((b) => b.id === ev.buildingId);
-                const evX = ev.x ?? (bld ? (bld.x ?? 0) + (bld.width ?? 180) / 2 : 400);
-                const evY = ev.y ?? (bld ? (bld.y ?? 0) + (bld.height ?? 120) / 2 : 300);
-                const color = ev.color || "#f59e0b";
-                const pillWidth = Math.max(90, ev.title.length * 7 + 34);
+                  const isSelected = selectedElement?.type === "event" && selectedElement.id === ev.id;
+                  const bld = storeData.buildings.find((b) => b.id === ev.buildingId);
+                  const evX = ev.x ?? (bld ? (bld.x ?? 0) + (bld.width ?? 180) / 2 : 400);
+                  const evY = ev.y ?? (bld ? (bld.y ?? 0) + (bld.height ?? 120) / 2 : 300);
+                  const color = ev.color || "#f59e0b";
+                  const pillWidth = Math.max(90, ev.title.length * 7 + 34);
 
-                return (
-                  <g
-                    key={ev.id}
-                    transform={`translate(${evX}, ${evY})`}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setSelectedElement({ type: "event", id: ev.id });
-                    }}
-                    onMouseDown={(e) => {
-                      e.stopPropagation();
-                      const cPos = getCanvasCoords(e);
-                      setDraggingId({ type: "event", id: ev.id });
-                      setDragOffset({ x: cPos.x - evX, y: cPos.y - evY });
-                    }}
-                    className="cursor-pointer select-none"
-                  >
-                    {isSelected && (
-                      <rect
-                        x={-pillWidth / 2 - 4}
-                        y="-16"
-                        width={pillWidth + 8}
-                        height="28"
-                        rx="10"
-                        fill="none"
-                        stroke={color}
-                        strokeWidth="2"
-                        className="animate-pulse"
-                      />
-                    )}
-                    <rect
-                      x={-pillWidth / 2}
-                      y="-14"
-                      width={pillWidth}
-                      height="24"
-                      rx="8"
-                      fill={color}
-                      fillOpacity="0.95"
-                      stroke={isSelected ? "#ffffff" : color}
-                      strokeWidth={isSelected ? 2 : 1}
-                      className="shadow-md transition-all hover:brightness-105"
-                    />
-                    <text
-                      x="0"
-                      y="2"
-                      textAnchor="middle"
-                      fill="#ffffff"
-                      fontSize="10"
-                      fontWeight="bold"
+                  return (
+                    <g
+                      key={ev.id}
+                      transform={`translate(${evX}, ${evY})`}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setSelectedElement({ type: "event", id: ev.id });
+                      }}
+                      onMouseDown={(e) => {
+                        e.stopPropagation();
+                        const cPos = getCanvasCoords(e);
+                        setDraggingId({ type: "event", id: ev.id });
+                        setDragOffset({ x: cPos.x - evX, y: cPos.y - evY });
+                      }}
+                      className="cursor-pointer select-none"
                     >
-                      ✨ {ev.title}
-                    </text>
-                  </g>
-                );
-              })}
+                      {isSelected && (
+                        <rect
+                          x={-pillWidth / 2 - 4}
+                          y="-16"
+                          width={pillWidth + 8}
+                          height="28"
+                          rx="10"
+                          fill="none"
+                          stroke={color}
+                          strokeWidth="2"
+                          className="animate-pulse"
+                        />
+                      )}
+                      <rect
+                        x={-pillWidth / 2}
+                        y="-14"
+                        width={pillWidth}
+                        height="24"
+                        rx="8"
+                        fill={color}
+                        fillOpacity="0.95"
+                        stroke={isSelected ? "#ffffff" : color}
+                        strokeWidth={isSelected ? 2 : 1}
+                        className="shadow-md transition-all hover:brightness-105"
+                      />
+                      <text
+                        x="0"
+                        y="2"
+                        textAnchor="middle"
+                        fill="#ffffff"
+                        fontSize="10"
+                        fontWeight="bold"
+                      >
+                        ✨ {ev.title}
+                      </text>
+                    </g>
+                  );
+                })}
 
               {/* Render Simulated Route Overlay */}
               {activeTool === "SIMULATE" && (simResult || altSimResult) && (
@@ -3385,31 +3381,31 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
               )}
 
 
-          {/* Device GPS Live Marker with Accuracy Circle & Heading Cone */}
-          {gps.isGpsActive && (
-            <g style={{ pointerEvents: "none" }} transform={`translate(${gps.canvasPos.x}, ${gps.canvasPos.y})`}>
-              {/* Accuracy Ring */}
-              <circle
-                r={gps.accuracy * 2.5}
-                fill="rgba(59, 130, 246, 0.15)"
-                stroke="#3b82f6"
-                strokeWidth="1.5"
-                strokeDasharray="4 3"
-                className="animate-pulse"
-              />
-              {/* Directional Cone Pointer */}
-              <path
-                d="M 0 -18 L 8 4 L 0 0 L -8 4 Z"
-                fill="#3b82f6"
-                transform={`rotate(${gps.heading})`}
-              />
-              {/* Pulsing Blue GPS Marker Dot */}
-              <circle r="8" fill="#3b82f6" stroke="#ffffff" strokeWidth="2.5" className="shadow-md" />
-              <text x="12" y="4" fontSize="10" fontWeight="bold" fill="#3b82f6" className="drop-shadow-xs">
-                You (Live GPS)
-              </text>
-            </g>
-          )}
+              {/* Device GPS Live Marker with Accuracy Circle & Heading Cone */}
+              {gps.isGpsActive && (
+                <g style={{ pointerEvents: "none" }} transform={`translate(${gps.canvasPos.x}, ${gps.canvasPos.y})`}>
+                  {/* Accuracy Ring */}
+                  <circle
+                    r={gps.accuracy * 2.5}
+                    fill="rgba(59, 130, 246, 0.15)"
+                    stroke="#3b82f6"
+                    strokeWidth="1.5"
+                    strokeDasharray="4 3"
+                    className="animate-pulse"
+                  />
+                  {/* Directional Cone Pointer */}
+                  <path
+                    d="M 0 -18 L 8 4 L 0 0 L -8 4 Z"
+                    fill="#3b82f6"
+                    transform={`rotate(${gps.heading})`}
+                  />
+                  {/* Pulsing Blue GPS Marker Dot */}
+                  <circle r="8" fill="#3b82f6" stroke="#ffffff" strokeWidth="2.5" className="shadow-md" />
+                  <text x="12" y="4" fontSize="10" fontWeight="bold" fill="#3b82f6" className="drop-shadow-xs">
+                    You (Live GPS)
+                  </text>
+                </g>
+              )}
 
             </g>
           </svg>
@@ -3604,11 +3600,10 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
                     });
                   }
                 }}
-                className={`flex items-center gap-1 rounded px-2 py-1 text-[11px] font-semibold transition-colors cursor-pointer shrink-0 whitespace-nowrap ${
-                  gps.isGpsActive
+                className={`flex items-center gap-1 rounded px-2 py-1 text-[11px] font-semibold transition-colors cursor-pointer shrink-0 whitespace-nowrap ${gps.isGpsActive
                     ? "text-emerald-600 dark:text-emerald-400 bg-emerald-500/15 border border-emerald-500/30"
                     : "text-[rgb(var(--muted-fg))] hover:bg-[rgb(var(--muted))] hover:text-[rgb(var(--fg))]"
-                }`}
+                  }`}
                 title="Focus & Center Live GPS Position"
               >
                 <Locate className="h-3.5 w-3.5" />
@@ -3621,11 +3616,10 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
               {/* GPS Diagnostics Engine Toggle Button */}
               <button
                 onClick={() => setShowDiagnostics((prev) => !prev)}
-                className={`flex items-center gap-1.5 rounded px-2 py-1 text-[11px] font-semibold transition-colors cursor-pointer shrink-0 whitespace-nowrap ${
-                  showDiagnostics
+                className={`flex items-center gap-1.5 rounded px-2 py-1 text-[11px] font-semibold transition-colors cursor-pointer shrink-0 whitespace-nowrap ${showDiagnostics
                     ? "bg-slate-900 text-emerald-400 border border-emerald-500/50 shadow-md"
                     : "text-[rgb(var(--muted-fg))] hover:bg-[rgb(var(--muted))] hover:text-[rgb(var(--fg))]"
-                }`}
+                  }`}
                 title="Toggle Live GPS Diagnostics Engine"
               >
                 <Sparkles className="h-3.5 w-3.5 text-emerald-400" />
@@ -3668,984 +3662,317 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
               )}
             </div>
 
-          {/* Multi-Selection Bulk Editing Panel */}
-          {selectedEntityIds.size > 0 && (
-            <div className="rounded-lg border border-indigo-500/30 bg-indigo-500/10 p-3 text-xs space-y-3">
-              <div className="flex items-center justify-between font-bold text-indigo-600 dark:text-indigo-400">
-                <span>{selectedEntityIds.size} Objects Selected</span>
-                <Button size="sm" variant="ghost" onClick={() => setSelectedEntityIds(new Set())}>
-                  Clear
-                </Button>
-              </div>
-
-              <div>
-                <label className="mb-1 block font-semibold text-[rgb(var(--fg))]">Bulk Rename Base Name</label>
-                <div className="flex gap-1.5">
-                  <Input
-                    placeholder="e.g. Lab, Node"
-                    value={bulkRenameInput}
-                    onChange={(e) => setBulkRenameInput(e.target.value)}
-                  />
-                  <Button
-                    size="sm"
-                    onClick={() => {
-                      campusStore.bulkRename(Array.from(selectedEntityIds), bulkRenameInput);
-                      toast({ type: "success", title: "Bulk Renamed", description: `Renamed ${selectedEntityIds.size} elements.` });
-                    }}
-                  >
-                    Apply
+            {/* Multi-Selection Bulk Editing Panel */}
+            {selectedEntityIds.size > 0 && (
+              <div className="rounded-lg border border-indigo-500/30 bg-indigo-500/10 p-3 text-xs space-y-3">
+                <div className="flex items-center justify-between font-bold text-indigo-600 dark:text-indigo-400">
+                  <span>{selectedEntityIds.size} Objects Selected</span>
+                  <Button size="sm" variant="ghost" onClick={() => setSelectedEntityIds(new Set())}>
+                    Clear
                   </Button>
                 </div>
-              </div>
 
-              <div>
-                <label className="mb-1 block font-semibold text-[rgb(var(--fg))]">Bulk Change Category</label>
-                <div className="flex gap-1.5">
+                <div>
+                  <label className="mb-1 block font-semibold text-[rgb(var(--fg))]">Bulk Rename Base Name</label>
+                  <div className="flex gap-1.5">
+                    <Input
+                      placeholder="e.g. Lab, Node"
+                      value={bulkRenameInput}
+                      onChange={(e) => setBulkRenameInput(e.target.value)}
+                    />
+                    <Button
+                      size="sm"
+                      onClick={() => {
+                        campusStore.bulkRename(Array.from(selectedEntityIds), bulkRenameInput);
+                        toast({ type: "success", title: "Bulk Renamed", description: `Renamed ${selectedEntityIds.size} elements.` });
+                      }}
+                    >
+                      Apply
+                    </Button>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="mb-1 block font-semibold text-[rgb(var(--fg))]">Bulk Change Category</label>
+                  <div className="flex gap-1.5">
+                    <select
+                      value={bulkCategoryInput}
+                      onChange={(e) => setBulkCategoryInput(e.target.value)}
+                      className="w-full rounded-md border bg-[rgb(var(--bg))] p-2 text-xs"
+                    >
+                      {["Classroom", "Laboratory", "Office", "Staff Room", "Seminar Hall", "Library", "Washroom", "Store Room", "Electrical Room", "Custom"].map((c) => (
+                        <option key={c} value={c}>
+                          {c}
+                        </option>
+                      ))}
+                    </select>
+                    <Button
+                      size="sm"
+                      onClick={() => {
+                        campusStore.bulkUpdateCategory(Array.from(selectedEntityIds), bulkCategoryInput);
+                        toast({ type: "success", title: "Bulk Category Updated", description: "Updated room categories." });
+                      }}
+                    >
+                      Set
+                    </Button>
+                  </div>
+                </div>
+
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    campusStore.bulkDelete(Array.from(selectedEntityIds));
+                    setSelectedEntityIds(new Set());
+                    setSelectedElement(null);
+                    toast({ type: "info", title: "Bulk Deleted Selected Elements" });
+                  }}
+                  className="w-full text-red-500 border-red-500/30 hover:bg-red-500/10"
+                >
+                  <Trash2 className="mr-1.5 h-3.5 w-3.5" /> Bulk Delete Selected ({selectedEntityIds.size})
+                </Button>
+              </div>
+            )}
+
+            {/* Tool Options Panels */}
+            {activeTool === "ROOM" && (
+              <div className="rounded-lg border p-3 bg-[rgb(var(--card))] space-y-3 text-xs">
+                <Badge className="bg-indigo-600 text-white">Room Drawing Tool</Badge>
+                <div>
+                  <label className="mb-1 block font-semibold">Room Number *</label>
+                  <Input value={roomNumber} onChange={(e) => setRoomNumber(e.target.value)} placeholder="e.g. 101, 202" />
+                </div>
+                <div>
+                  <label className="mb-1 block font-semibold">Room Name *</label>
+                  <Input value={roomNameInput} onChange={(e) => setRoomNameInput(e.target.value)} placeholder="e.g. Physics Lab" />
+                </div>
+                <div>
+                  <label className="mb-1 block font-semibold">Category</label>
                   <select
-                    value={bulkCategoryInput}
-                    onChange={(e) => setBulkCategoryInput(e.target.value)}
-                    className="w-full rounded-md border bg-[rgb(var(--bg))] p-2 text-xs"
+                    value={roomCategory}
+                    onChange={(e) => setRoomCategory(e.target.value)}
+                    className="w-full rounded border bg-[rgb(var(--bg))] p-2 text-xs"
                   >
-                    {["Classroom", "Laboratory", "Office", "Staff Room", "Seminar Hall", "Library", "Washroom", "Store Room", "Electrical Room", "Custom"].map((c) => (
-                      <option key={c} value={c}>
-                        {c}
+                    {["Classroom", "Laboratory", "Office", "Staff Room", "Seminar Hall", "Library", "Washroom", "Store Room", "Electrical Room", "Custom"].map((cat) => (
+                      <option key={cat} value={cat}>
+                        {cat}
                       </option>
                     ))}
                   </select>
-                  <Button
-                    size="sm"
-                    onClick={() => {
-                      campusStore.bulkUpdateCategory(Array.from(selectedEntityIds), bulkCategoryInput);
-                      toast({ type: "success", title: "Bulk Category Updated", description: "Updated room categories." });
-                    }}
-                  >
-                    Set
-                  </Button>
                 </div>
+                <p className="text-[11px] text-[rgb(var(--muted-fg))]">Click on canvas to place room rectangle. Node link will auto-suggest.</p>
               </div>
-
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => {
-                  campusStore.bulkDelete(Array.from(selectedEntityIds));
-                  setSelectedEntityIds(new Set());
-                  setSelectedElement(null);
-                  toast({ type: "info", title: "Bulk Deleted Selected Elements" });
-                }}
-                className="w-full text-red-500 border-red-500/30 hover:bg-red-500/10"
-              >
-                <Trash2 className="mr-1.5 h-3.5 w-3.5" /> Bulk Delete Selected ({selectedEntityIds.size})
-              </Button>
-            </div>
-          )}
-
-          {/* Tool Options Panels */}
-          {activeTool === "ROOM" && (
-            <div className="rounded-lg border p-3 bg-[rgb(var(--card))] space-y-3 text-xs">
-              <Badge className="bg-indigo-600 text-white">Room Drawing Tool</Badge>
-              <div>
-                <label className="mb-1 block font-semibold">Room Number *</label>
-                <Input value={roomNumber} onChange={(e) => setRoomNumber(e.target.value)} placeholder="e.g. 101, 202" />
-              </div>
-              <div>
-                <label className="mb-1 block font-semibold">Room Name *</label>
-                <Input value={roomNameInput} onChange={(e) => setRoomNameInput(e.target.value)} placeholder="e.g. Physics Lab" />
-              </div>
-              <div>
-                <label className="mb-1 block font-semibold">Category</label>
-                <select
-                  value={roomCategory}
-                  onChange={(e) => setRoomCategory(e.target.value)}
-                  className="w-full rounded border bg-[rgb(var(--bg))] p-2 text-xs"
-                >
-                  {["Classroom", "Laboratory", "Office", "Staff Room", "Seminar Hall", "Library", "Washroom", "Store Room", "Electrical Room", "Custom"].map((cat) => (
-                    <option key={cat} value={cat}>
-                      {cat}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <p className="text-[11px] text-[rgb(var(--muted-fg))]">Click on canvas to place room rectangle. Node link will auto-suggest.</p>
-            </div>
-          )}
+            )}
 
 
 
 
 
-          {/* BUILDING Placement Tool Panel */}
-          {!selectedElement && selectedEntityIds.size === 0 && activeTool === "BUILDING" && (
-            <div className="rounded-lg border p-3.5 bg-[rgb(var(--card))] space-y-3 text-xs shadow-md">
-              <Badge className="bg-indigo-600 text-white flex items-center gap-1">
-                <Building2 className="h-3 w-3" /> Building Placement Mode
-              </Badge>
-              <p className="text-[11px] text-[rgb(var(--muted-fg))] leading-relaxed">
-                Set default building details below, then click anywhere on the CAD Canvas to place a building footprint.
-              </p>
-              <div>
-                <label className="mb-1 block font-semibold text-[rgb(var(--fg))]">Building Name</label>
-                <Input
-                  placeholder="e.g. Science Block A"
-                  value={buildingName}
-                  onChange={(e) => setBuildingName(e.target.value)}
-                  className="h-8 text-xs"
-                />
-              </div>
-              <div>
-                <label className="mb-1 block font-semibold text-[rgb(var(--fg))]">Short Code</label>
-                <Input
-                  placeholder="e.g. SBA"
-                  value={buildingCode}
-                  onChange={(e) => setBuildingCode(e.target.value)}
-                  className="h-8 text-xs"
-                />
-              </div>
-              <div>
-                <label className="mb-1 block font-semibold text-[rgb(var(--fg))]">Accent Color</label>
-                <div className="flex items-center gap-2">
-                  <input
-                    type="color"
-                    value={buildingColor}
-                    onChange={(e) => setBuildingColor(e.target.value)}
-                    className="h-8 w-10 cursor-pointer rounded border bg-transparent p-0.5"
-                  />
-                  <span className="text-[11px] font-mono font-semibold">{buildingColor}</span>
-                </div>
-              </div>
-              <div className="rounded-md border bg-[rgb(var(--primary)/0.05)] border-[rgb(var(--primary)/0.2)] p-2 text-[11px] text-[rgb(var(--primary))] font-medium flex items-center gap-1.5">
-                <MousePointer className="h-3.5 w-3.5 shrink-0" />
-                <span>Click CAD Canvas to place building at cursor</span>
-              </div>
-            </div>
-          )}
-
-          {/* OBSTACLE Hazard Tool Panel */}
-          {!selectedElement && selectedEntityIds.size === 0 && activeTool === "OBSTACLE" && (
-            <div className="rounded-lg border p-3.5 bg-[rgb(var(--card))] space-y-3 text-xs shadow-md">
-              <Badge className="bg-amber-600 text-white flex items-center gap-1">
-                <AlertTriangle className="h-3 w-3" /> Hazard / Obstacle Tool
-              </Badge>
-              <p className="text-[11px] text-[rgb(var(--muted-fg))] leading-relaxed">
-                Set hazard reason and radius, then click near a node or walkway on canvas to block routing in real-time.
-              </p>
-              <div>
-                <label className="mb-1 block font-semibold text-[rgb(var(--fg))]">Hazard Reason / Title</label>
-                <Input
-                  placeholder="e.g. Maintenance / Spill Zone"
-                  value={obstacleReason}
-                  onChange={(e) => setObstacleReason(e.target.value)}
-                  className="h-8 text-xs"
-                />
-              </div>
-              <div>
-                <label className="mb-1 block font-semibold text-[rgb(var(--fg))]">Blocked Radius (Meters)</label>
-                <Input
-                  type="number"
-                  min={1}
-                  max={100}
-                  value={obstacleRadius}
-                  onChange={(e) => setObstacleRadius(Math.max(1, parseFloat(e.target.value) || 10))}
-                  className="h-8 text-xs"
-                />
-              </div>
-              <div className="rounded-md border bg-amber-500/10 border-amber-500/30 p-2 text-[11px] text-amber-700 dark:text-amber-300 font-medium flex items-center gap-1.5">
-                <AlertTriangle className="h-3.5 w-3.5 shrink-0 text-amber-500" />
-                <span>Click node or walkway on canvas to place hazard</span>
-              </div>
-            </div>
-          )}
-
-          {/* EDGE Connection Tool Panel */}
-          {!selectedElement && selectedEntityIds.size === 0 && activeTool === "EDGE" && (
-            <div className="rounded-lg border p-3.5 bg-[rgb(var(--card))] space-y-3 text-xs shadow-md">
-              <Badge className="bg-emerald-600 text-white flex items-center gap-1">
-                <GitFork className="h-3 w-3" /> Edge Connection Tool
-              </Badge>
-              <p className="text-[11px] text-[rgb(var(--muted-fg))] leading-relaxed">
-                {edgeStartNodeId
-                  ? "First node selected! Click second node on canvas to create connection."
-                  : "Click Node 1, then click Node 2 to connect with a walkway edge segment."}
-              </p>
-
-              {edgeStartNodeId && (() => {
-                const startN = storeData.nodes.find((n) => n.id === edgeStartNodeId);
-                return (
-                  <div className="rounded-md border border-emerald-500/40 bg-emerald-500/10 p-2 text-[11px] text-emerald-800 dark:text-emerald-200 flex items-center justify-between">
-                    <span className="font-bold">Start Node: {startN?.name || edgeStartNodeId}</span>
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      className="h-5 px-1.5 text-[10px] text-red-500 hover:bg-red-500/10"
-                      onClick={() => setEdgeStartNodeId(null)}
-                    >
-                      Cancel
-                    </Button>
-                  </div>
-                );
-              })()}
-
-              <div>
-                <label className="mb-1 block font-semibold text-[rgb(var(--fg))]">Default Edge Type</label>
-                <select
-                  value={edgeType}
-                  onChange={(e) => setEdgeType(e.target.value as EdgeType)}
-                  className="w-full rounded-md border bg-[rgb(var(--bg))] p-2 text-xs"
-                >
-                  <option value="WALK">Pedestrian Walkway</option>
-                  <option value="ROAD">Outdoor Street / Road</option>
-                  <option value="STAIRS">Staircase Connection</option>
-                  <option value="LIFT">Elevator / Lift Connection</option>
-                  <option value="RAMP">Accessible Ramp</option>
-                  <option value="ESCALATOR">Escalator</option>
-                </select>
-              </div>
-            </div>
-          )}
-
-
-
-          {activeTool === "DOOR" && (
-            <div className="rounded-lg border p-3 bg-[rgb(var(--card))] space-y-3 text-xs">
-              <Badge className="bg-cyan-600 text-white">Door Tool</Badge>
-              <div>
-                <label className="mb-1 block font-semibold">Door Type</label>
-                <select
-                  value={doorType}
-                  onChange={(e) => setDoorType(e.target.value as DoorType)}
-                  className="w-full rounded border bg-[rgb(var(--bg))] p-2 text-xs"
-                >
-                  <option value="ROOM_DOOR">Room Door</option>
-                  <option value="BUILDING_ENTRANCE">Building Entrance</option>
-                  <option value="EMERGENCY_DOOR">Emergency Door</option>
-                </select>
-              </div>
-              <p className="text-[11px] text-[rgb(var(--muted-fg))]">Click room wall or corridor boundary on canvas to place door.</p>
-            </div>
-          )}
-
-          {activeTool === "PLACE_VERTICAL" && pendingVerticalConnection && (
-            <div className="rounded-lg border p-3 bg-[rgb(var(--card))] space-y-3 text-xs">
-              <Badge className={pendingVerticalConnection.type === "STAIR" ? "bg-indigo-600 text-white" : "bg-blue-600 text-white"}>
-                Place {pendingVerticalConnection.type === "STAIR" ? "Staircase" : "Elevator"}
-              </Badge>
-              <div className="space-y-1.5">
-                <p className="font-semibold text-[rgb(var(--fg))]">Name: {pendingVerticalConnection.name}</p>
-                <p className="text-[10px] text-[rgb(var(--muted-fg))]">
-                  Connecting {pendingVerticalConnection.selectedFloorIds.length} floor(s)
+            {/* BUILDING Placement Tool Panel */}
+            {!selectedElement && selectedEntityIds.size === 0 && activeTool === "BUILDING" && (
+              <div className="rounded-lg border p-3.5 bg-[rgb(var(--card))] space-y-3 text-xs shadow-md">
+                <Badge className="bg-indigo-600 text-white flex items-center gap-1">
+                  <Building2 className="h-3 w-3" /> Building Placement Mode
+                </Badge>
+                <p className="text-[11px] text-[rgb(var(--muted-fg))] leading-relaxed">
+                  Set default building details below, then click anywhere on the CAD Canvas to place a building footprint.
                 </p>
-              </div>
-              <p className="text-[11px] text-[rgb(var(--muted-fg))] animate-pulse">
-                Click anywhere on the graph canvas to place this vertical connection group.
-              </p>
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => {
-                  setPendingVerticalConnection(null);
-                  setActiveTool("SELECT");
-                }}
-                className="w-full text-red-500 border-red-500/30 hover:bg-red-500/10 text-xs"
-              >
-                Cancel Placement
-              </Button>
-            </div>
-          )}
-
-          {/* Fix #15: NODE tool creation panel when nothing selected */}
-          {!selectedElement && selectedEntityIds.size === 0 && activeTool === "NODE" && (
-            <div className="rounded-lg border p-3 bg-[rgb(var(--card))] space-y-3 text-xs">
-              <Badge className="bg-violet-600 text-white flex items-center gap-1">
-                <Plus className="h-3 w-3" /> Node Placement
-              </Badge>
-              <p className="text-[11px] text-[rgb(var(--muted-fg))]">Select target building & floor, set coordinates and name, then click canvas — or use the form below to place a node at a specific GPS location.</p>
-
-              <div>
-                <label className="mb-1 block font-semibold">Building Location</label>
-                <select
-                  value={nodeTargetBuildingId}
-                  onChange={(e) => {
-                    const bId = e.target.value;
-                    setNodeTargetBuildingId(bId);
-                    if (!bId || bId === "outdoor") {
-                      setNodeTargetFloorId("f-out");
-                      setActiveFloorId("f-out");
-                    } else {
-                      const bFloors = storeData.floors.filter((f) => f.buildingId === bId);
-                      if (bFloors.length > 0) {
-                        setNodeTargetFloorId(bFloors[0].id);
-                        setActiveFloorId(bFloors[0].id);
-                      }
-                    }
-                  }}
-                  className="w-full rounded-md border bg-[rgb(var(--bg))] p-2 text-xs text-[rgb(var(--fg))]"
-                >
-                  <option value="outdoor">🌳 Outdoor Campus (No Building)</option>
-                  {storeData.buildings.map((b) => (
-                    <option key={b.id} value={b.id}>
-                      🏢 {b.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div>
-                <label className="mb-1 block font-semibold">Floor Location</label>
-                <select
-                  value={nodeTargetFloorId}
-                  onChange={(e) => {
-                    const fId = e.target.value;
-                    setNodeTargetFloorId(fId);
-                    if (fId && !fId.startsWith("f-all")) {
-                      setActiveFloorId(fId);
-                    }
-                  }}
-                  className="w-full rounded-md border bg-[rgb(var(--bg))] p-2 text-xs text-[rgb(var(--fg))]"
-                >
-                  {(!nodeTargetBuildingId || nodeTargetBuildingId === "outdoor") ? (
-                    <option value="f-out">Outdoor (f-out)</option>
-                  ) : (
-                    storeData.floors
-                      .filter((f) => f.buildingId === nodeTargetBuildingId)
-                      .map((f) => (
-                        <option key={f.id} value={f.id}>
-                          {f.name} ({f.code || `Floor ${f.ordinal}`})
-                        </option>
-                      ))
-                  )}
-                </select>
-              </div>
-
-              <div>
-                <label className="mb-1 block font-semibold">Node Name (optional)</label>
-                <Input value={nodeName} onChange={(e) => setNodeName(e.target.value)} placeholder="e.g. Main Lobby, Lab 101" />
-              </div>
-              <div className="grid grid-cols-2 gap-2">
                 <div>
-                  <label className="mb-0.5 block text-[10px] font-medium">Latitude</label>
+                  <label className="mb-1 block font-semibold text-[rgb(var(--fg))]">Building Name</label>
+                  <Input
+                    placeholder="e.g. Science Block A"
+                    value={buildingName}
+                    onChange={(e) => setBuildingName(e.target.value)}
+                    className="h-8 text-xs"
+                  />
+                </div>
+                <div>
+                  <label className="mb-1 block font-semibold text-[rgb(var(--fg))]">Short Code</label>
+                  <Input
+                    placeholder="e.g. SBA"
+                    value={buildingCode}
+                    onChange={(e) => setBuildingCode(e.target.value)}
+                    className="h-8 text-xs"
+                  />
+                </div>
+                <div>
+                  <label className="mb-1 block font-semibold text-[rgb(var(--fg))]">Accent Color</label>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="color"
+                      value={buildingColor}
+                      onChange={(e) => setBuildingColor(e.target.value)}
+                      className="h-8 w-10 cursor-pointer rounded border bg-transparent p-0.5"
+                    />
+                    <span className="text-[11px] font-mono font-semibold">{buildingColor}</span>
+                  </div>
+                </div>
+                <div className="rounded-md border bg-[rgb(var(--primary)/0.05)] border-[rgb(var(--primary)/0.2)] p-2 text-[11px] text-[rgb(var(--primary))] font-medium flex items-center gap-1.5">
+                  <MousePointer className="h-3.5 w-3.5 shrink-0" />
+                  <span>Click CAD Canvas to place building at cursor</span>
+                </div>
+              </div>
+            )}
+
+            {/* OBSTACLE Hazard Tool Panel */}
+            {!selectedElement && selectedEntityIds.size === 0 && activeTool === "OBSTACLE" && (
+              <div className="rounded-lg border p-3.5 bg-[rgb(var(--card))] space-y-3 text-xs shadow-md">
+                <Badge className="bg-amber-600 text-white flex items-center gap-1">
+                  <AlertTriangle className="h-3 w-3" /> Hazard / Obstacle Tool
+                </Badge>
+                <p className="text-[11px] text-[rgb(var(--muted-fg))] leading-relaxed">
+                  Set hazard reason and radius, then click near a node or walkway on canvas to block routing in real-time.
+                </p>
+                <div>
+                  <label className="mb-1 block font-semibold text-[rgb(var(--fg))]">Hazard Reason / Title</label>
+                  <Input
+                    placeholder="e.g. Maintenance / Spill Zone"
+                    value={obstacleReason}
+                    onChange={(e) => setObstacleReason(e.target.value)}
+                    className="h-8 text-xs"
+                  />
+                </div>
+                <div>
+                  <label className="mb-1 block font-semibold text-[rgb(var(--fg))]">Blocked Radius (Meters)</label>
                   <Input
                     type="number"
-                    step="0.000000001"
-                    placeholder="11.496327485"
-                    value={manualLat}
-                    onChange={(e) => setManualLat(e.target.value)}
-                    className="font-mono text-xs h-8"
+                    min={1}
+                    max={100}
+                    value={obstacleRadius}
+                    onChange={(e) => setObstacleRadius(Math.max(1, parseFloat(e.target.value) || 10))}
+                    className="h-8 text-xs"
                   />
                 </div>
-                <div>
-                  <label className="mb-0.5 block text-[10px] font-medium">Longitude</label>
-                  <Input
-                    type="number"
-                    step="0.000000001"
-                    placeholder="77.277485104"
-                    value={manualLng}
-                    onChange={(e) => setManualLng(e.target.value)}
-                    className="font-mono text-xs h-8"
-                  />
+                <div className="rounded-md border bg-amber-500/10 border-amber-500/30 p-2 text-[11px] text-amber-700 dark:text-amber-300 font-medium flex items-center gap-1.5">
+                  <AlertTriangle className="h-3.5 w-3.5 shrink-0 text-amber-500" />
+                  <span>Click node or walkway on canvas to place hazard</span>
                 </div>
               </div>
-              <Button
-                size="sm"
-                className="w-full bg-violet-600 text-white hover:bg-violet-700"
-                onClick={() => {
-                  const lat = Number(manualLat);
-                  const lng = Number(manualLng);
-                  if (!manualLat || !manualLng || isNaN(lat) || isNaN(lng)) {
-                    toast({ type: "error", title: "Enter Lat/Lng", description: "Fill in valid Latitude and Longitude to place the node." });
-                    return;
-                  }
-                  // Fix #14: GPS boundary check
-                  if (!isPointInCampusBoundary(lat, lng)) {
-                    toast({ type: "warning", title: "Outside Campus Boundary", description: "The GPS coordinates are outside the campus boundary. Node placed anyway." });
-                  }
-                  const targetFloor = nodeTargetFloorId && !nodeTargetFloorId.startsWith("f-all")
-                    ? nodeTargetFloorId
-                    : (activeFloorId.startsWith("f-all") ? "f-out" : activeFloorId);
-                  const { x, y } = campusStore.getCanvasCoordsFromGps(lat, lng, targetFloor);
-                  const newNodeId = `n-${Date.now().toString(36)}`;
-                  campusStore.addNode({ id: newNodeId, type: nodeType, name: nodeName.trim() || undefined, floorId: targetFloor, x, y, lat, lng, searchable: true }, false);
-                  setSelectedElement({ type: "node", id: newNodeId });
-                  const targetFloorObj = storeData.floors.find((f) => f.id === targetFloor);
-                  const targetFloorName = targetFloorObj ? targetFloorObj.name : (targetFloor === "f-out" ? "Outdoor Campus" : targetFloor);
-                  toast({ type: "success", title: "Node Placed", description: `Placed ${nodeType} node on ${targetFloorName} at (${lat.toFixed(9)}, ${lng.toFixed(9)}).` });
-                  setNodeName("");
-                  setManualLat("");
-                  setManualLng("");
-                }}
-              >
-                <Plus className="mr-1.5 h-3.5 w-3.5" /> Add Node at GPS Location
-              </Button>
-            </div>
-          )}
+            )}
 
-          {/* Door Inspector */}
-          {selectedElement?.type === "door" && (() => {
-            const door = storeData.doors.find((d) => d.id === selectedElement.id);
-            if (!door) return null;
-            const connectedNode = door.connectedNodeId ? storeData.nodes.find((n) => n.id === door.connectedNodeId) : null;
-            return (
-              <div className="space-y-3 text-xs">
-                <Badge className="bg-cyan-600 text-white">Door</Badge>
+            {/* EDGE Connection Tool Panel */}
+            {!selectedElement && selectedEntityIds.size === 0 && activeTool === "EDGE" && (
+              <div className="rounded-lg border p-3.5 bg-[rgb(var(--card))] space-y-3 text-xs shadow-md">
+                <Badge className="bg-emerald-600 text-white flex items-center gap-1">
+                  <GitFork className="h-3 w-3" /> Edge Connection Tool
+                </Badge>
+                <p className="text-[11px] text-[rgb(var(--muted-fg))] leading-relaxed">
+                  {edgeStartNodeId
+                    ? "First node selected! Click second node on canvas to create connection."
+                    : "Click Node 1, then click Node 2 to connect with a walkway edge segment."}
+                </p>
+
+                {edgeStartNodeId && (() => {
+                  const startN = storeData.nodes.find((n) => n.id === edgeStartNodeId);
+                  return (
+                    <div className="rounded-md border border-emerald-500/40 bg-emerald-500/10 p-2 text-[11px] text-emerald-800 dark:text-emerald-200 flex items-center justify-between">
+                      <span className="font-bold">Start Node: {startN?.name || edgeStartNodeId}</span>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="h-5 px-1.5 text-[10px] text-red-500 hover:bg-red-500/10"
+                        onClick={() => setEdgeStartNodeId(null)}
+                      >
+                        Cancel
+                      </Button>
+                    </div>
+                  );
+                })()}
+
                 <div>
-                  <label className="mb-1 block font-medium">Door Name</label>
-                  <Input
-                    value={door.name ?? ""}
-                    onChange={(e) => campusStore.updateDoor(door.id, { name: e.target.value })}
-                  />
-                </div>
-                <div>
-                  <label className="mb-1 block font-medium">Door Type</label>
+                  <label className="mb-1 block font-semibold text-[rgb(var(--fg))]">Default Edge Type</label>
                   <select
-                    value={door.type}
-                    onChange={(e) => campusStore.updateDoor(door.id, { type: e.target.value as DoorType })}
-                    className="w-full rounded-md border bg-[rgb(var(--bg))] p-2 text-xs text-[rgb(var(--fg))]"
+                    value={edgeType}
+                    onChange={(e) => setEdgeType(e.target.value as EdgeType)}
+                    className="w-full rounded-md border bg-[rgb(var(--bg))] p-2 text-xs"
+                  >
+                    <option value="WALK">Pedestrian Walkway</option>
+                    <option value="ROAD">Outdoor Street / Road</option>
+                    <option value="STAIRS">Staircase Connection</option>
+                    <option value="LIFT">Elevator / Lift Connection</option>
+                    <option value="RAMP">Accessible Ramp</option>
+                    <option value="ESCALATOR">Escalator</option>
+                  </select>
+                </div>
+              </div>
+            )}
+
+
+
+            {activeTool === "DOOR" && (
+              <div className="rounded-lg border p-3 bg-[rgb(var(--card))] space-y-3 text-xs">
+                <Badge className="bg-cyan-600 text-white">Door Tool</Badge>
+                <div>
+                  <label className="mb-1 block font-semibold">Door Type</label>
+                  <select
+                    value={doorType}
+                    onChange={(e) => setDoorType(e.target.value as DoorType)}
+                    className="w-full rounded border bg-[rgb(var(--bg))] p-2 text-xs"
                   >
                     <option value="ROOM_DOOR">Room Door</option>
                     <option value="BUILDING_ENTRANCE">Building Entrance</option>
                     <option value="EMERGENCY_DOOR">Emergency Door</option>
                   </select>
                 </div>
-                <div className="rounded-md border bg-[rgb(var(--bg))] p-2.5 space-y-1 text-[11px] text-[rgb(var(--muted-fg))]">
-                  <div>
-                    Floor: <span className="font-semibold text-[rgb(var(--fg))]">{storeData.floors.find((f) => f.id === door.floorId)?.name || door.floorId}</span>
-                  </div>
-                  <div>
-                    Connection: <span className="font-semibold text-[rgb(var(--fg))]">{connectedNode ? (connectedNode.name ?? connectedNode.id) : "None (Independent)"}</span>
-                  </div>
+                <p className="text-[11px] text-[rgb(var(--muted-fg))]">Click room wall or corridor boundary on canvas to place door.</p>
+              </div>
+            )}
+
+            {activeTool === "PLACE_VERTICAL" && pendingVerticalConnection && (
+              <div className="rounded-lg border p-3 bg-[rgb(var(--card))] space-y-3 text-xs">
+                <Badge className={pendingVerticalConnection.type === "STAIR" ? "bg-indigo-600 text-white" : "bg-blue-600 text-white"}>
+                  Place {pendingVerticalConnection.type === "STAIR" ? "Staircase" : "Elevator"}
+                </Badge>
+                <div className="space-y-1.5">
+                  <p className="font-semibold text-[rgb(var(--fg))]">Name: {pendingVerticalConnection.name}</p>
+                  <p className="text-[10px] text-[rgb(var(--muted-fg))]">
+                    Connecting {pendingVerticalConnection.selectedFloorIds.length} floor(s)
+                  </p>
                 </div>
-
-                {door.connectedNodeId && (
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => {
-                      campusStore.updateDoor(door.id, { connectedNodeId: undefined });
-                      toast({ type: "info", title: "Door Disconnected", description: "Removed connection to node." });
-                    }}
-                    className="w-full text-xs"
-                  >
-                    Disconnect from Node
-                  </Button>
-                )}
-
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => {
-                    campusStore.deleteDoor(door.id);
-                    setSelectedElement(null);
-                    toast({ type: "info", title: "Door Deleted" });
-                  }}
-                  className="w-full text-red-500 hover:bg-red-500/10"
-                >
-                  <Trash2 className="mr-1.5 h-3.5 w-3.5" /> Delete Door
-                </Button>
-              </div>
-            );
-          })()}
-
-
-
-          {/* Event Inspector Form */}
-          {(activeTool === "EVENT" || selectedElement?.type === "event") && (
-            <div className="space-y-3 text-xs">
-              <Badge variant="warning" className="flex items-center gap-1">
-                <Sparkles className="h-3 w-3" /> Event Configuration
-              </Badge>
-
-              <div>
-                <label className="mb-1 block font-semibold text-[rgb(var(--fg))]">Event Title *</label>
-                <Input
-                  placeholder="e.g. Annual Tech Fest, Hackathon"
-                  value={eventTitle}
-                  onChange={(e) => setEventTitle(e.target.value)}
-                />
-              </div>
-
-              <div>
-                <label className="mb-1 block font-semibold text-[rgb(var(--fg))]">Select Location / Building</label>
-                <select
-                  value={eventBuildingId}
-                  onChange={(e) => setEventBuildingId(e.target.value)}
-                  className="w-full rounded-md border bg-[rgb(var(--bg))] p-2 text-xs text-[rgb(var(--fg))]"
-                >
-                  <option value="">-- Campus Wide (No Building) --</option>
-                  {storeData.buildings.map((b) => (
-                    <option key={b.id} value={b.id}>
-                      {b.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div>
-                <label className="mb-1 block font-semibold text-[rgb(var(--fg))]">Start Date & Time</label>
-                <Input
-                  type="datetime-local"
-                  value={eventStartsAt}
-                  min={getCurrentDateTimeISO()}
-                  onChange={(e) => {
-                    const newStart = e.target.value;
-                    setEventStartsAt(newStart);
-                    if (new Date(eventEndsAt) <= new Date(newStart)) {
-                      setEventEndsAt(getDefaultEndDateTimeISO(newStart));
-                    }
-                  }}
-                />
-              </div>
-
-              <div>
-                <label className="mb-1 block font-semibold text-[rgb(var(--fg))]">End Date & Time</label>
-                <Input
-                  type="datetime-local"
-                  value={eventEndsAt}
-                  min={eventStartsAt || getCurrentDateTimeISO()}
-                  onChange={(e) => setEventEndsAt(e.target.value)}
-                />
-              </div>
-
-              <div>
-                <label className="mb-1 block font-semibold text-[rgb(var(--fg))]">Event Badge Color</label>
-                <div className="flex items-center gap-2 pt-1">
-                  {["#f59e0b", "#4f46e5", "#10b981", "#ef4444", "#ec4899", "#8b5cf6"].map((color) => (
-                    <button
-                      key={color}
-                      type="button"
-                      onClick={() => {
-                        setEventColor(color);
-                        if (selectedElement?.type === "event") {
-                          campusStore.updateEvent(selectedElement.id, { color });
-                        }
-                      }}
-                      style={{ backgroundColor: color }}
-                      className={cn(
-                        "h-6 w-6 rounded-full border-2 transition-transform cursor-pointer",
-                        eventColor === color ? "scale-110 border-white ring-2 ring-[rgb(var(--primary))]" : "border-transparent opacity-80"
-                      )}
-                    />
-                  ))}
-                </div>
-              </div>
-
-              <div>
-                <label className="mb-1 block font-semibold text-[rgb(var(--fg))]">Description / Info</label>
-                <Input
-                  placeholder="Short info for visitors..."
-                  value={eventDesc}
-                  onChange={(e) => setEventDesc(e.target.value)}
-                />
-              </div>
-
-              <Button size="sm" onClick={handleCreateEventSubmit} className="w-full mt-2">
-                <Sparkles className="mr-1.5 h-3.5 w-3.5" />
-                {selectedElement?.type === "event" ? "Update Event" : "Save Event"}
-              </Button>
-            </div>
-          )}
-
-          {/* Building Inspector */}
-          {selectedBuilding && (
-            <div className="space-y-3 text-xs">
-              <Badge variant="primary">Building</Badge>
-              <div>
-                <label className="mb-1 block font-medium">Building Name</label>
-                <Input
-                  value={selectedBuilding.name}
-                  onChange={(e) => campusStore.updateBuilding(selectedBuilding.id, { name: e.target.value })}
-                />
-              </div>
-
-              {/* Building Real-World GPS Coordinates */}
-              <div className="rounded-lg border bg-[rgb(var(--muted))/30] p-2.5 space-y-2">
-                <div className="flex items-center justify-between font-bold text-[rgb(var(--primary))] text-[11px]">
-                  <span>🌐 Real-World GPS Geolocation</span>
-                  <Badge variant="success" className="text-[9px]">9 Decimals</Badge>
-                </div>
-                <div className="grid grid-cols-2 gap-2">
-                  <div>
-                    <label className="mb-0.5 block text-[10px] font-medium">Latitude (Lat)</label>
-                    <Input
-                      type="number"
-                      step="0.000000001"
-                      placeholder="11.496327485"
-                      value={selectedBuilding.lat ?? ""}
-                      onChange={(e) => {
-                        const lat = Number(e.target.value);
-                        if (!isNaN(lat) && e.target.value !== "") {
-                          campusStore.updateBuilding(selectedBuilding.id, { lat });
-                        }
-                      }}
-                      className="font-mono text-xs h-8"
-                    />
-                  </div>
-                  <div>
-                    <label className="mb-0.5 block text-[10px] font-medium">Longitude (Lng)</label>
-                    <Input
-                      type="number"
-                      step="0.000000001"
-                      placeholder="77.277485104"
-                      value={selectedBuilding.lng ?? ""}
-                      onChange={(e) => {
-                        const lng = Number(e.target.value);
-                        if (!isNaN(lng) && e.target.value !== "") {
-                          campusStore.updateBuilding(selectedBuilding.id, { lng });
-                        }
-                      }}
-                      className="font-mono text-xs h-8"
-                    />
-                  </div>
-                </div>
-              </div>
-
-              <div className="border-t pt-3 mt-3">
-                <div className="flex items-center justify-between mb-2">
-                  <span className="font-semibold text-sm">Building Coordinates</span>
-                </div>
-                <div className="grid grid-cols-2 gap-2 mb-3">
-                  <div>
-                    <label className="mb-0.5 block text-[10px] font-medium text-gray-500">Center Lat</label>
-                    <div className="font-mono text-[10px] p-1.5 bg-gray-100 rounded border border-gray-200">
-                      {selectedBuilding.centerLat?.toFixed(6) ?? selectedBuilding.lat?.toFixed(6)}
-                    </div>
-                  </div>
-                  <div>
-                    <label className="mb-0.5 block text-[10px] font-medium text-gray-500">Center Lng</label>
-                    <div className="font-mono text-[10px] p-1.5 bg-gray-100 rounded border border-gray-200">
-                      {selectedBuilding.centerLng?.toFixed(6) ?? selectedBuilding.lng?.toFixed(6)}
-                    </div>
-                  </div>
-                </div>
-
-                <label className="mb-1 block text-xs font-semibold text-gray-600">4-Corner Boundary (Real-World)</label>
-                <div className="space-y-1">
-                  <div className="grid grid-cols-2 gap-2">
-                    <div className="font-mono text-[9px] p-1 bg-gray-50 rounded border text-gray-500 flex justify-between">
-                      <span>C1:</span>
-                      <span>{selectedBuilding.corner1Lat?.toFixed(5)}, {selectedBuilding.corner1Lng?.toFixed(5)}</span>
-                    </div>
-                    <div className="font-mono text-[9px] p-1 bg-gray-50 rounded border text-gray-500 flex justify-between">
-                      <span>C2:</span>
-                      <span>{selectedBuilding.corner2Lat?.toFixed(5)}, {selectedBuilding.corner2Lng?.toFixed(5)}</span>
-                    </div>
-                  </div>
-                  <div className="grid grid-cols-2 gap-2">
-                    <div className="font-mono text-[9px] p-1 bg-gray-50 rounded border text-gray-500 flex justify-between">
-                      <span>C3:</span>
-                      <span>{selectedBuilding.corner3Lat?.toFixed(5)}, {selectedBuilding.corner3Lng?.toFixed(5)}</span>
-                    </div>
-                    <div className="font-mono text-[9px] p-1 bg-gray-50 rounded border text-gray-500 flex justify-between">
-                      <span>C4:</span>
-                      <span>{selectedBuilding.corner4Lat?.toFixed(5)}, {selectedBuilding.corner4Lng?.toFixed(5)}</span>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              {/* Building Width & Height controls */}
-              <div className="border-t pt-3 mt-3">
-                <div className="flex items-center justify-between mb-2">
-                  <span className="font-semibold text-sm">Visual Presentation</span>
-                </div>
-                <p className="text-[10px] text-amber-600 mb-2 font-medium bg-amber-50 p-1.5 rounded border border-amber-200">
-                  Visual size only — does not change real building GPS boundary.
+                <p className="text-[11px] text-[rgb(var(--muted-fg))] animate-pulse">
+                  Click anywhere on the graph canvas to place this vertical connection group.
                 </p>
-                <div className="grid grid-cols-2 gap-2">
-                <DimensionInput
-                  label="Width (px)"
-                  value={selectedBuilding.width ?? 180}
-                  min={50}
-                  max={10000}
-                  onChange={(w) => {
-                    const clampedW = Math.max(50, w);
-                    campusStore.updateBuilding(selectedBuilding.id, { width: clampedW }, false);
-                  }}
-                  onCommit={(w) => {
-                    const clampedW = Math.max(50, w);
-                    campusStore.updateBuilding(selectedBuilding.id, { width: clampedW }, true);
-                  }}
-                />
-                <DimensionInput
-                  label="Height (px)"
-                  value={selectedBuilding.height ?? 120}
-                  min={50}
-                  max={10000}
-                  onChange={(h) => {
-                    const clampedH = Math.max(50, h);
-                    campusStore.updateBuilding(selectedBuilding.id, { height: clampedH }, false);
-                  }}
-                  onCommit={(h) => {
-                    const clampedH = Math.max(50, h);
-                    campusStore.updateBuilding(selectedBuilding.id, { height: clampedH }, true);
-                  }}
-                />
-              </div>
-              </div>
-
-              {/* Building Floors Manager */}
-              <div className="border-t pt-3 space-y-2">
-                <div className="flex items-center justify-between font-semibold">
-                  <span>Building Floors</span>
-                  <Badge variant="primary" className="text-[10px]">
-                    {storeData.floors.filter((f) => f.buildingId === selectedBuilding.id).length} floors
-                  </Badge>
-                </div>
-
-                <div className="space-y-1.5 max-h-44 overflow-y-auto">
-                  {storeData.floors
-                    .filter((f) => f.buildingId === selectedBuilding.id)
-                    .sort((a, b) => b.ordinal - a.ordinal)
-                    .map((f) => {
-                      const floorNodesCount = storeData.nodes.filter((n) => n.floorId === f.id).length;
-                      const isActive = activeFloorId === f.id;
-                      return (
-                        <div
-                          key={f.id}
-                          className={cn(
-                            "flex items-center justify-between rounded border p-1.5 transition-colors text-[11px]",
-                            isActive ? "bg-[rgb(var(--primary)/0.1)] border-[rgb(var(--primary))]" : "bg-[rgb(var(--card))]"
-                          )}
-                        >
-                          <div>
-                            <span className="font-bold">{f.name}</span>
-                            <span className="ml-1 text-[10px] text-[rgb(var(--muted-fg))]">(Level {f.ordinal})</span>
-                            <div className="text-[9px] text-[rgb(var(--muted-fg))]">{floorNodesCount} nodes</div>
-                          </div>
-                          <div className="flex items-center gap-1">
-                            <Button
-                              size="sm"
-                              variant={isActive ? "primary" : "outline"}
-                              className="h-6 px-2 text-[10px]"
-                              onClick={() => setActiveFloorId(f.id)}
-                            >
-                              {isActive ? "Editing" : "Edit"}
-                            </Button>
-                            <Button
-                              size="sm"
-                              variant="ghost"
-                              className="h-6 w-6 p-0 text-blue-500 hover:bg-blue-500/10"
-                              onClick={() => {
-                                setSelectedElement({ type: "floor", id: f.id });
-                                setRenameInputValue(f.name);
-                                setIsRenameModalOpen(true);
-                              }}
-                              title="Rename floor"
-                            >
-                              <Pencil className="h-3 w-3" />
-                            </Button>
-
-                            <Button
-                              size="sm"
-                              variant="ghost"
-                              className="h-6 w-6 p-0 text-red-500 hover:bg-red-500/10"
-                              onClick={() => campusStore.deleteFloor(f.id)}
-                              title="Delete floor"
-                            >
-                              <Trash2 className="h-3 w-3" />
-                            </Button>
-                          </div>
-                        </div>
-                      );
-                    })}
-                </div>
-
-                {/* Add Floor Buttons: Upper Floor & Basement Floor */}
-                <div className="grid grid-cols-2 gap-1.5 pt-1">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => {
-                      const buildingFloors = storeData.floors.filter((f) => f.buildingId === selectedBuilding.id);
-                      const maxOrdinal = buildingFloors.length > 0 ? Math.max(...buildingFloors.map((f) => f.ordinal)) : -1;
-                      const newOrdinal = Math.max(0, maxOrdinal) + 1;
-                      const newFloor = campusStore.addFloor(selectedBuilding.id, `Floor ${newOrdinal}`, newOrdinal, `F${newOrdinal}`);
-                      setActiveFloorId(newFloor.id);
-                      toast({ type: "success", title: "Floor Added", description: `Added "Floor ${newOrdinal}" to ${selectedBuilding.name}.` });
-                    }}
-                    className="text-blue-500 border-blue-500/30 hover:bg-blue-500/10 text-[11px] h-8 px-2"
-                  >
-                    <Plus className="mr-1 h-3 w-3" /> Upper Floor
-                  </Button>
-
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => {
-                      const buildingFloors = storeData.floors.filter((f) => f.buildingId === selectedBuilding.id);
-                      const minOrdinal = buildingFloors.length > 0 ? Math.min(...buildingFloors.map((f) => f.ordinal)) : 0;
-                      const nextBasementOrd = Math.min(0, minOrdinal) - 1;
-                      const floorName = nextBasementOrd === -1 ? "Level -1 Basement" : `Basement ${Math.abs(nextBasementOrd)}`;
-                      const code = getFloorCode(nextBasementOrd, floorName);
-                      const newFloor = campusStore.addFloor(selectedBuilding.id, floorName, nextBasementOrd, code);
-                      setActiveFloorId(newFloor.id);
-                      toast({ type: "success", title: "Basement Added", description: `Added "${floorName}" (Level ${nextBasementOrd}) to ${selectedBuilding.name}.` });
-                    }}
-                    className="text-amber-600 border-amber-500/30 hover:bg-amber-500/10 text-[11px] h-8 px-2"
-                  >
-                    <Plus className="mr-1 h-3 w-3" /> Basement (-1)
-                  </Button>
-                </div>
-              </div>
-
-              {/* Building Events Section */}
-              <div className="border-t pt-3 space-y-2">
-                <div className="flex items-center justify-between font-semibold">
-                  <span className="flex items-center gap-1">
-                    <Sparkles className="h-3.5 w-3.5 text-amber-500" />
-                    <span>Building Events</span>
-                  </span>
-                  <Badge variant="warning" className="text-[10px]">
-                    {storeData.events.filter((e) => e.buildingId === selectedBuilding.id).length} events
-                  </Badge>
-                </div>
-
-                <div className="space-y-1.5 max-h-44 overflow-y-auto">
-                  {storeData.events
-                    .filter((e) => e.buildingId === selectedBuilding.id)
-                    .map((ev) => {
-                      const status = getEventStatus(ev);
-                      return (
-                        <div
-                          key={ev.id}
-                          className={`flex items-center justify-between rounded border p-1.5 text-[11px] ${
-                            status === "ONGOING"
-                              ? "border-amber-500/40 bg-amber-500/10 text-amber-600 dark:text-amber-400 font-semibold"
-                              : status === "UPCOMING"
-                              ? "border-blue-500/30 bg-blue-500/5 text-blue-600 dark:text-blue-400"
-                              : "border-[rgb(var(--border))] bg-[rgb(var(--muted))/0.3] text-[rgb(var(--muted-fg))] opacity-75"
-                          }`}
-                        >
-                          <div className="min-w-0 flex-1 pr-2">
-                            <div className="flex items-center gap-1.5 flex-wrap">
-                              <span className="h-2 w-2 rounded-full shrink-0" style={{ backgroundColor: ev.color || "#f59e0b" }} />
-                              <span className="font-bold truncate">{ev.title}</span>
-                              <Badge
-                                variant={status === "ONGOING" ? "warning" : status === "UPCOMING" ? "primary" : "default"}
-                                className="text-[9px] px-1 py-0"
-                              >
-                                {status === "ONGOING" ? "✨ Ongoing" : status === "UPCOMING" ? "Upcoming" : "Completed"}
-                              </Badge>
-                            </div>
-                            {ev.description && <div className="text-[9px] text-[rgb(var(--muted-fg))] truncate">{ev.description}</div>}
-                          </div>
-                          <div className="flex items-center gap-1 shrink-0">
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              className="h-6 px-1.5 text-[10px]"
-                              onClick={() => {
-                                setSelectedElement({ type: "event", id: ev.id });
-                                setActiveTool("EVENT");
-                              }}
-                            >
-                              Edit
-                            </Button>
-                            <Button
-                              size="sm"
-                              variant="ghost"
-                              className="h-6 w-6 p-0 text-red-500 hover:bg-red-500/10"
-                              onClick={() => {
-                                campusStore.deleteEvent(ev.id);
-                                toast({ type: "info", title: "Event Deleted", description: `Removed event "${ev.title}".` });
-                              }}
-                              title="Delete Event"
-                            >
-                              <Trash2 className="h-3 w-3" />
-                            </Button>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  {storeData.events.filter((e) => e.buildingId === selectedBuilding.id).length === 0 && (
-                    <p className="text-[10px] text-[rgb(var(--muted-fg))] italic">No events assigned to this building yet.</p>
-                  )}
-                </div>
-
                 <Button
-                  variant="outline"
                   size="sm"
+                  variant="outline"
                   onClick={() => {
-                    setEventBuildingId(selectedBuilding.id);
-                    setEventTitle(`${selectedBuilding.name} Event`);
-                    setActiveTool("EVENT");
-                    setSelectedElement(null);
-                    toast({
-                      type: "info",
-                      title: "Add Building Event",
-                      description: `Configure new event for ${selectedBuilding.name} in the form.`,
-                    });
+                    setPendingVerticalConnection(null);
+                    setActiveTool("SELECT");
                   }}
-                  className="w-full text-amber-600 border-amber-500/30 hover:bg-amber-500/10"
+                  className="w-full text-red-500 border-red-500/30 hover:bg-red-500/10 text-xs"
                 >
-                  <Plus className="mr-1.5 h-3.5 w-3.5" /> Add Event for {selectedBuilding.name || "Building"}
+                  Cancel Placement
                 </Button>
               </div>
+            )}
 
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => {
-                  campusStore.deleteBuilding(selectedBuilding.id);
-                  setSelectedElement(null);
-                }}
-                className="w-full text-red-500 hover:bg-red-500/10 mt-2"
-              >
-                <Trash2 className="mr-1.5 h-3.5 w-3.5" /> Delete Building
-              </Button>
-            </div>
-          )}
-
-          {/* Node Inspector */}
-          {selectedNode && (
-            <div className="space-y-3 text-xs">
-              <div className="flex items-center justify-between">
-                <Badge variant="primary">{selectedNode.type} Node</Badge>
-                <span className="font-mono text-[10px] text-[rgb(var(--muted-fg))]">{selectedNode.id}</span>
-              </div>
-
-              <div>
-                <label className="mb-1 block font-semibold">Node Name</label>
-                <Input
-                  value={selectedNode.name ?? ""}
-                  onChange={(e) => campusStore.updateNode(selectedNode.id, { name: e.target.value })}
-                />
-              </div>
-
-              {/* Building & Floor Assignment */}
-              <div className="rounded-lg border bg-[rgb(var(--muted))/20] p-2.5 space-y-2">
-                <div className="flex items-center justify-between font-bold text-[rgb(var(--primary))] text-[11px]">
-                  <span>📍 Building & Floor Assignment</span>
-                  <Badge variant="primary" className="text-[9px]">
-                    {selectedNode.floorId === "f-out"
-                      ? "Outdoor"
-                      : storeData.floors.find((f) => f.id === selectedNode.floorId)?.name || selectedNode.floorId}
-                  </Badge>
-                </div>
+            {/* Fix #15: NODE tool creation panel when nothing selected */}
+            {!selectedElement && selectedEntityIds.size === 0 && activeTool === "NODE" && (
+              <div className="rounded-lg border p-3 bg-[rgb(var(--card))] space-y-3 text-xs">
+                <Badge className="bg-violet-600 text-white flex items-center gap-1">
+                  <Plus className="h-3 w-3" /> Node Placement
+                </Badge>
+                <p className="text-[11px] text-[rgb(var(--muted-fg))]">Select target building & floor, set coordinates and name, then click canvas — or use the form below to place a node at a specific GPS location.</p>
 
                 <div>
-                  <label className="mb-0.5 block text-[10px] font-medium">Building</label>
+                  <label className="mb-1 block font-semibold">Building Location</label>
                   <select
-                    value={
-                      selectedNode.floorId === "f-out"
-                        ? "outdoor"
-                        : storeData.floors.find((f) => f.id === selectedNode.floorId)?.buildingId || "outdoor"
-                    }
+                    value={nodeTargetBuildingId}
                     onChange={(e) => {
                       const bId = e.target.value;
+                      setNodeTargetBuildingId(bId);
                       if (!bId || bId === "outdoor") {
-                        campusStore.updateNode(selectedNode.id, { floorId: "f-out" });
-                        toast({ type: "info", title: "Building Updated", description: "Node moved to Outdoor Campus." });
+                        setNodeTargetFloorId("f-out");
+                        setActiveFloorId("f-out");
                       } else {
                         const bFloors = storeData.floors.filter((f) => f.buildingId === bId);
                         if (bFloors.length > 0) {
-                          campusStore.updateNode(selectedNode.id, { floorId: bFloors[0].id });
-                          const bld = storeData.buildings.find((b) => b.id === bId);
-                          toast({ type: "info", title: "Building Updated", description: `Node moved to ${bld?.name || bId} (${bFloors[0].name}).` });
-                        } else {
-                          toast({ type: "warning", title: "No Floors Found", description: "Selected building has no floors created yet." });
+                          setNodeTargetFloorId(bFloors[0].id);
+                          setActiveFloorId(bFloors[0].id);
                         }
                       }
                     }}
-                    className="w-full rounded border bg-[rgb(var(--bg))] p-1.5 text-xs text-[rgb(var(--fg))]"
+                    className="w-full rounded-md border bg-[rgb(var(--bg))] p-2 text-xs text-[rgb(var(--fg))]"
                   >
                     <option value="outdoor">🌳 Outdoor Campus (No Building)</option>
                     {storeData.buildings.map((b) => (
@@ -4657,430 +3984,1096 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
                 </div>
 
                 <div>
-                  <label className="mb-0.5 block text-[10px] font-medium">Floor</label>
+                  <label className="mb-1 block font-semibold">Floor Location</label>
                   <select
-                    value={selectedNode.floorId}
+                    value={nodeTargetFloorId}
                     onChange={(e) => {
-                      const newFloorId = e.target.value;
-                      campusStore.updateNode(selectedNode.id, { floorId: newFloorId });
-                      const fl = storeData.floors.find((f) => f.id === newFloorId);
-                      toast({
-                        type: "success",
-                        title: "Floor Updated",
-                        description: `Node ${selectedNode.name || selectedNode.id} assigned to ${fl ? fl.name : newFloorId}.`,
-                      });
+                      const fId = e.target.value;
+                      setNodeTargetFloorId(fId);
+                      if (fId && !fId.startsWith("f-all")) {
+                        setActiveFloorId(fId);
+                      }
                     }}
-                    className="w-full rounded border bg-[rgb(var(--bg))] p-1.5 text-xs text-[rgb(var(--fg))]"
+                    className="w-full rounded-md border bg-[rgb(var(--bg))] p-2 text-xs text-[rgb(var(--fg))]"
                   >
-                    {selectedNode.floorId === "f-out" ? (
+                    {(!nodeTargetBuildingId || nodeTargetBuildingId === "outdoor") ? (
                       <option value="f-out">Outdoor (f-out)</option>
                     ) : (
-                      (() => {
-                        const curFloor = storeData.floors.find((f) => f.id === selectedNode.floorId);
-                        const bId = curFloor?.buildingId;
-                        const bFloors = bId ? storeData.floors.filter((f) => f.buildingId === bId) : storeData.floors;
-                        return bFloors.map((f) => (
+                      storeData.floors
+                        .filter((f) => f.buildingId === nodeTargetBuildingId)
+                        .map((f) => (
                           <option key={f.id} value={f.id}>
                             {f.name} ({f.code || `Floor ${f.ordinal}`})
                           </option>
-                        ));
-                      })()
+                        ))
                     )}
                   </select>
                 </div>
-              </div>
 
-              {/* Real-World GPS Geolocation Section */}
-              <div className="rounded-lg border bg-[rgb(var(--muted))/30] p-2.5 space-y-2">
-                <div className="flex items-center justify-between font-bold text-[rgb(var(--primary))] text-[11px]">
-                  <span>🌐 Real-World GPS Geolocation</span>
-                  <Badge variant="success" className="text-[9px]">GPS Enabled</Badge>
+                <div>
+                  <label className="mb-1 block font-semibold">Node Name (optional)</label>
+                  <Input value={nodeName} onChange={(e) => setNodeName(e.target.value)} placeholder="e.g. Main Lobby, Lab 101" />
                 </div>
-
                 <div className="grid grid-cols-2 gap-2">
                   <div>
-                    <label className="mb-0.5 block text-[10px] font-medium">Latitude (Lat)</label>
+                    <label className="mb-0.5 block text-[10px] font-medium">Latitude</label>
                     <Input
                       type="number"
                       step="0.000000001"
-                      value={selectedNode.lat ?? 11.496327485}
-                      onChange={(e) => {
-                        const lat = Number(e.target.value);
-                        const lng = selectedNode.lng ?? 77.277485104;
-                        // Fix #10: Sync canvas position when GPS changes
-                        const { x, y } = campusStore.getCanvasCoordsFromGps(lat, lng, selectedNode.floorId);
-                        // Fix #14: Boundary check
-                        if (!isPointInCampusBoundary(lat, lng)) {
-                          toast({ type: "warning", title: "Outside Campus Boundary", description: "Coordinates are outside the campus boundary." });
-                        }
-                        campusStore.updateNode(selectedNode.id, { lat, x, y });
-                      }}
+                      placeholder="11.496327485"
+                      value={manualLat}
+                      onChange={(e) => setManualLat(e.target.value)}
                       className="font-mono text-xs h-8"
                     />
                   </div>
                   <div>
-                    <label className="mb-0.5 block text-[10px] font-medium">Longitude (Lng)</label>
+                    <label className="mb-0.5 block text-[10px] font-medium">Longitude</label>
                     <Input
                       type="number"
                       step="0.000000001"
-                      value={selectedNode.lng ?? 77.277485104}
-                      onChange={(e) => {
-                        const lng = Number(e.target.value);
-                        const lat = selectedNode.lat ?? 11.496327485;
-                        // Fix #10: Sync canvas position when GPS changes
-                        const { x, y } = campusStore.getCanvasCoordsFromGps(lat, lng, selectedNode.floorId);
-                        // Fix #14: Boundary check
-                        if (!isPointInCampusBoundary(lat, lng)) {
-                          toast({ type: "warning", title: "Outside Campus Boundary", description: "Coordinates are outside the campus boundary." });
-                        }
-                        campusStore.updateNode(selectedNode.id, { lng, x, y });
-                      }}
+                      placeholder="77.277485104"
+                      value={manualLng}
+                      onChange={(e) => setManualLng(e.target.value)}
                       className="font-mono text-xs h-8"
                     />
                   </div>
                 </div>
+                <Button
+                  size="sm"
+                  className="w-full bg-violet-600 text-white hover:bg-violet-700"
+                  onClick={() => {
+                    const lat = Number(manualLat);
+                    const lng = Number(manualLng);
+                    if (!manualLat || !manualLng || isNaN(lat) || isNaN(lng)) {
+                      toast({ type: "error", title: "Enter Lat/Lng", description: "Fill in valid Latitude and Longitude to place the node." });
+                      return;
+                    }
+                    // Fix #14: GPS boundary check
+                    if (!isPointInCampusBoundary(lat, lng)) {
+                      toast({ type: "warning", title: "Outside Campus Boundary", description: "The GPS coordinates are outside the campus boundary. Node placed anyway." });
+                    }
+                    const targetFloor = nodeTargetFloorId && !nodeTargetFloorId.startsWith("f-all")
+                      ? nodeTargetFloorId
+                      : (activeFloorId.startsWith("f-all") ? "f-out" : activeFloorId);
+                    const { x, y } = campusStore.getCanvasCoordsFromGps(lat, lng, targetFloor);
+                    const newNodeId = `n-${Date.now().toString(36)}`;
+                    campusStore.addNode({ id: newNodeId, type: nodeType, name: nodeName.trim() || undefined, floorId: targetFloor, x, y, lat, lng, searchable: true }, false);
+                    setSelectedElement({ type: "node", id: newNodeId });
+                    const targetFloorObj = storeData.floors.find((f) => f.id === targetFloor);
+                    const targetFloorName = targetFloorObj ? targetFloorObj.name : (targetFloor === "f-out" ? "Outdoor Campus" : targetFloor);
+                    toast({ type: "success", title: "Node Placed", description: `Placed ${nodeType} node on ${targetFloorName} at (${lat.toFixed(9)}, ${lng.toFixed(9)}).` });
+                    setNodeName("");
+                    setManualLat("");
+                    setManualLng("");
+                  }}
+                >
+                  <Plus className="mr-1.5 h-3.5 w-3.5" /> Add Node at GPS Location
+                </Button>
+              </div>
+            )}
 
-                <div className="grid grid-cols-2 gap-1.5 pt-1">
+            {/* Door Inspector */}
+            {selectedElement?.type === "door" && (() => {
+              const door = storeData.doors.find((d) => d.id === selectedElement.id);
+              if (!door) return null;
+              const connectedNode = door.connectedNodeId ? storeData.nodes.find((n) => n.id === door.connectedNodeId) : null;
+              return (
+                <div className="space-y-3 text-xs">
+                  <Badge className="bg-cyan-600 text-white">Door</Badge>
+                  <div>
+                    <label className="mb-1 block font-medium">Door Name</label>
+                    <Input
+                      value={door.name ?? ""}
+                      onChange={(e) => campusStore.updateDoor(door.id, { name: e.target.value })}
+                    />
+                  </div>
+                  <div>
+                    <label className="mb-1 block font-medium">Door Type</label>
+                    <select
+                      value={door.type}
+                      onChange={(e) => campusStore.updateDoor(door.id, { type: e.target.value as DoorType })}
+                      className="w-full rounded-md border bg-[rgb(var(--bg))] p-2 text-xs text-[rgb(var(--fg))]"
+                    >
+                      <option value="ROOM_DOOR">Room Door</option>
+                      <option value="BUILDING_ENTRANCE">Building Entrance</option>
+                      <option value="EMERGENCY_DOOR">Emergency Door</option>
+                    </select>
+                  </div>
+                  <div className="rounded-md border bg-[rgb(var(--bg))] p-2.5 space-y-1 text-[11px] text-[rgb(var(--muted-fg))]">
+                    <div>
+                      Floor: <span className="font-semibold text-[rgb(var(--fg))]">{storeData.floors.find((f) => f.id === door.floorId)?.name || door.floorId}</span>
+                    </div>
+                    <div>
+                      Connection: <span className="font-semibold text-[rgb(var(--fg))]">{connectedNode ? (connectedNode.name ?? connectedNode.id) : "None (Independent)"}</span>
+                    </div>
+                  </div>
+
+                  {door.connectedNodeId && (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => {
+                        campusStore.updateDoor(door.id, { connectedNodeId: undefined });
+                        toast({ type: "info", title: "Door Disconnected", description: "Removed connection to node." });
+                      }}
+                      className="w-full text-xs"
+                    >
+                      Disconnect from Node
+                    </Button>
+                  )}
+
                   <Button
-                    size="sm"
                     variant="outline"
+                    size="sm"
                     onClick={() => {
-                      const gps = (selectedNode.lat && selectedNode.lng)
-                        ? { lat: selectedNode.lat, lng: selectedNode.lng }
-                        : canvasToGps(selectedNode.x, selectedNode.y);
-                      const coord = `${gps.lat.toFixed(6)}, ${gps.lng.toFixed(6)}`;
-                      navigator.clipboard.writeText(coord);
-                      toast({ type: "info", title: "GPS Coordinates Copied", description: coord });
+                      campusStore.deleteDoor(door.id);
+                      setSelectedElement(null);
+                      toast({ type: "info", title: "Door Deleted" });
                     }}
-                    className="h-7 text-[10px]"
+                    className="w-full text-red-500 hover:bg-red-500/10"
                   >
-                    Copy GPS
+                    <Trash2 className="mr-1.5 h-3.5 w-3.5" /> Delete Door
                   </Button>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={async () => {
-                      try {
-                        const text = await navigator.clipboard.readText();
-                        const parts = text.split(",").map((s) => parseFloat(s.trim()));
-                        if (parts.length === 2 && !isNaN(parts[0]) && !isNaN(parts[1])) {
-                          const { x, y } = campusStore.getCanvasCoordsFromGps(parts[0], parts[1], selectedNode.floorId);
-                          campusStore.updateNode(selectedNode.id, { lat: parts[0], lng: parts[1], x, y });
-                          toast({ type: "success", title: "GPS Coordinates Pasted", description: `${parts[0]}, ${parts[1]}` });
-                        }
-                      } catch {
-                        toast({ type: "error", title: "Paste Failed", description: "Clipboard does not contain valid 'lat, lng'." });
+                </div>
+              );
+            })()}
+
+
+
+            {/* Event Inspector Form */}
+            {(activeTool === "EVENT" || selectedElement?.type === "event") && (
+              <div className="space-y-3 text-xs">
+                <Badge variant="warning" className="flex items-center gap-1">
+                  <Sparkles className="h-3 w-3" /> Event Configuration
+                </Badge>
+
+                <div>
+                  <label className="mb-1 block font-semibold text-[rgb(var(--fg))]">Event Title *</label>
+                  <Input
+                    placeholder="e.g. Annual Tech Fest, Hackathon"
+                    value={eventTitle}
+                    onChange={(e) => setEventTitle(e.target.value)}
+                  />
+                </div>
+
+                <div>
+                  <label className="mb-1 block font-semibold text-[rgb(var(--fg))]">Select Location / Building</label>
+                  <select
+                    value={eventBuildingId}
+                    onChange={(e) => setEventBuildingId(e.target.value)}
+                    className="w-full rounded-md border bg-[rgb(var(--bg))] p-2 text-xs text-[rgb(var(--fg))]"
+                  >
+                    <option value="">-- Campus Wide (No Building) --</option>
+                    {storeData.buildings.map((b) => (
+                      <option key={b.id} value={b.id}>
+                        {b.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="mb-1 block font-semibold text-[rgb(var(--fg))]">Start Date & Time</label>
+                  <Input
+                    type="datetime-local"
+                    value={eventStartsAt}
+                    min={getCurrentDateTimeISO()}
+                    onChange={(e) => {
+                      const newStart = e.target.value;
+                      setEventStartsAt(newStart);
+                      if (new Date(eventEndsAt) <= new Date(newStart)) {
+                        setEventEndsAt(getDefaultEndDateTimeISO(newStart));
                       }
                     }}
-                    className="h-7 text-[10px]"
+                  />
+                </div>
+
+                <div>
+                  <label className="mb-1 block font-semibold text-[rgb(var(--fg))]">End Date & Time</label>
+                  <Input
+                    type="datetime-local"
+                    value={eventEndsAt}
+                    min={eventStartsAt || getCurrentDateTimeISO()}
+                    onChange={(e) => setEventEndsAt(e.target.value)}
+                  />
+                </div>
+
+                <div>
+                  <label className="mb-1 block font-semibold text-[rgb(var(--fg))]">Event Badge Color</label>
+                  <div className="flex items-center gap-2 pt-1">
+                    {["#f59e0b", "#4f46e5", "#10b981", "#ef4444", "#ec4899", "#8b5cf6"].map((color) => (
+                      <button
+                        key={color}
+                        type="button"
+                        onClick={() => {
+                          setEventColor(color);
+                          if (selectedElement?.type === "event") {
+                            campusStore.updateEvent(selectedElement.id, { color });
+                          }
+                        }}
+                        style={{ backgroundColor: color }}
+                        className={cn(
+                          "h-6 w-6 rounded-full border-2 transition-transform cursor-pointer",
+                          eventColor === color ? "scale-110 border-white ring-2 ring-[rgb(var(--primary))]" : "border-transparent opacity-80"
+                        )}
+                      />
+                    ))}
+                  </div>
+                </div>
+
+                <div>
+                  <label className="mb-1 block font-semibold text-[rgb(var(--fg))]">Description / Info</label>
+                  <Input
+                    placeholder="Short info for visitors..."
+                    value={eventDesc}
+                    onChange={(e) => setEventDesc(e.target.value)}
+                  />
+                </div>
+
+                <Button size="sm" onClick={handleCreateEventSubmit} className="w-full mt-2">
+                  <Sparkles className="mr-1.5 h-3.5 w-3.5" />
+                  {selectedElement?.type === "event" ? "Update Event" : "Save Event"}
+                </Button>
+              </div>
+            )}
+
+            {/* Building Inspector */}
+            {selectedBuilding && (
+              <div className="space-y-3 text-xs">
+                <Badge variant="primary">Building</Badge>
+                <div>
+                  <label className="mb-1 block font-medium">Building Name</label>
+                  <Input
+                    value={selectedBuilding.name}
+                    onChange={(e) => campusStore.updateBuilding(selectedBuilding.id, { name: e.target.value })}
+                  />
+                </div>
+
+                {/* Building Real-World GPS Coordinates */}
+                <div className="rounded-lg border bg-[rgb(var(--muted))/30] p-2.5 space-y-2">
+                  <div className="flex items-center justify-between font-bold text-[rgb(var(--primary))] text-[11px]">
+                    <span>🌐 Real-World GPS Geolocation</span>
+                    <Badge variant="success" className="text-[9px]">9 Decimals</Badge>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label className="mb-0.5 block text-[10px] font-medium">Latitude (Lat)</label>
+                      <Input
+                        type="number"
+                        step="0.000000001"
+                        placeholder="11.496327485"
+                        value={selectedBuilding.lat ?? ""}
+                        onChange={(e) => {
+                          const lat = Number(e.target.value);
+                          if (!isNaN(lat) && e.target.value !== "") {
+                            campusStore.updateBuilding(selectedBuilding.id, { lat });
+                          }
+                        }}
+                        className="font-mono text-xs h-8"
+                      />
+                    </div>
+                    <div>
+                      <label className="mb-0.5 block text-[10px] font-medium">Longitude (Lng)</label>
+                      <Input
+                        type="number"
+                        step="0.000000001"
+                        placeholder="77.277485104"
+                        value={selectedBuilding.lng ?? ""}
+                        onChange={(e) => {
+                          const lng = Number(e.target.value);
+                          if (!isNaN(lng) && e.target.value !== "") {
+                            campusStore.updateBuilding(selectedBuilding.id, { lng });
+                          }
+                        }}
+                        className="font-mono text-xs h-8"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                <div className="border-t pt-3 mt-3">
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="font-semibold text-sm">Building Coordinates</span>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2 mb-3">
+                    <div>
+                      <label className="mb-0.5 block text-[10px] font-medium text-gray-500">Center Lat</label>
+                      <div className="font-mono text-[10px] p-1.5 bg-gray-100 rounded border border-gray-200">
+                        {selectedBuilding.centerLat?.toFixed(6) ?? selectedBuilding.lat?.toFixed(6)}
+                      </div>
+                    </div>
+                    <div>
+                      <label className="mb-0.5 block text-[10px] font-medium text-gray-500">Center Lng</label>
+                      <div className="font-mono text-[10px] p-1.5 bg-gray-100 rounded border border-gray-200">
+                        {selectedBuilding.centerLng?.toFixed(6) ?? selectedBuilding.lng?.toFixed(6)}
+                      </div>
+                    </div>
+                  </div>
+
+                  <label className="mb-1 block text-xs font-semibold text-gray-600">4-Corner Boundary (Real-World)</label>
+                  <div className="space-y-1">
+                    <div className="grid grid-cols-2 gap-2">
+                      <div className="font-mono text-[9px] p-1 bg-gray-50 rounded border text-gray-500 flex justify-between">
+                        <span>C1:</span>
+                        <span>{selectedBuilding.corner1Lat?.toFixed(5)}, {selectedBuilding.corner1Lng?.toFixed(5)}</span>
+                      </div>
+                      <div className="font-mono text-[9px] p-1 bg-gray-50 rounded border text-gray-500 flex justify-between">
+                        <span>C2:</span>
+                        <span>{selectedBuilding.corner2Lat?.toFixed(5)}, {selectedBuilding.corner2Lng?.toFixed(5)}</span>
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2">
+                      <div className="font-mono text-[9px] p-1 bg-gray-50 rounded border text-gray-500 flex justify-between">
+                        <span>C3:</span>
+                        <span>{selectedBuilding.corner3Lat?.toFixed(5)}, {selectedBuilding.corner3Lng?.toFixed(5)}</span>
+                      </div>
+                      <div className="font-mono text-[9px] p-1 bg-gray-50 rounded border text-gray-500 flex justify-between">
+                        <span>C4:</span>
+                        <span>{selectedBuilding.corner4Lat?.toFixed(5)}, {selectedBuilding.corner4Lng?.toFixed(5)}</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Building Width & Height controls */}
+                <div className="border-t pt-3 mt-3">
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="font-semibold text-sm">Visual Presentation</span>
+                  </div>
+                  <p className="text-[10px] text-amber-600 mb-2 font-medium bg-amber-50 p-1.5 rounded border border-amber-200">
+                    Visual size only — does not change real building GPS boundary.
+                  </p>
+                  <div className="grid grid-cols-2 gap-2">
+                    <DimensionInput
+                      label="Width (px)"
+                      value={selectedBuilding.width ?? 180}
+                      min={50}
+                      max={10000}
+                      onChange={(w) => {
+                        const clampedW = Math.max(50, w);
+                        campusStore.updateBuilding(selectedBuilding.id, { width: clampedW }, false);
+                      }}
+                      onCommit={(w) => {
+                        const clampedW = Math.max(50, w);
+                        campusStore.updateBuilding(selectedBuilding.id, { width: clampedW }, true);
+                      }}
+                    />
+                    <DimensionInput
+                      label="Height (px)"
+                      value={selectedBuilding.height ?? 120}
+                      min={50}
+                      max={10000}
+                      onChange={(h) => {
+                        const clampedH = Math.max(50, h);
+                        campusStore.updateBuilding(selectedBuilding.id, { height: clampedH }, false);
+                      }}
+                      onCommit={(h) => {
+                        const clampedH = Math.max(50, h);
+                        campusStore.updateBuilding(selectedBuilding.id, { height: clampedH }, true);
+                      }}
+                    />
+                  </div>
+                </div>
+
+                {/* Building Floors Manager */}
+                <div className="border-t pt-3 space-y-2">
+                  <div className="flex items-center justify-between font-semibold">
+                    <span>Building Floors</span>
+                    <Badge variant="primary" className="text-[10px]">
+                      {storeData.floors.filter((f) => f.buildingId === selectedBuilding.id).length} floors
+                    </Badge>
+                  </div>
+
+                  <div className="space-y-1.5 max-h-44 overflow-y-auto">
+                    {storeData.floors
+                      .filter((f) => f.buildingId === selectedBuilding.id)
+                      .sort((a, b) => b.ordinal - a.ordinal)
+                      .map((f) => {
+                        const floorNodesCount = storeData.nodes.filter((n) => n.floorId === f.id).length;
+                        const isActive = activeFloorId === f.id;
+                        return (
+                          <div
+                            key={f.id}
+                            className={cn(
+                              "flex items-center justify-between rounded border p-1.5 transition-colors text-[11px]",
+                              isActive ? "bg-[rgb(var(--primary)/0.1)] border-[rgb(var(--primary))]" : "bg-[rgb(var(--card))]"
+                            )}
+                          >
+                            <div>
+                              <span className="font-bold">{f.name}</span>
+                              <span className="ml-1 text-[10px] text-[rgb(var(--muted-fg))]">(Level {f.ordinal})</span>
+                              <div className="text-[9px] text-[rgb(var(--muted-fg))]">{floorNodesCount} nodes</div>
+                            </div>
+                            <div className="flex items-center gap-1">
+                              <Button
+                                size="sm"
+                                variant={isActive ? "primary" : "outline"}
+                                className="h-6 px-2 text-[10px]"
+                                onClick={() => setActiveFloorId(f.id)}
+                              >
+                                {isActive ? "Editing" : "Edit"}
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                className="h-6 w-6 p-0 text-blue-500 hover:bg-blue-500/10"
+                                onClick={() => {
+                                  setSelectedElement({ type: "floor", id: f.id });
+                                  setRenameInputValue(f.name);
+                                  setIsRenameModalOpen(true);
+                                }}
+                                title="Rename floor"
+                              >
+                                <Pencil className="h-3 w-3" />
+                              </Button>
+
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                className="h-6 w-6 p-0 text-red-500 hover:bg-red-500/10"
+                                onClick={() => campusStore.deleteFloor(f.id)}
+                                title="Delete floor"
+                              >
+                                <Trash2 className="h-3 w-3" />
+                              </Button>
+                            </div>
+                          </div>
+                        );
+                      })}
+                  </div>
+
+                  {/* Add Floor Buttons: Upper Floor & Basement Floor */}
+                  <div className="grid grid-cols-2 gap-1.5 pt-1">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => {
+                        const buildingFloors = storeData.floors.filter((f) => f.buildingId === selectedBuilding.id);
+                        const maxOrdinal = buildingFloors.length > 0 ? Math.max(...buildingFloors.map((f) => f.ordinal)) : -1;
+                        const newOrdinal = Math.max(0, maxOrdinal) + 1;
+                        const newFloor = campusStore.addFloor(selectedBuilding.id, `Floor ${newOrdinal}`, newOrdinal, `F${newOrdinal}`);
+                        setActiveFloorId(newFloor.id);
+                        toast({ type: "success", title: "Floor Added", description: `Added "Floor ${newOrdinal}" to ${selectedBuilding.name}.` });
+                      }}
+                      className="text-blue-500 border-blue-500/30 hover:bg-blue-500/10 text-[11px] h-8 px-2"
+                    >
+                      <Plus className="mr-1 h-3 w-3" /> Upper Floor
+                    </Button>
+
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => {
+                        const buildingFloors = storeData.floors.filter((f) => f.buildingId === selectedBuilding.id);
+                        const minOrdinal = buildingFloors.length > 0 ? Math.min(...buildingFloors.map((f) => f.ordinal)) : 0;
+                        const nextBasementOrd = Math.min(0, minOrdinal) - 1;
+                        const floorName = nextBasementOrd === -1 ? "Level -1 Basement" : `Basement ${Math.abs(nextBasementOrd)}`;
+                        const code = getFloorCode(nextBasementOrd, floorName);
+                        const newFloor = campusStore.addFloor(selectedBuilding.id, floorName, nextBasementOrd, code);
+                        setActiveFloorId(newFloor.id);
+                        toast({ type: "success", title: "Basement Added", description: `Added "${floorName}" (Level ${nextBasementOrd}) to ${selectedBuilding.name}.` });
+                      }}
+                      className="text-amber-600 border-amber-500/30 hover:bg-amber-500/10 text-[11px] h-8 px-2"
+                    >
+                      <Plus className="mr-1 h-3 w-3" /> Basement (-1)
+                    </Button>
+                  </div>
+                </div>
+
+                {/* Building Events Section */}
+                <div className="border-t pt-3 space-y-2">
+                  <div className="flex items-center justify-between font-semibold">
+                    <span className="flex items-center gap-1">
+                      <Sparkles className="h-3.5 w-3.5 text-amber-500" />
+                      <span>Building Events</span>
+                    </span>
+                    <Badge variant="warning" className="text-[10px]">
+                      {storeData.events.filter((e) => e.buildingId === selectedBuilding.id).length} events
+                    </Badge>
+                  </div>
+
+                  <div className="space-y-1.5 max-h-44 overflow-y-auto">
+                    {storeData.events
+                      .filter((e) => e.buildingId === selectedBuilding.id)
+                      .map((ev) => {
+                        const status = getEventStatus(ev);
+                        return (
+                          <div
+                            key={ev.id}
+                            className={`flex items-center justify-between rounded border p-1.5 text-[11px] ${status === "ONGOING"
+                                ? "border-amber-500/40 bg-amber-500/10 text-amber-600 dark:text-amber-400 font-semibold"
+                                : status === "UPCOMING"
+                                  ? "border-blue-500/30 bg-blue-500/5 text-blue-600 dark:text-blue-400"
+                                  : "border-[rgb(var(--border))] bg-[rgb(var(--muted))/0.3] text-[rgb(var(--muted-fg))] opacity-75"
+                              }`}
+                          >
+                            <div className="min-w-0 flex-1 pr-2">
+                              <div className="flex items-center gap-1.5 flex-wrap">
+                                <span className="h-2 w-2 rounded-full shrink-0" style={{ backgroundColor: ev.color || "#f59e0b" }} />
+                                <span className="font-bold truncate">{ev.title}</span>
+                                <Badge
+                                  variant={status === "ONGOING" ? "warning" : status === "UPCOMING" ? "primary" : "default"}
+                                  className="text-[9px] px-1 py-0"
+                                >
+                                  {status === "ONGOING" ? "✨ Ongoing" : status === "UPCOMING" ? "Upcoming" : "Completed"}
+                                </Badge>
+                              </div>
+                              {ev.description && <div className="text-[9px] text-[rgb(var(--muted-fg))] truncate">{ev.description}</div>}
+                            </div>
+                            <div className="flex items-center gap-1 shrink-0">
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                className="h-6 px-1.5 text-[10px]"
+                                onClick={() => {
+                                  setSelectedElement({ type: "event", id: ev.id });
+                                  setActiveTool("EVENT");
+                                }}
+                              >
+                                Edit
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                className="h-6 w-6 p-0 text-red-500 hover:bg-red-500/10"
+                                onClick={() => {
+                                  campusStore.deleteEvent(ev.id);
+                                  toast({ type: "info", title: "Event Deleted", description: `Removed event "${ev.title}".` });
+                                }}
+                                title="Delete Event"
+                              >
+                                <Trash2 className="h-3 w-3" />
+                              </Button>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    {storeData.events.filter((e) => e.buildingId === selectedBuilding.id).length === 0 && (
+                      <p className="text-[10px] text-[rgb(var(--muted-fg))] italic">No events assigned to this building yet.</p>
+                    )}
+                  </div>
+
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      setEventBuildingId(selectedBuilding.id);
+                      setEventTitle(`${selectedBuilding.name} Event`);
+                      setActiveTool("EVENT");
+                      setSelectedElement(null);
+                      toast({
+                        type: "info",
+                        title: "Add Building Event",
+                        description: `Configure new event for ${selectedBuilding.name} in the form.`,
+                      });
+                    }}
+                    className="w-full text-amber-600 border-amber-500/30 hover:bg-amber-500/10"
                   >
-                    Paste GPS
+                    <Plus className="mr-1.5 h-3.5 w-3.5" /> Add Event for {selectedBuilding.name || "Building"}
                   </Button>
                 </div>
 
                 <Button
+                  variant="outline"
                   size="sm"
-                  variant="secondary"
-                  onClick={() => zoomToPos(selectedNode.x, selectedNode.y, selectedNode.floorId)}
-                  className="w-full h-7 text-[10px]"
+                  onClick={() => {
+                    campusStore.deleteBuilding(selectedBuilding.id);
+                    setSelectedElement(null);
+                  }}
+                  className="w-full text-red-500 hover:bg-red-500/10 mt-2"
                 >
-                  <Navigation className="mr-1 h-3 w-3" /> Center Map on Node
+                  <Trash2 className="mr-1.5 h-3.5 w-3.5" /> Delete Building
                 </Button>
               </div>
+            )}
 
-              <div className="grid grid-cols-2 gap-2">
-                <div>
-                  <label className="mb-1 block font-medium">Canvas X</label>
-                  <Input
-                    type="number"
-                    value={selectedNode.x}
-                    onChange={(e) => campusStore.updateNode(selectedNode.id, { x: Number(e.target.value) })}
-                  />
-                </div>
-                <div>
-                  <label className="mb-1 block font-medium">Canvas Y</label>
-                  <Input
-                    type="number"
-                    value={selectedNode.y}
-                    onChange={(e) => campusStore.updateNode(selectedNode.id, { y: Number(e.target.value) })}
-                  />
-                </div>
-              </div>
-
-              {/* Node Reference Photo Inspector Card */}
-              <div className="rounded-lg border border-[rgb(var(--border))] bg-[rgb(var(--card))] p-2.5 space-y-2 text-xs">
+            {/* Node Inspector */}
+            {selectedNode && (
+              <div className="space-y-3 text-xs">
                 <div className="flex items-center justify-between">
-                  <span className="font-bold text-[rgb(var(--fg))] flex items-center gap-1.5">
-                    <Camera className="h-3.5 w-3.5 text-[rgb(var(--primary))]" /> Reference Photo
-                  </span>
-                  {selectedNode.photoUrl ? (
-                    <Badge className="bg-emerald-600 text-white text-[10px] px-1.5 py-0.5">📷 Attached</Badge>
-                  ) : (
-                    <span className="text-[10px] text-[rgb(var(--muted-fg))]">○ None</span>
-                  )}
+                  <Badge variant="primary">{selectedNode.type} Node</Badge>
+                  <span className="font-mono text-[10px] text-[rgb(var(--muted-fg))]">{selectedNode.id}</span>
                 </div>
-                {selectedNode.photoUrl ? (
-                  <div className="space-y-1.5">
-                    <div className="relative w-full overflow-hidden rounded-md border border-[rgb(var(--border))] bg-transparent flex items-center justify-center">
-                      <img src={selectedNode.photoUrl} alt="Reference" className="w-full h-auto max-h-36 object-contain rounded-md" />
+
+                <div>
+                  <label className="mb-1 block font-semibold">Node Name</label>
+                  <Input
+                    value={selectedNode.name ?? ""}
+                    onChange={(e) => campusStore.updateNode(selectedNode.id, { name: e.target.value })}
+                  />
+                </div>
+
+                {/* Building & Floor Assignment */}
+                <div className="rounded-lg border bg-[rgb(var(--muted))/20] p-2.5 space-y-2">
+                  <div className="flex items-center justify-between font-bold text-[rgb(var(--primary))] text-[11px]">
+                    <span>📍 Building & Floor Assignment</span>
+                    <Badge variant="primary" className="text-[9px]">
+                      {selectedNode.floorId === "f-out"
+                        ? "Outdoor"
+                        : storeData.floors.find((f) => f.id === selectedNode.floorId)?.name || selectedNode.floorId}
+                    </Badge>
+                  </div>
+
+                  <div>
+                    <label className="mb-0.5 block text-[10px] font-medium">Building</label>
+                    <select
+                      value={
+                        selectedNode.floorId === "f-out"
+                          ? "outdoor"
+                          : storeData.floors.find((f) => f.id === selectedNode.floorId)?.buildingId || "outdoor"
+                      }
+                      onChange={(e) => {
+                        const bId = e.target.value;
+                        if (!bId || bId === "outdoor") {
+                          campusStore.updateNode(selectedNode.id, { floorId: "f-out" });
+                          toast({ type: "info", title: "Building Updated", description: "Node moved to Outdoor Campus." });
+                        } else {
+                          const bFloors = storeData.floors.filter((f) => f.buildingId === bId);
+                          if (bFloors.length > 0) {
+                            campusStore.updateNode(selectedNode.id, { floorId: bFloors[0].id });
+                            const bld = storeData.buildings.find((b) => b.id === bId);
+                            toast({ type: "info", title: "Building Updated", description: `Node moved to ${bld?.name || bId} (${bFloors[0].name}).` });
+                          } else {
+                            toast({ type: "warning", title: "No Floors Found", description: "Selected building has no floors created yet." });
+                          }
+                        }
+                      }}
+                      className="w-full rounded border bg-[rgb(var(--bg))] p-1.5 text-xs text-[rgb(var(--fg))]"
+                    >
+                      <option value="outdoor">🌳 Outdoor Campus (No Building)</option>
+                      {storeData.buildings.map((b) => (
+                        <option key={b.id} value={b.id}>
+                          🏢 {b.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="mb-0.5 block text-[10px] font-medium">Floor</label>
+                    <select
+                      value={selectedNode.floorId}
+                      onChange={(e) => {
+                        const newFloorId = e.target.value;
+                        campusStore.updateNode(selectedNode.id, { floorId: newFloorId });
+                        const fl = storeData.floors.find((f) => f.id === newFloorId);
+                        toast({
+                          type: "success",
+                          title: "Floor Updated",
+                          description: `Node ${selectedNode.name || selectedNode.id} assigned to ${fl ? fl.name : newFloorId}.`,
+                        });
+                      }}
+                      className="w-full rounded border bg-[rgb(var(--bg))] p-1.5 text-xs text-[rgb(var(--fg))]"
+                    >
+                      {selectedNode.floorId === "f-out" ? (
+                        <option value="f-out">Outdoor (f-out)</option>
+                      ) : (
+                        (() => {
+                          const curFloor = storeData.floors.find((f) => f.id === selectedNode.floorId);
+                          const bId = curFloor?.buildingId;
+                          const bFloors = bId ? storeData.floors.filter((f) => f.buildingId === bId) : storeData.floors;
+                          return bFloors.map((f) => (
+                            <option key={f.id} value={f.id}>
+                              {f.name} ({f.code || `Floor ${f.ordinal}`})
+                            </option>
+                          ));
+                        })()
+                      )}
+                    </select>
+                  </div>
+                </div>
+
+                {/* Real-World GPS Geolocation Section */}
+                <div className="rounded-lg border bg-[rgb(var(--muted))/30] p-2.5 space-y-2">
+                  <div className="flex items-center justify-between font-bold text-[rgb(var(--primary))] text-[11px]">
+                    <span>🌐 Real-World GPS Geolocation</span>
+                    <Badge variant="success" className="text-[9px]">GPS Enabled</Badge>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label className="mb-0.5 block text-[10px] font-medium">Latitude (Lat)</label>
+                      <Input
+                        type="number"
+                        step="0.000000001"
+                        value={selectedNode.lat ?? 11.496327485}
+                        onChange={(e) => {
+                          const lat = Number(e.target.value);
+                          const lng = selectedNode.lng ?? 77.277485104;
+                          // Fix #10: Sync canvas position when GPS changes
+                          const { x, y } = campusStore.getCanvasCoordsFromGps(lat, lng, selectedNode.floorId);
+                          // Fix #14: Boundary check
+                          if (!isPointInCampusBoundary(lat, lng)) {
+                            toast({ type: "warning", title: "Outside Campus Boundary", description: "Coordinates are outside the campus boundary." });
+                          }
+                          campusStore.updateNode(selectedNode.id, { lat, x, y });
+                        }}
+                        className="font-mono text-xs h-8"
+                      />
                     </div>
+                    <div>
+                      <label className="mb-0.5 block text-[10px] font-medium">Longitude (Lng)</label>
+                      <Input
+                        type="number"
+                        step="0.000000001"
+                        value={selectedNode.lng ?? 77.277485104}
+                        onChange={(e) => {
+                          const lng = Number(e.target.value);
+                          const lat = selectedNode.lat ?? 11.496327485;
+                          // Fix #10: Sync canvas position when GPS changes
+                          const { x, y } = campusStore.getCanvasCoordsFromGps(lat, lng, selectedNode.floorId);
+                          // Fix #14: Boundary check
+                          if (!isPointInCampusBoundary(lat, lng)) {
+                            toast({ type: "warning", title: "Outside Campus Boundary", description: "Coordinates are outside the campus boundary." });
+                          }
+                          campusStore.updateNode(selectedNode.id, { lng, x, y });
+                        }}
+                        className="font-mono text-xs h-8"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-1.5 pt-1">
                     <Button
                       size="sm"
                       variant="outline"
-                      onClick={() => setViewingPhotoNode({
-                        id: selectedNode.id,
-                        name: selectedNode.name || `Node ${selectedNode.id}`,
-                        photoUrl: selectedNode.photoUrl!,
-                        lat: selectedNode.lat,
-                        lng: selectedNode.lng,
-                        physicalVerified: selectedNode.physicalVerified,
-                      })}
-                      className="w-full text-xs h-7 gap-1"
+                      onClick={() => {
+                        const gps = (selectedNode.lat && selectedNode.lng)
+                          ? { lat: selectedNode.lat, lng: selectedNode.lng }
+                          : canvasToGps(selectedNode.x, selectedNode.y);
+                        const coord = `${gps.lat.toFixed(6)}, ${gps.lng.toFixed(6)}`;
+                        navigator.clipboard.writeText(coord);
+                        toast({ type: "info", title: "GPS Coordinates Copied", description: coord });
+                      }}
+                      className="h-7 text-[10px]"
                     >
-                      <Eye className="h-3 w-3" /> View Photo Details
+                      Copy GPS
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={async () => {
+                        try {
+                          const text = await navigator.clipboard.readText();
+                          const parts = text.split(",").map((s) => parseFloat(s.trim()));
+                          if (parts.length === 2 && !isNaN(parts[0]) && !isNaN(parts[1])) {
+                            const { x, y } = campusStore.getCanvasCoordsFromGps(parts[0], parts[1], selectedNode.floorId);
+                            campusStore.updateNode(selectedNode.id, { lat: parts[0], lng: parts[1], x, y });
+                            toast({ type: "success", title: "GPS Coordinates Pasted", description: `${parts[0]}, ${parts[1]}` });
+                          }
+                        } catch {
+                          toast({ type: "error", title: "Paste Failed", description: "Clipboard does not contain valid 'lat, lng'." });
+                        }
+                      }}
+                      className="h-7 text-[10px]"
+                    >
+                      Paste GPS
                     </Button>
                   </div>
-                ) : (
-                  <p className="text-[11px] text-[rgb(var(--muted-fg))]">No physical reference photo attached for this node.</p>
-                )}
-              </div>
 
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => {
-                  campusStore.deleteNode(selectedNode.id);
-                  setSelectedElement(null);
-                }}
-                className="w-full text-red-500 hover:bg-red-500/10"
-              >
-                <Trash2 className="mr-1.5 h-3.5 w-3.5" /> Delete Node
-              </Button>
-            </div>
-          )}
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    onClick={() => zoomToPos(selectedNode.x, selectedNode.y, selectedNode.floorId)}
+                    className="w-full h-7 text-[10px]"
+                  >
+                    <Navigation className="mr-1 h-3 w-3" /> Center Map on Node
+                  </Button>
+                </div>
 
-          {/* Obstacle Inspector */}
-          {selectedObstacle && (
-            <div className="space-y-3 text-xs">
-              <div className="flex items-center justify-between">
-                <Badge variant="danger">Obstacle Hazard</Badge>
-                <Badge variant="default" className="text-[10px]">
-                  {selectedObstacle.edgeIds && selectedObstacle.edgeIds.length > 0 ? "🎯 Route-Only" : "⭕ Area Radius"}
-                </Badge>
-              </div>
-
-              <div>
-                <label className="mb-1 block font-medium">Reason / Label</label>
-                <Input
-                  value={selectedObstacle.reason ?? ""}
-                  onChange={(e) => campusStore.updateObstacle(selectedObstacle.id, { reason: e.target.value })}
-                />
-              </div>
-
-              <div>
-                <label className="mb-1 block font-semibold text-[rgb(var(--fg))]">Assigned Floor Level</label>
-                <select
-                  value={selectedObstacle.floorId ?? "f-out"}
-                  onChange={(e) => campusStore.updateObstacle(selectedObstacle.id, { floorId: e.target.value })}
-                  className="w-full rounded-md border bg-[rgb(var(--bg))] p-2 text-xs font-semibold text-[rgb(var(--fg))] cursor-pointer focus:outline-none"
-                >
-                  <option value="f-out">🌿 Outdoor / Campus Wide</option>
-                  {storeData.buildings.map((bld) => {
-                    const bFloors = storeData.floors
-                      .filter((f) => f.buildingId === bld.id)
-                      .sort((a, b) => a.ordinal - b.ordinal);
-                    if (bFloors.length === 0) return null;
-                    return (
-                      <optgroup key={bld.id} label={`🏢 ${bld.name}`}>
-                        {bFloors.map((f) => (
-                          <option key={f.id} value={f.id}>
-                            {bld.name ? `${bld.name} - ` : ""}{f.name} (Level {f.ordinal})
-                          </option>
-                        ))}
-                      </optgroup>
-                    );
-                  })}
-                </select>
-              </div>
-
-              <div>
-                <label className="mb-1 block font-semibold text-[rgb(var(--fg))]">Obstacle Mode</label>
-                <select
-                  value={selectedObstacle.edgeIds && selectedObstacle.edgeIds.length > 0 ? "EDGE" : "AREA"}
-                  onChange={(e) => {
-                    if (e.target.value === "AREA") {
-                      campusStore.updateObstacle(selectedObstacle.id, { edgeIds: undefined });
-                    } else {
-                      const firstEdgeId = storeData.edges[0]?.id ?? `e-blocked-${selectedObstacle.id}`;
-                      campusStore.updateObstacle(selectedObstacle.id, { edgeIds: [firstEdgeId] });
-                    }
-                  }}
-                  className="w-full rounded-md border bg-[rgb(var(--bg))] p-2 text-xs font-semibold text-[rgb(var(--fg))] cursor-pointer focus:outline-none"
-                >
-                  <option value="EDGE">🎯 Route-Only (Block Specific Edge Only)</option>
-                  <option value="AREA">⭕ Area Spatial Hazard (Radius px)</option>
-                </select>
-              </div>
-
-              {selectedObstacle.edgeIds && selectedObstacle.edgeIds.length > 0 && (
-                <div>
-                  <label className="mb-1 block font-semibold text-[rgb(var(--fg))]">Blocked Route / Edge</label>
-                  {storeData.edges.length > 0 ? (
-                    <select
-                      value={selectedObstacle.edgeIds[0] ?? storeData.edges[0].id}
-                      onChange={(e) => campusStore.updateObstacle(selectedObstacle.id, { edgeIds: [e.target.value] })}
-                      className="w-full rounded-md border bg-[rgb(var(--bg))] p-2 text-xs font-medium text-[rgb(var(--fg))]"
-                    >
-                      {storeData.edges.map((edge) => {
-                        const fn = storeData.nodes.find((n) => n.id === (edge.fromNodeId ?? edge.from));
-                        const tn = storeData.nodes.find((n) => n.id === (edge.toNodeId ?? edge.to));
-                        return (
-                          <option key={edge.id} value={edge.id}>
-                            {fn?.name || edge.from} ↔ {tn?.name || edge.to} ({edge.id})
-                          </option>
-                        );
-                      })}
-                    </select>
-                  ) : (
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="mb-1 block font-medium">Canvas X</label>
                     <Input
-                      value={selectedObstacle.edgeIds[0] ?? "e1"}
-                      onChange={(e) => campusStore.updateObstacle(selectedObstacle.id, { edgeIds: [e.target.value] })}
-                      placeholder="e.g. e1, e-road-1"
-                      className="h-8 text-xs bg-[rgb(var(--bg))]"
+                      type="number"
+                      value={selectedNode.x}
+                      onChange={(e) => campusStore.updateNode(selectedNode.id, { x: Number(e.target.value) })}
                     />
+                  </div>
+                  <div>
+                    <label className="mb-1 block font-medium">Canvas Y</label>
+                    <Input
+                      type="number"
+                      value={selectedNode.y}
+                      onChange={(e) => campusStore.updateNode(selectedNode.id, { y: Number(e.target.value) })}
+                    />
+                  </div>
+                </div>
+
+                {/* Node Reference Photo Inspector Card */}
+                <div className="rounded-lg border border-[rgb(var(--border))] bg-[rgb(var(--card))] p-2.5 space-y-2 text-xs">
+                  <div className="flex items-center justify-between">
+                    <span className="font-bold text-[rgb(var(--fg))] flex items-center gap-1.5">
+                      <Camera className="h-3.5 w-3.5 text-[rgb(var(--primary))]" /> Reference Photo
+                    </span>
+                    {selectedNode.photoUrl ? (
+                      <Badge className="bg-emerald-600 text-white text-[10px] px-1.5 py-0.5">📷 Attached</Badge>
+                    ) : (
+                      <span className="text-[10px] text-[rgb(var(--muted-fg))]">○ None</span>
+                    )}
+                  </div>
+                  {selectedNode.photoUrl ? (
+                    <div className="space-y-1.5">
+                      <div className="relative w-full overflow-hidden rounded-md border border-[rgb(var(--border))] bg-transparent flex items-center justify-center">
+                        <img src={selectedNode.photoUrl} alt="Reference" className="w-full h-auto max-h-36 object-contain rounded-md" />
+                      </div>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => setViewingPhotoNode({
+                          id: selectedNode.id,
+                          name: selectedNode.name || `Node ${selectedNode.id}`,
+                          photoUrl: selectedNode.photoUrl!,
+                          lat: selectedNode.lat,
+                          lng: selectedNode.lng,
+                          physicalVerified: selectedNode.physicalVerified,
+                        })}
+                        className="w-full text-xs h-7 gap-1"
+                      >
+                        <Eye className="h-3 w-3" /> View Photo Details
+                      </Button>
+                    </div>
+                  ) : (
+                    <p className="text-[11px] text-[rgb(var(--muted-fg))]">No physical reference photo attached for this node.</p>
                   )}
                 </div>
-              )}
 
-              {(!selectedObstacle.edgeIds || selectedObstacle.edgeIds.length === 0) && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    campusStore.deleteNode(selectedNode.id);
+                    setSelectedElement(null);
+                  }}
+                  className="w-full text-red-500 hover:bg-red-500/10"
+                >
+                  <Trash2 className="mr-1.5 h-3.5 w-3.5" /> Delete Node
+                </Button>
+              </div>
+            )}
+
+            {/* Obstacle Inspector */}
+            {selectedObstacle && (
+              <div className="space-y-3 text-xs">
+                <div className="flex items-center justify-between">
+                  <Badge variant="danger">Obstacle Hazard</Badge>
+                  <Badge variant="default" className="text-[10px]">
+                    {selectedObstacle.edgeIds && selectedObstacle.edgeIds.length > 0 ? "🎯 Route-Only" : "⭕ Area Radius"}
+                  </Badge>
+                </div>
+
                 <div>
-                  <div className="flex items-center justify-between mb-1">
-                    <label className="font-medium">Hazard Radius ({selectedObstacle.radius} px)</label>
-                    <span className="text-[10px] text-[rgb(var(--muted-fg))]">{selectedObstacle.radius}px</span>
-                  </div>
-                  <input
-                    type="range"
-                    min={5}
-                    max={100}
-                    step={5}
-                    value={selectedObstacle.radius}
-                    onChange={(e) => campusStore.updateObstacle(selectedObstacle.id, { radius: Number(e.target.value) })}
-                    className="w-full h-1.5 bg-slate-200 rounded-lg appearance-none cursor-pointer dark:bg-slate-700"
+                  <label className="mb-1 block font-medium">Reason / Label</label>
+                  <Input
+                    value={selectedObstacle.reason ?? ""}
+                    onChange={(e) => campusStore.updateObstacle(selectedObstacle.id, { reason: e.target.value })}
                   />
                 </div>
-              )}
 
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => {
-                  campusStore.deleteObstacle(selectedObstacle.id);
-                  setSelectedElement(null);
-                }}
-                className="w-full text-red-500 hover:bg-red-500/10"
-              >
-                <Trash2 className="mr-1.5 h-3.5 w-3.5" /> Delete Obstacle
-              </Button>
-            </div>
-          )}
-
-          {/* Destination Inspector */}
-          {selectedDest && (
-            <div className="space-y-3 text-xs">
-              <Badge variant="primary">{selectedDest.category}</Badge>
-              <div>
-                <label className="mb-1 block font-semibold text-[rgb(var(--fg))]">Room Name</label>
-                <Input
-                  value={selectedDest.name}
-                  onChange={(e) => campusStore.updateDestination(selectedDest.id, { name: e.target.value }, false)}
-                />
-              </div>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => {
-                  campusStore.deleteDestination(selectedDest.id);
-                  setSelectedElement(null);
-                }}
-                className="w-full text-red-500 hover:bg-red-500/10"
-              >
-                <Trash2 className="mr-1.5 h-3.5 w-3.5" /> Delete Room
-              </Button>
-            </div>
-          )}
-
-          {/* Edge Inspector */}
-          {selectedEdge && (
-            <div className="space-y-3 text-xs">
-              <div className="flex items-center gap-1.5 flex-wrap">
-                <Badge variant="primary">{selectedEdge.type} Edge</Badge>
-                <Badge variant={getEdgePathType(selectedEdge) === "EV" ? "success" : "default"}>
-                  {getEdgePathType(selectedEdge) === "EV" ? "⚡ EV Path" : "🚶 Only Walk"}
-                </Badge>
-              </div>
-
-              <div>
-                <label className="mb-1 block font-medium">Edge Type</label>
-                <select
-                  value={selectedEdge.type}
-                  onChange={(e) => campusStore.updateEdge(selectedEdge.id, { type: e.target.value as any })}
-                  className="w-full rounded-md border bg-[rgb(var(--bg))] p-2 text-xs text-[rgb(var(--fg))]"
-                >
-                  <option value="WALK">WALK (Path / Corridor)</option>
-                  <option value="ROAD">ROAD (Outdoor Street / Road)</option>
-                  <option value="STAIRS">STAIRS (Vertical Flow)</option>
-                  <option value="LIFT">LIFT (Elevator)</option>
-                  <option value="RAMP">RAMP (Accessible Slope)</option>
-                </select>
-              </div>
-
-              <div>
-                <label className="mb-1 block font-medium">Path Type (Vehicle / Walking Access)</label>
-                <select
-                  value={getEdgePathType(selectedEdge)}
-                  onChange={(e) => campusStore.updateEdge(selectedEdge.id, { pathType: e.target.value as PathType })}
-                  className="w-full rounded-md border bg-[rgb(var(--bg))] p-2 text-xs text-[rgb(var(--fg))]"
-                >
-                  <option value="EV">⚡ EV Path (Electric vehicle + walking)</option>
-                  <option value="WALK">🚶 Only Walk Path (Walking only — EV prohibited)</option>
-                </select>
-              </div>
-
-              <div>
-                <label className="mb-1 block font-medium">Distance (Meters)</label>
-                <Input
-                  type="number"
-                  value={selectedEdge.distance}
-                  onChange={(e) => campusStore.updateEdge(selectedEdge.id, { distance: Number(e.target.value) })}
-                />
-              </div>
-
-              <div className="rounded-md border bg-[rgb(var(--bg))] p-2.5 space-y-1 text-[11px] text-[rgb(var(--muted-fg))]">
                 <div>
-                  From: <span className="font-semibold text-[rgb(var(--fg))]">{storeData.nodes.find((n) => n.id === selectedEdge.from)?.name || selectedEdge.from}</span>
+                  <label className="mb-1 block font-semibold text-[rgb(var(--fg))]">Assigned Floor Level</label>
+                  <select
+                    value={selectedObstacle.floorId ?? "f-out"}
+                    onChange={(e) => campusStore.updateObstacle(selectedObstacle.id, { floorId: e.target.value })}
+                    className="w-full rounded-md border bg-[rgb(var(--bg))] p-2 text-xs font-semibold text-[rgb(var(--fg))] cursor-pointer focus:outline-none"
+                  >
+                    <option value="f-out">🌿 Outdoor / Campus Wide</option>
+                    {storeData.buildings.map((bld) => {
+                      const bFloors = storeData.floors
+                        .filter((f) => f.buildingId === bld.id)
+                        .sort((a, b) => a.ordinal - b.ordinal);
+                      if (bFloors.length === 0) return null;
+                      return (
+                        <optgroup key={bld.id} label={`🏢 ${bld.name}`}>
+                          {bFloors.map((f) => (
+                            <option key={f.id} value={f.id}>
+                              {bld.name ? `${bld.name} - ` : ""}{f.name} (Level {f.ordinal})
+                            </option>
+                          ))}
+                        </optgroup>
+                      );
+                    })}
+                  </select>
                 </div>
-                <div>
-                  To: <span className="font-semibold text-[rgb(var(--fg))]">{storeData.nodes.find((n) => n.id === selectedEdge.to)?.name || selectedEdge.to}</span>
-                </div>
-              </div>
 
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={(e) => {
-                  // Fix #6: Stop propagation and immediately clear selection
-                  e.stopPropagation();
-                  const edgeId = selectedEdge.id;
-                  setSelectedElement(null);
-                  campusStore.deleteEdge(edgeId);
-                  toast({ type: "info", title: "Edge Deleted", description: "Connection removed from graph." });
-                }}
-                className="w-full text-red-500 hover:bg-red-500/10"
-              >
-                <Trash2 className="mr-1.5 h-3.5 w-3.5" /> Delete Edge
-              </Button>
-            </div>
-          )}
+                <div>
+                  <label className="mb-1 block font-semibold text-[rgb(var(--fg))]">Obstacle Mode</label>
+                  <select
+                    value={selectedObstacle.edgeIds && selectedObstacle.edgeIds.length > 0 ? "EDGE" : "AREA"}
+                    onChange={(e) => {
+                      if (e.target.value === "AREA") {
+                        campusStore.updateObstacle(selectedObstacle.id, { edgeIds: undefined });
+                      } else {
+                        const firstEdgeId = storeData.edges[0]?.id ?? `e-blocked-${selectedObstacle.id}`;
+                        campusStore.updateObstacle(selectedObstacle.id, { edgeIds: [firstEdgeId] });
+                      }
+                    }}
+                    className="w-full rounded-md border bg-[rgb(var(--bg))] p-2 text-xs font-semibold text-[rgb(var(--fg))] cursor-pointer focus:outline-none"
+                  >
+                    <option value="EDGE">🎯 Route-Only (Block Specific Edge Only)</option>
+                    <option value="AREA">⭕ Area Spatial Hazard (Radius px)</option>
+                  </select>
+                </div>
+
+                {selectedObstacle.edgeIds && selectedObstacle.edgeIds.length > 0 && (
+                  <div>
+                    <label className="mb-1 block font-semibold text-[rgb(var(--fg))]">Blocked Route / Edge</label>
+                    {storeData.edges.length > 0 ? (
+                      <select
+                        value={selectedObstacle.edgeIds[0] ?? storeData.edges[0].id}
+                        onChange={(e) => campusStore.updateObstacle(selectedObstacle.id, { edgeIds: [e.target.value] })}
+                        className="w-full rounded-md border bg-[rgb(var(--bg))] p-2 text-xs font-medium text-[rgb(var(--fg))]"
+                      >
+                        {storeData.edges.map((edge) => {
+                          const fn = storeData.nodes.find((n) => n.id === (edge.fromNodeId ?? edge.from));
+                          const tn = storeData.nodes.find((n) => n.id === (edge.toNodeId ?? edge.to));
+                          return (
+                            <option key={edge.id} value={edge.id}>
+                              {fn?.name || edge.from} ↔ {tn?.name || edge.to} ({edge.id})
+                            </option>
+                          );
+                        })}
+                      </select>
+                    ) : (
+                      <Input
+                        value={selectedObstacle.edgeIds[0] ?? "e1"}
+                        onChange={(e) => campusStore.updateObstacle(selectedObstacle.id, { edgeIds: [e.target.value] })}
+                        placeholder="e.g. e1, e-road-1"
+                        className="h-8 text-xs bg-[rgb(var(--bg))]"
+                      />
+                    )}
+                  </div>
+                )}
+
+                {(!selectedObstacle.edgeIds || selectedObstacle.edgeIds.length === 0) && (
+                  <div>
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="font-medium">Hazard Radius ({selectedObstacle.radius} px)</label>
+                      <span className="text-[10px] text-[rgb(var(--muted-fg))]">{selectedObstacle.radius}px</span>
+                    </div>
+                    <input
+                      type="range"
+                      min={5}
+                      max={100}
+                      step={5}
+                      value={selectedObstacle.radius}
+                      onChange={(e) => campusStore.updateObstacle(selectedObstacle.id, { radius: Number(e.target.value) })}
+                      className="w-full h-1.5 bg-slate-200 rounded-lg appearance-none cursor-pointer dark:bg-slate-700"
+                    />
+                  </div>
+                )}
+
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    campusStore.deleteObstacle(selectedObstacle.id);
+                    setSelectedElement(null);
+                  }}
+                  className="w-full text-red-500 hover:bg-red-500/10"
+                >
+                  <Trash2 className="mr-1.5 h-3.5 w-3.5" /> Delete Obstacle
+                </Button>
+              </div>
+            )}
+
+            {/* Destination Inspector */}
+            {selectedDest && (
+              <div className="space-y-3 text-xs">
+                <Badge variant="primary">{selectedDest.category}</Badge>
+                <div>
+                  <label className="mb-1 block font-semibold text-[rgb(var(--fg))]">Room Name</label>
+                  <Input
+                    value={selectedDest.name}
+                    onChange={(e) => campusStore.updateDestination(selectedDest.id, { name: e.target.value }, false)}
+                  />
+                </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    campusStore.deleteDestination(selectedDest.id);
+                    setSelectedElement(null);
+                  }}
+                  className="w-full text-red-500 hover:bg-red-500/10"
+                >
+                  <Trash2 className="mr-1.5 h-3.5 w-3.5" /> Delete Room
+                </Button>
+              </div>
+            )}
+
+            {/* Edge Inspector */}
+            {selectedEdge && (
+              <div className="space-y-3 text-xs">
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <Badge variant="primary">{selectedEdge.type} Edge</Badge>
+                  <Badge variant={getEdgePathType(selectedEdge) === "EV" ? "success" : "default"}>
+                    {getEdgePathType(selectedEdge) === "EV" ? "⚡ EV Path" : "🚶 Only Walk"}
+                  </Badge>
+                </div>
+
+                <div>
+                  <label className="mb-1 block font-medium">Edge Type</label>
+                  <select
+                    value={selectedEdge.type}
+                    onChange={(e) => campusStore.updateEdge(selectedEdge.id, { type: e.target.value as any })}
+                    className="w-full rounded-md border bg-[rgb(var(--bg))] p-2 text-xs text-[rgb(var(--fg))]"
+                  >
+                    <option value="WALK">WALK (Path / Corridor)</option>
+                    <option value="ROAD">ROAD (Outdoor Street / Road)</option>
+                    <option value="STAIRS">STAIRS (Vertical Flow)</option>
+                    <option value="LIFT">LIFT (Elevator)</option>
+                    <option value="RAMP">RAMP (Accessible Slope)</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="mb-1 block font-medium">Path Type (Vehicle / Walking Access)</label>
+                  <select
+                    value={getEdgePathType(selectedEdge)}
+                    onChange={(e) => campusStore.updateEdge(selectedEdge.id, { pathType: e.target.value as PathType })}
+                    className="w-full rounded-md border bg-[rgb(var(--bg))] p-2 text-xs text-[rgb(var(--fg))]"
+                  >
+                    <option value="EV">⚡ EV Path (Electric vehicle + walking)</option>
+                    <option value="WALK">🚶 Only Walk Path (Walking only — EV prohibited)</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="mb-1 block font-medium">Distance (Meters)</label>
+                  <Input
+                    type="number"
+                    value={selectedEdge.distance}
+                    onChange={(e) => campusStore.updateEdge(selectedEdge.id, { distance: Number(e.target.value) })}
+                  />
+                </div>
+
+                <div className="rounded-md border bg-[rgb(var(--bg))] p-2.5 space-y-1 text-[11px] text-[rgb(var(--muted-fg))]">
+                  <div>
+                    From: <span className="font-semibold text-[rgb(var(--fg))]">{storeData.nodes.find((n) => n.id === selectedEdge.from)?.name || selectedEdge.from}</span>
+                  </div>
+                  <div>
+                    To: <span className="font-semibold text-[rgb(var(--fg))]">{storeData.nodes.find((n) => n.id === selectedEdge.to)?.name || selectedEdge.to}</span>
+                  </div>
+                </div>
+
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={(e) => {
+                    // Fix #6: Stop propagation and immediately clear selection
+                    e.stopPropagation();
+                    const edgeId = selectedEdge.id;
+                    setSelectedElement(null);
+                    campusStore.deleteEdge(edgeId);
+                    toast({ type: "info", title: "Edge Deleted", description: "Connection removed from graph." });
+                  }}
+                  className="w-full text-red-500 hover:bg-red-500/10"
+                >
+                  <Trash2 className="mr-1.5 h-3.5 w-3.5" /> Delete Edge
+                </Button>
+              </div>
+            )}
 
           </div>
         )}
@@ -5205,8 +5198,8 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
                   validationReport.status === "EXCELLENT"
                     ? "bg-emerald-600 text-white"
                     : validationReport.status === "WARNINGS"
-                    ? "bg-amber-600 text-white"
-                    : "bg-red-600 text-white"
+                      ? "bg-amber-600 text-white"
+                      : "bg-red-600 text-white"
                 }
               >
                 {validationReport.status}
@@ -5294,7 +5287,7 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
                     ⚠️ Please select a building and at least 1 connected floor to create a group.
                   </div>
                 )}
-                
+
                 <div>
                   <label className="mb-1 block font-semibold text-[rgb(var(--fg))]">Group Type *</label>
                   <select
@@ -5876,11 +5869,10 @@ function ToolButton({
   return (
     <button
       onClick={onClick}
-      className={`flex items-center gap-1.5 rounded-lg px-2.5 h-8 text-xs font-semibold whitespace-nowrap shrink-0 transition-all select-none ${
-        active
+      className={`flex items-center gap-1.5 rounded-lg px-2.5 h-8 text-xs font-semibold whitespace-nowrap shrink-0 transition-all select-none ${active
           ? "bg-[rgb(var(--primary))] text-white shadow-sm ring-1 ring-[rgb(var(--primary))]"
           : "text-[rgb(var(--muted-fg))] hover:bg-[rgb(var(--muted))] hover:text-[rgb(var(--fg))]"
-      }`}
+        }`}
     >
       <Icon className="h-3.5 w-3.5 shrink-0" />
       <span className="whitespace-nowrap leading-none">{label}</span>

@@ -144,7 +144,7 @@ export function NavigateShell() {
       return containment.building;
     }
     const canvasPos = gps.canvasPos || gpsToCanvas(gps.lat, gps.lng);
-    return blds.find((b) => isPointInsideBuilding(canvasPos.x, canvasPos.y, b)) || null;
+    return blds.find((b) => isPointInsideBuilding(canvasPos.x, canvasPos.y, b, 0)) || null;
   }, [gps.isGpsActive, gps.lat, gps.lng, gps.accuracy, gps.canvasPos, publishedData.buildings]);
 
   // Check if detected building has multiple floors
