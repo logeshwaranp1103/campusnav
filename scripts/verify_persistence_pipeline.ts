@@ -67,8 +67,7 @@ async function runVerification() {
 
   // 4. API Route Verification (GET /api/published-graph)
   console.log("\n4. Calling GET /api/published-graph endpoint...");
-  const req = new Request("http://localhost:3000/api/published-graph");
-  const res = await getPublishedGraphRoute(req);
+  const res = await getPublishedGraphRoute();
   const json = await res.json();
 
   console.log("   - API response status:", res.status);

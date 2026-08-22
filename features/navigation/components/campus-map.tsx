@@ -638,9 +638,17 @@ function MapCanvas({
   const animFrameRef = useRef<number | null>(null);
   const lastTapTimeRef = useRef<number>(0);
 
-  const currentZoom = externalZoom * internalZoom;
-  const currentZoomRef = useRef(currentZoom);
-  currentZoomRef.current = currentZoom;
+  const externalZoomRef = useRef(externalZoom);
+  externalZoomRef.current = externalZoom;
+
+  const targetZoom = Math.min(5, Math.max(0.35, externalZoom * internalZoom));
+  const targetZoomRef = useRef(targetZoom);
+  targetZoomRef.current = targetZoom;
+
+  // ── Smooth Visual Zoom State (Interpolated Glide via RAF loop) ──
+  const [visualZoom, setVisualZoom] = useState(targetZoom);
+  const visualZoomRef = useRef(visualZoom);
+  visualZoomRef.current = visualZoom;
 
   // ── Smooth Visual GPS Marker State (Interpolated Glide) ──
   const [visualGps, setVisualGps] = useState<{ x: number; y: number; heading: number }>({
@@ -719,6 +727,20 @@ function MapCanvas({
       const now = timestamp || performance.now();
       const dt = Math.min(0.064, Math.max(0.001, (now - (lastTimeRef.current || now)) / 1000));
       lastTimeRef.current = now;
+
+      // 0. Smooth Visual Zoom Glide (Delta-Time Exponential Smoothing, settling in ~150-200ms)
+      const targetZ = targetZoomRef.current;
+      const curZ = visualZoomRef.current;
+      const dZ = targetZ - curZ;
+      if (Math.abs(dZ) > 0.0004) {
+        const zoomAlpha = 1 - Math.exp(-12.0 * dt);
+        const nextZ = curZ + dZ * zoomAlpha;
+        visualZoomRef.current = nextZ;
+        setVisualZoom(nextZ);
+      } else if (curZ !== targetZ) {
+        visualZoomRef.current = targetZ;
+        setVisualZoom(targetZ);
+      }
 
       // 1. Visual GPS Marker Smooth Gliding
       if (targetGpsPos) {
@@ -970,9 +992,9 @@ function MapCanvas({
   const destination = route?.nodes[route.nodes.length - 1];
   const showLiveHere = livePosition && isNodeOnActiveFloor(livePosition);
 
-  // Viewbox coordinates with current pan and zoom
-  const effectiveW = bounds.w / currentZoom;
-  const effectiveH = bounds.h / currentZoom;
+  // Viewbox coordinates with smoothly interpolated visual zoom at 60/120 FPS
+  const effectiveW = bounds.w / visualZoom;
+  const effectiveH = bounds.h / visualZoom;
   const effectiveX = bounds.x + (bounds.w - effectiveW) / 2 - pan.x;
   const effectiveY = bounds.y + (bounds.h - effectiveH) / 2 - pan.y;
   const viewBoxStr = `${effectiveX} ${effectiveY} ${effectiveW} ${effectiveH}`;
@@ -997,8 +1019,10 @@ function MapCanvas({
   const handleMouseMove = (e: React.MouseEvent<SVGSVGElement>) => {
     if (!isDragging || !svgRef.current) return;
     const rect = svgRef.current.getBoundingClientRect();
-    const scaleX = effectiveW / (rect.width || 1);
-    const scaleY = effectiveH / (rect.height || 1);
+    const curEffW = boundsRef.current.w / (visualZoomRef.current || 1);
+    const curEffH = boundsRef.current.h / (visualZoomRef.current || 1);
+    const scaleX = curEffW / (rect.width || 1);
+    const scaleY = curEffH / (rect.height || 1);
     const now = Date.now();
     const dt = Math.max(1, now - (lastTouchTimeRef.current || now));
 
@@ -1027,30 +1051,37 @@ function MapCanvas({
     setIsDragging(false);
   };
 
-  // ── Cursor-Anchored Wheel Zoom with Rotation Compensation ──
+  // ── Cursor-Anchored Wheel Zoom with Continuous Smooth Interpolation ──
   useEffect(() => {
     const svg = svgRef.current;
     if (!svg) return;
     const handleWheel = (e: WheelEvent) => {
       e.preventDefault();
       onUserPan?.();
-      const zoomFactor = e.deltaY < 0 ? 1.15 : 0.85;
+
+      const delta = e.deltaY;
+      const normalizedDelta = Math.min(120, Math.max(-120, delta));
+      const zoomMultiplier = Math.pow(0.9982, normalizedDelta);
+
       const curInternal = internalZoomRef.current;
-      const targetZoom = Math.min(5, Math.max(0.35, curInternal * zoomFactor));
-      if (targetZoom === curInternal) return;
+      const extZ = externalZoomRef.current || 1;
+      const curTargetTotal = extZ * curInternal;
+      const newTargetTotal = Math.min(5, Math.max(0.35, curTargetTotal * zoomMultiplier));
+      const newInternal = newTargetTotal / extZ;
+      if (Math.abs(newInternal - curInternal) < 0.0004) return;
 
       const rect = svg.getBoundingClientRect();
-      const mouseRatioX = (e.clientX - rect.left) / rect.width;
-      const mouseRatioY = (e.clientY - rect.top) / rect.height;
+      const mouseRatioX = (e.clientX - rect.left) / (rect.width || 1);
+      const mouseRatioY = (e.clientY - rect.top) / (rect.height || 1);
 
       const bW = boundsRef.current.w;
       const bH = boundsRef.current.h;
-      const extZ = externalZoom || 1;
 
-      const oldEffW = bW / (extZ * curInternal);
-      const oldEffH = bH / (extZ * curInternal);
-      const newEffW = bW / (extZ * targetZoom);
-      const newEffH = bH / (extZ * targetZoom);
+      // Focal anchor calculation: Keeps the cursor's world coordinate anchored during animated glide
+      const oldEffW = bW / curTargetTotal;
+      const oldEffH = bH / curTargetTotal;
+      const newEffW = bW / newTargetTotal;
+      const newEffH = bH / newTargetTotal;
 
       const rawDPanX = (oldEffW - newEffW) * (0.5 - mouseRatioX);
       const rawDPanY = (oldEffH - newEffH) * (0.5 - mouseRatioY);
@@ -1060,13 +1091,15 @@ function MapCanvas({
       const dPanX = rawDPanX * Math.cos(rad) - rawDPanY * Math.sin(rad);
       const dPanY = rawDPanX * Math.sin(rad) + rawDPanY * Math.cos(rad);
 
-      setPan((prev) => ({ x: prev.x + dPanX, y: prev.y + dPanY }));
-      setInternalZoom(targetZoom);
+      const nextPan = { x: panRef.current.x + dPanX, y: panRef.current.y + dPanY };
+      panRef.current = nextPan;
+      setPan(nextPan);
+      setInternalZoom(newInternal);
     };
 
     svg.addEventListener("wheel", handleWheel, { passive: false });
     return () => svg.removeEventListener("wheel", handleWheel);
-  }, [externalZoom, onUserPan]);
+  }, [onUserPan]);
 
   // Touch gesture state ref for Mobile (2-Finger Simultaneous Pinch-Zoom + Bearing Rotation + Pan)
   const touchGestureRef = useRef<{
@@ -1115,17 +1148,20 @@ function MapCanvas({
         if (now - lastTapTimeRef.current < 300) {
           e.preventDefault();
           const rect = svg.getBoundingClientRect();
-          const mouseRatioX = (touch.clientX - rect.left) / rect.width;
-          const mouseRatioY = (touch.clientY - rect.top) / rect.height;
-          const curZ = internalZoomRef.current;
-          const targetZ = Math.min(5, curZ * 1.5);
+          const mouseRatioX = (touch.clientX - rect.left) / (rect.width || 1);
+          const mouseRatioY = (touch.clientY - rect.top) / (rect.height || 1);
+          const curInternal = internalZoomRef.current;
+          const extZ = externalZoomRef.current || 1;
+          const curTargetTotal = extZ * curInternal;
+          const newTargetTotal = Math.min(5, curTargetTotal * 1.5);
+          const newInternal = newTargetTotal / extZ;
+
           const bW = boundsRef.current.w;
           const bH = boundsRef.current.h;
-          const extZ = currentZoomRef.current / (curZ || 1);
-          const oldW = bW / (extZ * curZ);
-          const oldH = bH / (extZ * curZ);
-          const newW = bW / (extZ * targetZ);
-          const newH = bH / (extZ * targetZ);
+          const oldW = bW / curTargetTotal;
+          const oldH = bH / curTargetTotal;
+          const newW = bW / newTargetTotal;
+          const newH = bH / newTargetTotal;
 
           const rawDPanX = (oldW - newW) * (0.5 - mouseRatioX);
           const rawDPanY = (oldH - newH) * (0.5 - mouseRatioY);
@@ -1133,8 +1169,10 @@ function MapCanvas({
           const dPanX = rawDPanX * Math.cos(rad) - rawDPanY * Math.sin(rad);
           const dPanY = rawDPanX * Math.sin(rad) + rawDPanY * Math.cos(rad);
 
-          setPan((prev) => ({ x: prev.x + dPanX, y: prev.y + dPanY }));
-          setInternalZoom(targetZ);
+          const nextPan = { x: panRef.current.x + dPanX, y: panRef.current.y + dPanY };
+          panRef.current = nextPan;
+          setPan(nextPan);
+          setInternalZoom(newInternal);
           lastTapTimeRef.current = 0;
           touchGestureRef.current.mode = "NONE";
           return;
@@ -1181,11 +1219,10 @@ function MapCanvas({
       const rect = svgRef.current.getBoundingClientRect();
       const bW = boundsRef.current.w;
       const bH = boundsRef.current.h;
-      const cZoom = currentZoomRef.current;
-      const effW = bW / (cZoom || 1);
-      const effH = bH / (cZoom || 1);
-      const scaleX = effW / (rect.width || 1);
-      const scaleY = effH / (rect.height || 1);
+      const curEffW = bW / (visualZoomRef.current || 1);
+      const curEffH = bH / (visualZoomRef.current || 1);
+      const scaleX = curEffW / (rect.width || 1);
+      const scaleY = curEffH / (rect.height || 1);
       const now = Date.now();
       const dt = Math.max(1, now - (lastTouchTimeRef.current || now));
 
@@ -1212,8 +1249,10 @@ function MapCanvas({
 
         // 1. Pinch Zoom Scaling
         const ratio = currentDist / gState.initialDist;
-        const targetZoom = Math.min(5, Math.max(0.35, gState.initialZoom * ratio));
-        setInternalZoom(targetZoom);
+        const extZ = externalZoomRef.current || 1;
+        const targetTotal = Math.min(5, Math.max(0.35, gState.initialZoom * ratio));
+        const newInternal = targetTotal / extZ;
+        setInternalZoom(newInternal);
 
         // 2. Continuous Two-Finger Rotation
         const deltaAngle = currentAngle - gState.initialAngle;
