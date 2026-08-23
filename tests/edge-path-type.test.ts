@@ -226,4 +226,48 @@ describe("CampusStore PathType Synchronization & Persistence", () => {
       expect(e.pathType).toBe("EV");
     });
   });
+
+  it("only sets transferNodeId when EV Mode is active and never for Walk Mode", () => {
+    const testNodes: Node[] = [
+      { id: "A", name: "Gate", floorId: "f-out", type: "GATE", x: 100, y: 100 },
+      { id: "B", name: "Junction", floorId: "f-out", type: "JUNCTION", x: 200, y: 100 },
+      { id: "C", name: "Classroom", floorId: "f-out", type: "ROOM", x: 300, y: 100 },
+    ];
+    const testEdges: Edge[] = [
+      { id: "e-AB", from: "A", to: "B", type: "ROAD", pathType: "EV", distance: 50, bidirectional: true },
+      { id: "e-BC", from: "B", to: "C", type: "WALK", pathType: "WALK", distance: 50, bidirectional: true },
+    ];
+
+    // Under WALK mode, a route along EV + pedestrian paths should have travelMode WALK and no transfer badge
+    const walkRoute = shortestPath("A", "C", {
+      travelMode: "WALK",
+      graphData: {
+        nodes: testNodes,
+        edges: testEdges,
+        floors: [],
+        buildings: [],
+        destinations: [],
+        obstacles: [],
+      },
+    });
+    expect(walkRoute).not.toBeNull();
+    expect(walkRoute?.travelMode).toBe("WALK");
+    expect(walkRoute?.transferNodeId).toBeUndefined();
+
+    // Under EV mode, the multimodal route has transferNodeId at B
+    const evRoute = shortestPath("A", "C", {
+      travelMode: "EV",
+      graphData: {
+        nodes: testNodes,
+        edges: testEdges,
+        floors: [],
+        buildings: [],
+        destinations: [],
+        obstacles: [],
+      },
+    });
+    expect(evRoute).not.toBeNull();
+    expect(evRoute?.travelMode).toBe("MULTIMODAL");
+    expect(evRoute?.transferNodeId).toBe("B");
+  });
 });

@@ -43,6 +43,7 @@ import {
   Share2,
   Camera,
   CheckCircle2,
+  Hash,
 } from "lucide-react";
 
 import { Button } from "@/shared/components/ui/button";
@@ -55,9 +56,11 @@ import { Badge } from "@/shared/components/ui/badge";
 import { useToast } from "@/shared/components/ui/toast";
 import { cn } from "@/shared/lib/utils";
 import { campusStore, type PendingChange } from "@/shared/lib/campus-store";
+import { generateShortId } from "@/shared/lib/id-generator";
 import { PublishModal } from "@/shared/components/publish-modal";
 import { isEventActive, getEventStatus } from "@/shared/lib/event-utils";
 import { useVisitorGps } from "@/shared/hooks/use-visitor-gps";
+import { useCadFakeLocation, CadFakeLocationButton, CadFakeLocationSvgLayer } from "./cad-fake-location";
 import { GpsStatusIndicator } from "@/features/location/components/gps-status-indicator";
 import { GpsDiagnosticsPanel } from "@/features/location/components/gps-diagnostics-panel";
 import {
@@ -168,7 +171,20 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
   const [pendingChanges, setPendingChanges] = useState<PendingChange[]>(campusStore.getPendingChanges());
   const [showMobilePanels, setShowMobilePanels] = useState(false);
   const [showDiagnostics, setShowDiagnostics] = useState(false);
+  const [activeTool, setActiveTool] = useState<ToolMode>(initialTool);
+  const [activeFloorId, setActiveFloorId] = useState<string>("f-out");
   const gps = useVisitorGps();
+
+  // Standalone Fake Live Location Tool Hook for CAD route testing
+  const fakeGps = useCadFakeLocation({
+    nodes: storeData.nodes,
+    edges: storeData.edges,
+    obstacles: storeData.obstacles,
+    destinations: storeData.destinations,
+    buildings: storeData.buildings,
+    floors: storeData.floors,
+    activeFloorId,
+  });
 
   // Subscribe to live campusStore changes and sync with database on mount
   useEffect(() => {
@@ -184,8 +200,6 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
     });
     return unsubscribe;
   }, []);
-  const [activeTool, setActiveTool] = useState<ToolMode>(initialTool);
-  const [activeFloorId, setActiveFloorId] = useState<string>("f-out");
 
 
 
@@ -328,6 +342,7 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
   // Refs to prevent accidental element placement during map pan/drag
   const hasDraggedRef = useRef(false);
   const mouseDownScreenPosRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
+  const mouseDownCanvasPosRef = useRef<{ x: number; y: number } | null>(null);
   const dragRafRef = useRef<number | null>(null);
   const dragTargetPosRef = useRef<{ x: number; y: number } | null>(null);
 
@@ -389,11 +404,11 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
     } else if (!activeFloorId.startsWith("f-all")) {
       const curFloor = storeData.floors.find((f) => f.id === activeFloorId);
       if (curFloor) {
-        setNodeTargetBuildingId(curFloor.buildingId);
-        setNodeTargetFloorId(curFloor.id);
+        setNodeTargetBuildingId((prev) => (prev !== curFloor.buildingId ? curFloor.buildingId : prev));
+        setNodeTargetFloorId((prev) => (prev !== curFloor.id ? curFloor.id : prev));
       }
     }
-  }, [activeFloorId, storeData.floors]);
+  }, [activeFloorId]);
 
 
 
@@ -405,11 +420,9 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
 
   const { toast } = useToast();
   const canvasRef = useRef<SVGSVGElement | null>(null);
-  // Refs to keep current zoom/pan values accessible in wheel event handler (avoids stale closure)
+  // Refs to keep current zoom/pan values synchronously accessible (single source of truth for high-frequency gestures)
   const zoomRef = useRef(zoom);
   const panOffsetRef = useRef(panOffset);
-  useEffect(() => { zoomRef.current = zoom; }, [zoom]);
-  useEffect(() => { panOffsetRef.current = panOffset; }, [panOffset]);
 
   // Handle URL focus query parameter to automatically center and highlight target entity on CAD canvas
   const searchParams = useSearchParams();
@@ -440,11 +453,13 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
       const rect = canvasRef.current.getBoundingClientRect();
       const curZoom = 0.20;
 
-      setZoom(0.20);
-      setPanOffset({
+      zoomRef.current = 0.20;
+      panOffsetRef.current = {
         x: (rect.width / 2) - cx * curZoom,
         y: (rect.height / 2) - cy * curZoom
-      });
+      };
+      setZoom(0.20);
+      setPanOffset(panOffsetRef.current);
       hasAutoCenteredRef.current = true;
     }
   }, [focusParamId]);
@@ -567,7 +582,8 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
       const centeredPanX = 500 - targetX * curZoom;
       const centeredPanY = 350 - targetY * curZoom;
 
-      setPanOffset({ x: centeredPanX, y: centeredPanY });
+      panOffsetRef.current = { x: centeredPanX, y: centeredPanY };
+      setPanOffset(panOffsetRef.current);
 
       if (selectedType) {
         setSelectedElement(selectedType);
@@ -612,7 +628,7 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
 
   // Sync selected event data to inspector form fields when an event is clicked/selected
   useEffect(() => {
-    if (selectedElement?.type === "event") {
+    if (selectedElement?.type === "event" && selectedElement.id) {
       const ev = storeData.events.find((e) => e.id === selectedElement.id);
       if (ev) {
         setEventTitle(ev.title || "");
@@ -624,7 +640,7 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
         setEventEndsAt(ev.endsAt || getDefaultEndDateTimeISO(start));
       }
     }
-  }, [selectedElement, storeData.events]);
+  }, [selectedElement?.id, selectedElement?.type]);
 
   const handleCreateEventSubmit = () => {
     const title = eventTitle.trim() || "Campus Event";
@@ -651,7 +667,7 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
       return;
     }
 
-    const evId = isEditing ? selectedElement.id : `ev-${Date.now().toString(36)}`;
+    const evId = isEditing ? selectedElement.id : generateShortId("ev", storeData.events.map((e) => e.id));
     const targetBld = storeData.buildings.find((b) => b.id === eventBuildingId);
     const evX = targetBld ? (targetBld.x ?? 0) + (targetBld.width ?? 180) / 2 : 400;
     const evY = targetBld ? (targetBld.y ?? 0) + (targetBld.height ?? 120) / 2 : 300;
@@ -688,36 +704,158 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
     setIsAddEventOpen(false);
   };
 
-  // ── Scroll-Wheel Zoom (Smooth & Cursor-Anchored) ──────────────────────────
+  // ── Scroll-Wheel & Touchpad Zoom (Instant, Smooth & Cursor-Anchored with RAF Batching) ──
+  const zoomRafRef = useRef<number | null>(null);
+  const touchStateRef = useRef<{
+    initialDist: number;
+    initialZoom: number;
+    lastCenter: { x: number; y: number };
+  }>({
+    initialDist: 0,
+    initialZoom: 1,
+    lastCenter: { x: 0, y: 0 },
+  });
+
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
+
     const handleWheel = (e: WheelEvent) => {
       e.preventDefault();
-      const rect = canvas.getBoundingClientRect();
-      const mouseX = e.clientX - rect.left;
-      const mouseY = e.clientY - rect.top;
+
+      let zoomMultiplier: number;
+      if (e.ctrlKey) {
+        // Laptop touchpad pinch gesture: continuous proportional exponential scale
+        const clampedDelta = Math.min(60, Math.max(-60, e.deltaY));
+        zoomMultiplier = Math.exp(-clampedDelta * 0.008);
+      } else if (e.deltaMode === WheelEvent.DOM_DELTA_PIXEL) {
+        // Laptop touchpad two-finger swipe up/down (continuous pixel stream)
+        const clampedDelta = Math.min(80, Math.max(-80, e.deltaY));
+        zoomMultiplier = Math.exp(-clampedDelta * 0.0012);
+      } else {
+        // Physical discrete mouse wheel (DOM_DELTA_LINE or DOM_DELTA_PAGE)
+        let delta = e.deltaY;
+        if (e.deltaMode === WheelEvent.DOM_DELTA_LINE) {
+          delta *= 20;
+        } else if (e.deltaMode === WheelEvent.DOM_DELTA_PAGE) {
+          delta *= 200;
+        }
+        const normalizedDelta = Math.min(120, Math.max(-120, delta));
+        zoomMultiplier = Math.exp(-normalizedDelta * 0.0018);
+      }
+
       const currentZoom = zoomRef.current || 1;
       const currentPan = panOffsetRef.current;
 
-      const zoomFactor = e.deltaY < 0 ? 1.15 : 0.85;
-      const nextZoom = Math.min(5.0, Math.max(0.1, Number((currentZoom * zoomFactor).toFixed(3))));
+      const rect = canvas.getBoundingClientRect();
+      const mouseX = e.clientX - rect.left;
+      const mouseY = e.clientY - rect.top;
 
-      if (nextZoom === currentZoom) return;
+      // Exact world coordinates under cursor before zoom
+      const worldX = (mouseX - currentPan.x) / currentZoom;
+      const worldY = (mouseY - currentPan.y) / currentZoom;
 
-      // Zoom centered on mouse cursor
-      const newPanX = mouseX - (mouseX - currentPan.x) * (nextZoom / currentZoom);
-      const newPanY = mouseY - (mouseY - currentPan.y) * (nextZoom / currentZoom);
+      const nextZoom = Math.min(5.0, Math.max(0.1, currentZoom * zoomMultiplier));
+      if (Math.abs(nextZoom - currentZoom) < 0.00001) return;
 
-      panOffsetRef.current = { x: newPanX, y: newPanY };
+      // Exact new pan to keep worldX, worldY precisely pinned to mouseX, mouseY (zero shake)
+      const newPanX = mouseX - worldX * nextZoom;
+      const newPanY = mouseY - worldY * nextZoom;
+
       zoomRef.current = nextZoom;
+      panOffsetRef.current = { x: newPanX, y: newPanY };
 
-      setPanOffset({ x: newPanX, y: newPanY });
-      setZoom(nextZoom);
+      // High-frequency input is recorded immediately in refs.
+      // Batch visual React state render to single RAF frame to prevent render backlog.
+      if (zoomRafRef.current === null) {
+        zoomRafRef.current = requestAnimationFrame(() => {
+          zoomRafRef.current = null;
+          setZoom(zoomRef.current);
+          setPanOffset(panOffsetRef.current);
+        });
+      }
     };
+
+    // Mobile / Touchscreen 2-finger pinch-to-zoom support for CAD Editor
+    const handleTouchStart = (e: TouchEvent) => {
+      if (e.touches.length === 2) {
+        e.preventDefault();
+        const t1 = e.touches[0];
+        const t2 = e.touches[1];
+        const dist = Math.hypot(t1.clientX - t2.clientX, t1.clientY - t2.clientY);
+        const center = {
+          x: (t1.clientX + t2.clientX) / 2,
+          y: (t1.clientY + t2.clientY) / 2,
+        };
+        touchStateRef.current = {
+          initialDist: dist || 1,
+          initialZoom: zoomRef.current || 1,
+          lastCenter: center,
+        };
+      }
+    };
+
+    const handleTouchMove = (e: TouchEvent) => {
+      if (e.touches.length === 2) {
+        e.preventDefault();
+        const t1 = e.touches[0];
+        const t2 = e.touches[1];
+        const dist = Math.hypot(t1.clientX - t2.clientX, t1.clientY - t2.clientY);
+        const center = {
+          x: (t1.clientX + t2.clientX) / 2,
+          y: (t1.clientY + t2.clientY) / 2,
+        };
+        const state = touchStateRef.current;
+        if (!state.initialDist) return;
+
+        const ratio = dist / state.initialDist;
+        const currentZoom = zoomRef.current || 1;
+        const currentPan = panOffsetRef.current;
+        const nextZoom = Math.min(5.0, Math.max(0.1, state.initialZoom * ratio));
+        if (Math.abs(nextZoom - currentZoom) < 0.00001) return;
+
+        const rect = canvas.getBoundingClientRect();
+        const mouseX = center.x - rect.left;
+        const mouseY = center.y - rect.top;
+
+        const dx = center.x - state.lastCenter.x;
+        const dy = center.y - state.lastCenter.y;
+
+        const adjustedPanX = currentPan.x + dx;
+        const adjustedPanY = currentPan.y + dy;
+
+        const worldX = (mouseX - adjustedPanX) / currentZoom;
+        const worldY = (mouseY - adjustedPanY) / currentZoom;
+
+        const newPanX = mouseX - worldX * nextZoom;
+        const newPanY = mouseY - worldY * nextZoom;
+
+        state.lastCenter = center;
+        zoomRef.current = nextZoom;
+        panOffsetRef.current = { x: newPanX, y: newPanY };
+
+        if (zoomRafRef.current === null) {
+          zoomRafRef.current = requestAnimationFrame(() => {
+            zoomRafRef.current = null;
+            setZoom(zoomRef.current);
+            setPanOffset(panOffsetRef.current);
+          });
+        }
+      }
+    };
+
     canvas.addEventListener("wheel", handleWheel, { passive: false });
-    return () => canvas.removeEventListener("wheel", handleWheel);
-  }, []); // Only mount once — reads and writes zoom/pan via refs
+    canvas.addEventListener("touchstart", handleTouchStart, { passive: false });
+    canvas.addEventListener("touchmove", handleTouchMove, { passive: false });
+    return () => {
+      canvas.removeEventListener("wheel", handleWheel);
+      canvas.removeEventListener("touchstart", handleTouchStart);
+      canvas.removeEventListener("touchmove", handleTouchMove);
+      if (zoomRafRef.current !== null) {
+        cancelAnimationFrame(zoomRafRef.current);
+      }
+    };
+  }, []);
 
   // Unified Global Keyboard Shortcuts (Ctrl+C, Ctrl+V, Ctrl+Z, Ctrl+Y, Delete, Backspace, Escape)
   useEffect(() => {
@@ -1336,8 +1474,10 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
   // Pan Canvas to specific coordinate
   const zoomToPos = (x: number, y: number, floorId?: string) => {
     if (floorId) setActiveFloorId(floorId);
+    zoomRef.current = 1.4;
+    panOffsetRef.current = { x: 400 - x * 1.4, y: 300 - y * 1.4 };
     setZoom(1.4);
-    setPanOffset({ x: 400 - x * 1.4, y: 300 - y * 1.4 });
+    setPanOffset(panOffsetRef.current);
   };
 
   // Run Route Simulation
@@ -1375,11 +1515,13 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
   const handleCanvasMouseDown = (e: React.MouseEvent<SVGSVGElement>) => {
     hasDraggedRef.current = false;
     mouseDownScreenPosRef.current = { x: e.clientX, y: e.clientY };
+    mouseDownCanvasPosRef.current = getCanvasCoords(e);
 
+    // Pan initiation via Middle click (1), Right click (2), Shift + click, or Left click in SELECT tool
     if (e.button === 1 || e.button === 2 || e.shiftKey) {
       e.preventDefault();
       setIsPanning(true);
-      setPanStart({ x: e.clientX - panOffset.x, y: e.clientY - panOffset.y });
+      setPanStart({ x: e.clientX - panOffsetRef.current.x, y: e.clientY - panOffsetRef.current.y });
       return;
     }
 
@@ -1390,9 +1532,11 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
       target.getAttribute("fill")?.includes("cad-grid") ||
       target.id === "cad-grid-rect";
 
-    if (isBackground && e.button === 0) {
+    // Only allow left-click background panning when in SELECT mode.
+    // In placement tools (NODE, BUILDING, OBSTACLE, ROOM, DOOR, etc.), left-click is strictly dedicated to object creation.
+    if (isBackground && e.button === 0 && activeTool === "SELECT") {
       setIsPanning(true);
-      setPanStart({ x: e.clientX - panOffset.x, y: e.clientY - panOffset.y });
+      setPanStart({ x: e.clientX - panOffsetRef.current.x, y: e.clientY - panOffsetRef.current.y });
     }
   };
 
@@ -1406,12 +1550,15 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
     }
 
     if (isPanning) {
-      nextPanRef.current = { x: e.clientX - panStart.x, y: e.clientY - panStart.y };
-      if (panRafRef.current === null) {
-        panRafRef.current = requestAnimationFrame(() => {
-          panRafRef.current = null;
-          setPanOffset(nextPanRef.current);
-        });
+      if (hasDraggedRef.current) {
+        nextPanRef.current = { x: e.clientX - panStart.x, y: e.clientY - panStart.y };
+        panOffsetRef.current = nextPanRef.current;
+        if (panRafRef.current === null) {
+          panRafRef.current = requestAnimationFrame(() => {
+            panRafRef.current = null;
+            setPanOffset(nextPanRef.current);
+          });
+        }
       }
       return;
     }
@@ -1504,7 +1651,7 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
   const createBuildingAtPos = (x: number, y: number) => {
     const name = buildingName.trim() || `Building ${storeData.buildings.length + 1}`;
     const code = buildingCode.trim().toUpperCase() || `B${storeData.buildings.length + 1}`;
-    const newBldId = `b-${Date.now().toString(36)}`;
+    const newBldId = generateShortId("b", storeData.buildings.map((b) => b.id));
     const W = 180, H = 120;
     // Canonical Convention: (x, y) is the CANVAS CENTER
     const { lat, lng } = canvasToGps(x, y);
@@ -1581,7 +1728,14 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
 
     if (isNodeOrEdgeTarget) return;
 
-    const { x, y } = getCanvasCoords(e);
+    // Use the exact coordinates captured on mouse down to prevent micro-pan displacement
+    const { x, y } = mouseDownCanvasPosRef.current || getCanvasCoords(e);
+
+    // If Fake GPS tool is active, place fake pin on click
+    if (fakeGps.isActive) {
+      fakeGps.setFakePosition(x, y, activeFloorId);
+      return;
+    }
     const effectiveFloorId =
       activeFloorId === "f-out"
         ? "f-out"
@@ -1594,7 +1748,7 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
               : activeFloorId;
 
     if (activeTool === "NODE") {
-      const newNodeId = `n-${Date.now().toString(36)}`;
+      const newNodeId = generateShortId("n", storeData.nodes.map((n) => n.id));
       let targetFloor = nodeTargetFloorId && !nodeTargetFloorId.startsWith("f-all")
         ? nodeTargetFloorId
         : effectiveFloorId;
@@ -1645,7 +1799,7 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
         : effectiveFloorId;
 
       const name = roomNameInput.trim() || `Room ${roomNumber}`;
-      const autoNodeId = `node-room-${Date.now().toString(36)}`;
+      const autoNodeId = generateShortId("n", storeData.nodes.map((n) => n.id));
       const roomNode: Node = {
         id: autoNodeId,
         type: "ROOM",
@@ -1658,7 +1812,7 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
       };
       campusStore.addNode(roomNode, false);
 
-      const newRoomId = `dest-room-${Date.now().toString(36)}`;
+      const newRoomId = generateShortId("d", storeData.destinations.map((d) => d.id));
       const newRoom: Destination = {
         id: newRoomId,
         nodeId: autoNodeId,
@@ -1677,7 +1831,7 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
       setSelectedElement({ type: "destination", id: newRoomId });
       toast({ type: "success", title: "Room Placed", description: `Created ${roomCategory} "${name}" (#${roomNumber}).` });
     } else if (activeTool === "DOOR") {
-      const doorId = `door-${Date.now().toString(36)}`;
+      const doorId = generateShortId("door", storeData.doors.map((d) => d.id));
       const targetBuilding = storeData.buildings.find(
         (b) => x >= (b.x ?? 0) && x <= (b.x ?? 0) + (b.width ?? 180) && y >= (b.y ?? 0) && y <= (b.y ?? 0) + (b.height ?? 120)
       );
@@ -1709,7 +1863,7 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
 
       let nearestNode: Node;
       if (!closestItem.node || closestItem.dist > 60) {
-        const autoNodeId = `n-${Date.now().toString(36)}`;
+        const autoNodeId = generateShortId("n", storeData.nodes.map((n) => n.id));
         const autoNode: Node = {
           id: autoNodeId,
           type: "ROOM",
@@ -1726,7 +1880,7 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
         campusStore.updateNode(nearestNode.id, { name: name }, false);
       }
 
-      const newDestId = `dest-${Date.now().toString(36)}`;
+      const newDestId = generateShortId("d", storeData.destinations.map((d) => d.id));
       const newDest: Destination = {
         id: newDestId,
         nodeId: nearestNode.id,
@@ -1781,7 +1935,7 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
       }
 
       // Default to Route-Only mode by assigning target edge or first available edge
-      const obsId = `obs-${Date.now().toString(36)}`;
+      const obsId = generateShortId("obs", storeData.obstacles.map((o) => o.id));
       const defaultBlockedEdgeId =
         targetEdgeId ||
         floorEdges[0]?.id ||
@@ -2328,6 +2482,23 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
             >
               <History className="h-3.5 w-3.5" />
             </Button>
+
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => {
+                const res = campusStore.compactAllIds();
+                toast({
+                  type: "success",
+                  title: "IDs Cleaned & Shortened",
+                  description: `Shortened ${res.stats.nodes} nodes, ${res.stats.edges} edges, ${res.stats.buildings} buildings, ${res.stats.destinations} rooms into clean unique short IDs.`,
+                });
+              }}
+              className="h-8 w-8 p-0 shrink-0 border-indigo-500/30 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-500/10"
+              title="Clean & Shorten All Object IDs (e.g. n-k4a2, e-7b9x, b-r3m1)"
+            >
+              <Hash className="h-3.5 w-3.5" />
+            </Button>
           </div>
           <div>
             <h4 className="mb-2 font-semibold text-[rgb(var(--fg))] flex items-center justify-between">
@@ -2336,6 +2507,12 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
             </h4>
             <div className="space-y-1.5">
 
+              {/* Fake Live Location Tool (Isolated Modular Route Tester) */}
+              <CadFakeLocationButton
+                fakeGps={fakeGps}
+                nodes={storeData.nodes}
+                destinations={storeData.destinations}
+              />
 
               {/* Add Room tool (places room node on canvas, editable in Element Inspector) */}
               <Button
@@ -3407,6 +3584,13 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
                 </g>
               )}
 
+              {/* Standalone CAD Fake Live Location & Route Pathfinding Layer */}
+              <CadFakeLocationSvgLayer
+                fakeGps={fakeGps}
+                activeFloorId={activeFloorId}
+                getCanvasCoords={getCanvasCoords}
+              />
+
             </g>
           </svg>
 
@@ -4056,7 +4240,7 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
                       ? nodeTargetFloorId
                       : (activeFloorId.startsWith("f-all") ? "f-out" : activeFloorId);
                     const { x, y } = campusStore.getCanvasCoordsFromGps(lat, lng, targetFloor);
-                    const newNodeId = `n-${Date.now().toString(36)}`;
+                    const newNodeId = generateShortId("n", storeData.nodes.map((n) => n.id));
                     campusStore.addNode({ id: newNodeId, type: nodeType, name: nodeName.trim() || undefined, floorId: targetFloor, x, y, lat, lng, searchable: true }, false);
                     setSelectedElement({ type: "node", id: newNodeId });
                     const targetFloorObj = storeData.floors.find((f) => f.id === targetFloor);
@@ -5768,7 +5952,7 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
                     return;
                   }
                   const result = campusStore.addEdge({
-                    id: `e-${pendingEdgeModal.startNodeId}-${pendingEdgeModal.endNodeId}`,
+                    id: generateShortId("e", storeData.edges.map((e) => e.id)),
                     from: pendingEdgeModal.startNodeId,
                     to: pendingEdgeModal.endNodeId,
                     type: edgeModalType,

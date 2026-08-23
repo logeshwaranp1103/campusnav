@@ -276,6 +276,18 @@ export function findContextAwareNearestNodes(
     if (buildingNodes.length > 0) {
       candidatePool.push(...buildingNodes.slice().sort((a, b) => getDistance(a) - getDistance(b)));
     }
+
+    if (candidatePool.length > 0) {
+      const uniqueIds = new Set<string>();
+      const result: Node[] = [];
+      for (const n of candidatePool) {
+        if (!uniqueIds.has(n.id)) {
+          uniqueIds.add(n.id);
+          result.push(n);
+        }
+      }
+      return result;
+    }
   }
 
   // Priority 4: Outdoor / Campus walkway nodes
@@ -292,9 +304,18 @@ export function findContextAwareNearestNodes(
   );
   if (outdoorNodes.length > 0) {
     candidatePool.push(...outdoorNodes.slice().sort((a, b) => getDistance(a) - getDistance(b)));
+    const uniqueIds = new Set<string>();
+    const result: Node[] = [];
+    for (const n of candidatePool) {
+      if (!uniqueIds.has(n.id)) {
+        uniqueIds.add(n.id);
+        result.push(n);
+      }
+    }
+    return result;
   }
 
-  // Priority 5: All remaining nodes sorted by geographic distance
+  // Priority 5: Fallback to all remaining nodes sorted by geographic distance if no outdoor nodes exist
   candidatePool.push(...validNodes.slice().sort((a, b) => getDistance(a) - getDistance(b)));
 
   // Deduplicate candidate list preserving priority order

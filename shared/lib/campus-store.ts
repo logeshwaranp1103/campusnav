@@ -19,6 +19,7 @@ import {
   type SuggestedNode,
   type SuggestedEdge,
 } from "../data/campus";
+import { generateShortId } from "./id-generator";
 
 export type PendingChangeType =
   | "ADD_BUILDING"
@@ -811,7 +812,7 @@ class CampusStore {
           : `Floor ${ord}`;
       const defaultCode = getFloorCode(ord, name);
       f = {
-        id: `f-${floorOrBuildingId}-${Date.now().toString(36)}`,
+        id: generateShortId("f", this.floors.map((fl) => fl.id)),
         buildingId: floorOrBuildingId,
         name: name || defaultName,
         ordinal: ord,
@@ -903,7 +904,7 @@ class CampusStore {
       newFloorName = `Floor ${nextOrdinal}`;
     }
 
-    const newFloorId = `f-${srcFloor.buildingId}-${Date.now().toString(36)}`;
+    const newFloorId = generateShortId("f", this.floors.map((fl) => fl.id));
 
     const newFloor: Floor = {
       id: newFloorId,
@@ -1375,7 +1376,7 @@ class CampusStore {
     const node = this.nodes.find((n) => n.id === nodeId);
     if (!node) return;
     this.saveSnapshotToUndo(`Duplicated Node "${node.name ?? nodeId}"`);
-    const newId = `node-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
+    const newId = generateShortId("n", this.nodes.map((n) => n.id));
     const copy: Node = {
       ...JSON.parse(JSON.stringify(node)),
       id: newId,
@@ -1412,7 +1413,7 @@ class CampusStore {
     pos?: { x: number; y: number }
   ): StairGroup {
     const groupName = name.trim() || "Staircase A";
-    const groupId = `stairgroup-${Date.now().toString(36)}`;
+    const groupId = generateShortId("stair", (this.stairGroups || []).map((sg) => sg.id));
     this.saveSnapshotToUndo(`Created Staircase Group "${groupName}"`);
 
     let targetPos = pos;
@@ -1530,7 +1531,7 @@ class CampusStore {
               (e) => (e.from === n1.id && e.to === n2.id) || (e.from === n2.id && e.to === n1.id)
             );
             if (!hasEdge) {
-              const edgeId = `e-stair-nearby-${n1.id}-${n2.id}`;
+              const edgeId = generateShortId("e", this.edges.map((e) => e.id));
               const n1Gps = n1.lat && n1.lng ? { lat: n1.lat, lng: n1.lng } : canvasToGps(n1.x, n1.y);
               const n2Gps = n2.lat && n2.lng ? { lat: n2.lat, lng: n2.lng } : canvasToGps(n2.x, n2.y);
               const dist = calculateGeographicDistance(n1Gps.lat, n1Gps.lng, n2Gps.lat, n2Gps.lng);
@@ -1585,7 +1586,7 @@ class CampusStore {
               (e) => (e.from === from.id && e.to === to.id) || (e.from === to.id && e.to === from.id)
             );
             if (!hasEdge) {
-              const edgeId = `e-stair-auto-${from.id}-${to.id}`;
+              const edgeId = generateShortId("e", this.edges.map((e) => e.id));
               this.addEdgeInternal({
                 id: edgeId,
                 from: from.id,
@@ -1642,7 +1643,7 @@ class CampusStore {
               (e) => (e.from === n1.id && e.to === n2.id) || (e.from === n2.id && e.to === n1.id)
             );
             if (!hasEdge) {
-              const edgeId = `e-lift-nearby-${n1.id}-${n2.id}`;
+              const edgeId = generateShortId("e", this.edges.map((e) => e.id));
               const n1Gps = n1.lat && n1.lng ? { lat: n1.lat, lng: n1.lng } : canvasToGps(n1.x, n1.y);
               const n2Gps = n2.lat && n2.lng ? { lat: n2.lat, lng: n2.lng } : canvasToGps(n2.x, n2.y);
               const dist = calculateGeographicDistance(n1Gps.lat, n1Gps.lng, n2Gps.lat, n2Gps.lng);
@@ -1690,7 +1691,7 @@ class CampusStore {
               (e) => (e.from === from.id && e.to === to.id) || (e.from === to.id && e.to === from.id)
             );
             if (!hasEdge) {
-              const edgeId = `e-lift-auto-${from.id}-${to.id}`;
+              const edgeId = generateShortId("e", this.edges.map((e) => e.id));
               this.addEdgeInternal({
                 id: edgeId,
                 from: from.id,
@@ -1737,7 +1738,7 @@ class CampusStore {
       let node = this.nodes.find((n) => n.stairGroupId === group.id && n.floorId === fl.id);
       if (!node) {
         node = {
-          id: `stair-node-${group.id}-${fl.id}`,
+          id: generateShortId("n", this.nodes.map((n) => n.id)),
           type: "STAIR",
           name: `${group.name} (${fl.name})`,
           floorId: fl.id,
@@ -1775,7 +1776,7 @@ class CampusStore {
     for (let i = 0; i < createdNodes.length - 1; i++) {
       const fromNode = createdNodes[i];
       const toNode = createdNodes[i + 1];
-      const edgeId = `e-stair-${fromNode.id}-${toNode.id}`;
+      const edgeId = generateShortId("e", this.edges.map((e) => e.id));
       this.addEdgeInternal({
         id: edgeId,
         from: fromNode.id,
@@ -1800,7 +1801,7 @@ class CampusStore {
     pos?: { x: number; y: number }
   ): LiftGroup {
     this.saveSnapshotToUndo();
-    const groupId = `liftgroup-${Date.now().toString(36)}`;
+    const groupId = generateShortId("lift", (this.liftGroups || []).map((lg) => lg.id));
     const groupName = name.trim() || "Elevator 1";
 
     let targetPos = pos;
@@ -1871,7 +1872,7 @@ class CampusStore {
       let node = this.nodes.find((n) => n.liftGroupId === group.id && n.floorId === fl.id);
       if (!node) {
         node = {
-          id: `lift-node-${group.id}-${fl.id}`,
+          id: generateShortId("n", this.nodes.map((n) => n.id)),
           type: "LIFT",
           name: `${group.name} (${fl.name})`,
           floorId: fl.id,
@@ -1895,7 +1896,7 @@ class CampusStore {
     for (let i = 0; i < createdNodes.length - 1; i++) {
       const fromNode = createdNodes[i];
       const toNode = createdNodes[i + 1];
-      const edgeId = `e-lift-${fromNode.id}-${toNode.id}`;
+      const edgeId = generateShortId("e", this.edges.map((e) => e.id));
       this.addEdgeInternal({
         id: edgeId,
         from: fromNode.id,
@@ -1943,8 +1944,10 @@ class CampusStore {
   private addEdgeInternal(edge: Edge) {
     this.edges.push(edge);
     if (edge.bidirectional) {
-      const revId = `e-${edge.to}-${edge.from}`;
-      if (!this.edges.some((e) => e.id === revId)) {
+      const revId = edge.id.includes(edge.from) && edge.id.includes(edge.to)
+        ? `e-${edge.to}-${edge.from}`
+        : `${edge.id}_rev`;
+      if (!this.edges.some((e) => e.id === revId || (e.from === edge.to && e.to === edge.from))) {
         this.edges.push({
           id: revId,
           from: edge.to,
@@ -1970,8 +1973,9 @@ class CampusStore {
     const updated = this.edges[idx];
 
     // Sync reverse edge properties if twin exists
-    const revId = `e-${updated.to}-${updated.from}`;
-    const revIdx = this.edges.findIndex((e) => e.id === revId);
+    const revIdx = this.edges.findIndex(
+      (e) => (e.id === `e-${updated.to}-${updated.from}` || e.id === `${id}_rev` || (e.from === updated.to && e.to === updated.from)) && e.id !== id
+    );
     if (revIdx !== -1) {
       this.edges[revIdx] = {
         ...this.edges[revIdx],
@@ -2005,7 +2009,7 @@ class CampusStore {
 
     this.startBatching();
 
-    const newNodeId = `n-${Date.now().toString(36)}`;
+    const newNodeId = generateShortId("n", this.nodes.map((n) => n.id));
     const { lat, lng } = canvasToGps(x, y);
     const newNode: Node = {
       id: newNodeId,
@@ -3352,6 +3356,162 @@ class CampusStore {
       console.warn("Failed to import full data snapshot:", e);
       return false;
     }
+  }
+
+  /**
+   * Shortens and cleans all existing object IDs in the campus graph into short,
+   * human-readable IDs (e.g. n-k4a2, e-7b9x, b-r3m1, d-w8p2) while fully preserving
+   * all topological edge links, node references, and building/floor relationships.
+   */
+  public compactAllIds(): { success: boolean; stats: Record<string, number> } {
+    this.saveSnapshotToUndo("Shortened & Cleaned All Object IDs");
+    const idMap = new Map<string, string>();
+    const usedIds = new Set<string>();
+
+    const getShort = (prefix: string, oldId: string): string => {
+      if (!oldId) return oldId;
+      if (idMap.has(oldId)) return idMap.get(oldId)!;
+      // If already a clean short ID matching prefix-[a-z0-9]{4}, preserve it
+      const regex = new RegExp(`^${prefix}-[a-z0-9]{4}$`);
+      if (regex.test(oldId) && !usedIds.has(oldId)) {
+        usedIds.add(oldId);
+        idMap.set(oldId, oldId);
+        return oldId;
+      }
+      const newId = generateShortId(prefix, usedIds);
+      usedIds.add(newId);
+      idMap.set(oldId, newId);
+      return newId;
+    };
+
+    // 1. Buildings (b-xxxx)
+    this.buildings.forEach((b) => {
+      const newId = getShort("b", b.id);
+      b.id = newId;
+    });
+
+    // 2. Floors (f-xxxx, keep f-out and outdoor as is)
+    this.floors.forEach((f) => {
+      if (f.id === "f-out" || f.id === "outdoor") {
+        idMap.set(f.id, f.id);
+        usedIds.add(f.id);
+      } else {
+        const newId = getShort("f", f.id);
+        f.id = newId;
+      }
+      if (f.buildingId && idMap.has(f.buildingId)) {
+        f.buildingId = idMap.get(f.buildingId)!;
+      }
+    });
+
+    // 3. Nodes (n-xxxx)
+    this.nodes.forEach((n) => {
+      const newId = getShort("n", n.id);
+      n.id = newId;
+      if (n.floorId && idMap.has(n.floorId)) {
+        n.floorId = idMap.get(n.floorId)!;
+      }
+      if (n.stairGroupId) {
+        if (!idMap.has(n.stairGroupId)) idMap.set(n.stairGroupId, generateShortId("stair", usedIds));
+        n.stairGroupId = idMap.get(n.stairGroupId)!;
+      }
+      if (n.liftGroupId) {
+        if (!idMap.has(n.liftGroupId)) idMap.set(n.liftGroupId, generateShortId("lift", usedIds));
+        n.liftGroupId = idMap.get(n.liftGroupId)!;
+      }
+    });
+
+    // 4. Edges (e-xxxx)
+    this.edges.forEach((e) => {
+      const newId = getShort("e", e.id);
+      e.id = newId;
+      if (idMap.has(e.from)) e.from = idMap.get(e.from)!;
+      if (idMap.has(e.to)) e.to = idMap.get(e.to)!;
+    });
+
+    // 5. Destinations / Rooms (d-xxxx)
+    this.destinations.forEach((d) => {
+      const newId = getShort("d", d.id);
+      d.id = newId;
+      if (d.nodeId && idMap.has(d.nodeId)) d.nodeId = idMap.get(d.nodeId)!;
+      if (d.floorId && idMap.has(d.floorId)) d.floorId = idMap.get(d.floorId)!;
+      if (d.buildingId && idMap.has(d.buildingId)) d.buildingId = idMap.get(d.buildingId)!;
+    });
+
+    // 6. Obstacles (obs-xxxx)
+    this.obstacles.forEach((obs) => {
+      const newId = getShort("obs", obs.id);
+      obs.id = newId;
+      if (obs.nodeId && idMap.has(obs.nodeId)) obs.nodeId = idMap.get(obs.nodeId)!;
+      if (obs.floorId && idMap.has(obs.floorId)) obs.floorId = idMap.get(obs.floorId)!;
+      if (obs.edgeIds && Array.isArray(obs.edgeIds)) {
+        obs.edgeIds = obs.edgeIds.map((eid) => idMap.get(eid) || eid);
+      }
+    });
+
+    // 7. Events (ev-xxxx)
+    this.events.forEach((ev) => {
+      const newId = getShort("ev", ev.id);
+      ev.id = newId;
+      if (ev.buildingId && idMap.has(ev.buildingId)) ev.buildingId = idMap.get(ev.buildingId)!;
+    });
+
+    // 8. Doors (door-xxxx)
+    this.doors.forEach((door) => {
+      const newId = getShort("door", door.id);
+      door.id = newId;
+      if (door.floorId && idMap.has(door.floorId)) door.floorId = idMap.get(door.floorId)!;
+      if (door.connectedNodeId && idMap.has(door.connectedNodeId)) door.connectedNodeId = idMap.get(door.connectedNodeId)!;
+    });
+
+    // 9. Stair & Lift Groups
+    (this.stairGroups || []).forEach((sg) => {
+      const newId = idMap.get(sg.id) || getShort("stair", sg.id);
+      sg.id = newId;
+      if (sg.buildingId && idMap.has(sg.buildingId)) sg.buildingId = idMap.get(sg.buildingId)!;
+      if (sg.connectedFloorIds && Array.isArray(sg.connectedFloorIds)) {
+        sg.connectedFloorIds = sg.connectedFloorIds.map((fid) => idMap.get(fid) || fid);
+      }
+    });
+
+    (this.liftGroups || []).forEach((lg) => {
+      const newId = idMap.get(lg.id) || getShort("lift", lg.id);
+      lg.id = newId;
+      if (lg.buildingId && idMap.has(lg.buildingId)) lg.buildingId = idMap.get(lg.buildingId)!;
+      if (lg.servedFloorIds && Array.isArray(lg.servedFloorIds)) {
+        lg.servedFloorIds = lg.servedFloorIds.map((fid) => idMap.get(fid) || fid);
+      }
+    });
+
+    this.publishedGraph = {
+      buildings: JSON.parse(JSON.stringify(this.buildings)),
+      floors: JSON.parse(JSON.stringify(this.floors)),
+      nodes: JSON.parse(JSON.stringify(this.nodes)),
+      edges: JSON.parse(JSON.stringify(this.edges)),
+      destinations: JSON.parse(JSON.stringify(this.destinations)),
+      events: JSON.parse(JSON.stringify(this.events)),
+      obstacles: JSON.parse(JSON.stringify(this.obstacles)),
+      stairGroups: JSON.parse(JSON.stringify(this.stairGroups || [])),
+      liftGroups: JSON.parse(JSON.stringify(this.liftGroups || [])),
+      doors: JSON.parse(JSON.stringify(this.doors || [])),
+    };
+
+    this.persistWorkingDraft();
+    this.notify();
+
+    return {
+      success: true,
+      stats: {
+        buildings: this.buildings.length,
+        floors: this.floors.length,
+        nodes: this.nodes.length,
+        edges: this.edges.length,
+        destinations: this.destinations.length,
+        obstacles: this.obstacles.length,
+        events: this.events.length,
+        doors: this.doors.length,
+      },
+    };
   }
 }
 

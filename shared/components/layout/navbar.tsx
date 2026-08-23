@@ -2,24 +2,23 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Compass, Menu, X, ArrowRight } from "lucide-react";
+import { Compass, ArrowRight, Home, Navigation } from "lucide-react";
 import { ThemeToggle } from "@/shared/components/ui/theme-toggle";
 import { Button } from "@/shared/components/ui/button";
 import { cn } from "@/shared/lib/utils";
 import { useEffect, useState } from "react";
-import { motion, AnimatePresence } from "framer-motion";
+import { motion } from "framer-motion";
 
 const links = [
   { href: "/", label: "Home" },
   { href: "/navigate", label: "Navigate" },
 ];
 
-
-
 export function Navbar() {
   const pathname = usePathname();
-  const [open, setOpen] = useState(false);
   const [scrolled, setScrolled] = useState(false);
+
+  const isNavigatePage = pathname === "/navigate" || pathname.startsWith("/navigate");
 
   useEffect(() => {
     const onScroll = () => {
@@ -39,7 +38,7 @@ export function Navbar() {
       )}
     >
       <div className="mx-auto flex h-16 max-w-7xl items-center justify-between px-3 sm:px-4 md:px-6">
-        <Link href="/" className="group flex items-center gap-2.5">
+        <Link href="/" className="group flex items-center gap-2.5 shrink-0">
           <div className="relative">
             <div className="absolute inset-0 rounded-xl bg-[rgb(var(--primary))] opacity-30 blur-md group-hover:opacity-60 transition-opacity" />
             <div className="relative flex h-9 w-9 items-center justify-center rounded-xl gradient-primary text-white shadow-[var(--shadow-sm)]">
@@ -56,7 +55,36 @@ export function Navbar() {
           </div>
         </Link>
 
-        <nav className="hidden items-center gap-1 rounded-full border border-[rgb(var(--border))] bg-[rgb(var(--card))]/60 p-1 md:flex">
+        {/* Mobile Quick Navigation Buttons (Between Logo and Theme Changer) */}
+        <nav aria-label="Mobile Navigation" className="flex items-center gap-1 md:hidden">
+          <Link
+            href="/"
+            className={cn(
+              "flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-semibold transition-all",
+              pathname === "/"
+                ? "bg-[rgb(var(--primary))] text-white shadow-xs font-bold"
+                : "text-[rgb(var(--muted-fg))] hover:bg-[rgb(var(--muted))] hover:text-[rgb(var(--fg))]"
+            )}
+          >
+            <Home className="h-3.5 w-3.5" />
+            <span>Home</span>
+          </Link>
+          <Link
+            href="/navigate"
+            className={cn(
+              "flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-semibold transition-all",
+              isNavigatePage
+                ? "bg-[rgb(var(--primary))] text-white shadow-xs font-bold"
+                : "text-[rgb(var(--muted-fg))] hover:bg-[rgb(var(--muted))] hover:text-[rgb(var(--fg))]"
+            )}
+          >
+            <Navigation className="h-3.5 w-3.5" />
+            <span>Navigate</span>
+          </Link>
+        </nav>
+
+        {/* Desktop Navigation Links */}
+        <nav aria-label="Desktop Navigation" className="hidden items-center gap-1 rounded-full border border-[rgb(var(--border))] bg-[rgb(var(--card))]/60 p-1 md:flex">
           {links.map((l) => {
             const active =
               l.href === "/" ? pathname === "/" : pathname.startsWith(l.href);
@@ -92,58 +120,8 @@ export function Navbar() {
               <ArrowRight className="h-3.5 w-3.5" />
             </Button>
           </Link>
-          <Button
-            variant="ghost"
-            size="icon"
-            className="md:hidden"
-            onClick={() => setOpen((v) => !v)}
-            aria-label="Menu"
-          >
-            {open ? <X className="h-4 w-4" /> : <Menu className="h-4 w-4" />}
-          </Button>
         </div>
       </div>
-
-      <AnimatePresence>
-        {open && (
-          <motion.div
-            initial={{ height: 0, opacity: 0 }}
-            animate={{ height: "auto", opacity: 1 }}
-            exit={{ height: 0, opacity: 0 }}
-            transition={{ duration: 0.22 }}
-            className="overflow-hidden border-t md:hidden"
-          >
-            <div className="flex flex-col gap-1 p-3">
-              {links.map((l) => {
-                const active =
-                  l.href === "/"
-                    ? pathname === "/"
-                    : pathname.startsWith(l.href);
-                return (
-                  <Link
-                    key={l.href}
-                    href={l.href}
-                    onClick={() => setOpen(false)}
-                    className={cn(
-                      "rounded-lg px-3 py-2.5 text-sm font-medium transition-colors",
-                      active
-                        ? "bg-[rgb(var(--muted))] text-[rgb(var(--fg))]"
-                        : "text-[rgb(var(--muted-fg))] hover:bg-[rgb(var(--muted))] hover:text-[rgb(var(--fg))]",
-                    )}
-                  >
-                    {l.label}
-                  </Link>
-                );
-              })}
-              <Link href="/navigate" onClick={() => setOpen(false)} className="mt-2">
-                <Button variant="gradient" className="w-full">
-                  Start Navigating <ArrowRight className="h-4 w-4" />
-                </Button>
-              </Link>
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
     </header>
   );
 }

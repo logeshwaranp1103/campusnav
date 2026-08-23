@@ -273,4 +273,43 @@ describe("Location Store & Map Matching Integration", () => {
     expect(match.node?.id).toBe("n-out-1");
     expect(match.distanceMeters).toBeLessThan(10);
   });
+
+  it("correctly reflects location turned off / stopped state in location store", () => {
+    useLocationStore.getState().resetLocationState();
+    const state = useLocationStore.getState();
+    expect(state.isGpsActive).toBe(false);
+    expect(state.isTracking).toBe(false);
+    expect(state.status).toBe("idle");
+    expect(state.lat).toBe(0);
+    expect(state.lng).toBe(0);
+  });
+
+  it("handles location error and permission denied by setting isGpsActive and isTracking to false", () => {
+    const mockError: GeolocationPositionError = {
+      code: 1, // PERMISSION_DENIED
+      message: "User denied Geolocation",
+      PERMISSION_DENIED: 1,
+      POSITION_UNAVAILABLE: 2,
+      TIMEOUT: 3,
+    };
+
+    const gpsErr = mapGeolocationError(mockError);
+    const status = mapErrorToStatus(mockError);
+
+    expect(status).toBe("denied");
+    expect(gpsErr.code).toBe("PERMISSION_DENIED");
+
+    useLocationStore.getState().setLocationState({
+      status,
+      isTracking: false,
+      isGpsActive: false,
+      error: gpsErr.userMessage,
+      gpsError: gpsErr,
+    });
+
+    const state = useLocationStore.getState();
+    expect(state.isGpsActive).toBe(false);
+    expect(state.isTracking).toBe(false);
+    expect(state.status).toBe("denied");
+  });
 });

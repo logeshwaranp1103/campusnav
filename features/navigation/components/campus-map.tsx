@@ -13,7 +13,6 @@ import { getBuildingCanvasPoints, getBuildingCenter, getPolygonSvgPath, isPointI
 import { detectBuildingAtGps } from "@/lib/geo/containment";
 import { calculateShortestAngleDelta } from "@/lib/geo/haversine";
 import { DestinationDetailsDrawer } from "./destination-details-drawer";
-import { isEventActive } from "@/shared/lib/event-utils";
 import { useNavigationStore } from "@/features/navigation/navigation-store";
 
 /**
@@ -655,20 +654,18 @@ function MapCanvas({
   });
   const visualGpsRef = useRef(visualGps);
   visualGpsRef.current = visualGps;
+  const hasGpsFixRef = useRef(false);
 
-  // Target GPS position
+  // Target GPS position (strictly only computed when real GPS is active)
   const targetGpsPos = useMemo(() => {
     if (gps && gps.isGpsActive && gps.lat && gps.lng) {
       return gpsToCanvas(gps.lat, gps.lng);
     }
-    if (gps?.canvasPos && (gps.isGpsActive || gps.isTracking)) {
+    if (gps && gps.isGpsActive && gps.canvasPos) {
       return gps.canvasPos;
     }
-    if (livePosition) {
-      return { x: livePosition.x, y: livePosition.y };
-    }
     return null;
-  }, [gps?.isGpsActive, gps?.isTracking, gps?.lat, gps?.lng, gps?.canvasPos, livePosition]);
+  }, [gps?.isGpsActive, gps?.lat, gps?.lng, gps?.canvasPos]);
 
   const targetHeading = gps?.heading ?? 0;
 
@@ -725,45 +722,61 @@ function MapCanvas({
       const dt = Math.min(0.064, Math.max(0.001, (now - (lastTimeRef.current || now)) / 1000));
       lastTimeRef.current = now;
 
-      // 0. Smooth Visual Zoom Glide (Delta-Time Exponential Smoothing, settling in ~150-200ms)
+      // 0. Smooth Visual Zoom Glide (Delta-Time Exponential Smoothing, snappy ~60ms convergence)
       const targetZ = targetZoomRef.current;
       const curZ = visualZoomRef.current;
       const dZ = targetZ - curZ;
       if (Math.abs(dZ) > 0.0004) {
-        const zoomAlpha = 1 - Math.exp(-12.0 * dt);
+        const zoomAlpha = 1 - Math.exp(-24.0 * dt);
         const nextZ = curZ + dZ * zoomAlpha;
         visualZoomRef.current = nextZ;
         setVisualZoom(nextZ);
+        setPan(panRef.current);
+        setInternalZoom(internalZoomRef.current);
       } else if (curZ !== targetZ) {
         visualZoomRef.current = targetZ;
         setVisualZoom(targetZ);
+        setPan(panRef.current);
+        setInternalZoom(internalZoomRef.current);
       }
 
       // 1. Visual GPS Marker Smooth Gliding
-      if (targetGpsPos) {
-        const cur = visualGpsRef.current;
-        const dx = targetGpsPos.x - cur.x;
-        const dy = targetGpsPos.y - cur.y;
-
-        // Circular shortest angle interpolation for heading
-        const dHeading = (((targetHeading - cur.heading + 540) % 360) - 180);
-
-        // Continuous Delta-Time Exponential Smoothing (60Hz / 90Hz / 120Hz invariant)
-        const gpsAlpha = 1 - Math.exp(-10.0 * dt);
-        const headingAlpha = 1 - Math.exp(-8.0 * dt);
-
-        if (Math.abs(dx) > 0.02 || Math.abs(dy) > 0.02 || Math.abs(dHeading) > 0.05) {
-          const nextX = cur.x + dx * gpsAlpha;
-          const nextY = cur.y + dy * gpsAlpha;
-          const nextHeading = (cur.heading + dHeading * headingAlpha + 360) % 360;
-
-          visualGpsRef.current = { x: nextX, y: nextY, heading: nextHeading };
+      if (targetGpsPos && gps?.isGpsActive) {
+        if (!hasGpsFixRef.current) {
+          hasGpsFixRef.current = true;
+          visualGpsRef.current = { x: targetGpsPos.x, y: targetGpsPos.y, heading: targetHeading };
           setVisualGps({
-            x: nextX,
-            y: nextY,
-            heading: nextHeading,
+            x: targetGpsPos.x,
+            y: targetGpsPos.y,
+            heading: targetHeading,
           });
+        } else {
+          const cur = visualGpsRef.current;
+          const dx = targetGpsPos.x - cur.x;
+          const dy = targetGpsPos.y - cur.y;
+
+          // Circular shortest angle interpolation for heading
+          const dHeading = (((targetHeading - cur.heading + 540) % 360) - 180);
+
+          // Continuous Delta-Time Exponential Smoothing (60Hz / 90Hz / 120Hz invariant)
+          const gpsAlpha = 1 - Math.exp(-10.0 * dt);
+          const headingAlpha = 1 - Math.exp(-8.0 * dt);
+
+          if (Math.abs(dx) > 0.02 || Math.abs(dy) > 0.02 || Math.abs(dHeading) > 0.05) {
+            const nextX = cur.x + dx * gpsAlpha;
+            const nextY = cur.y + dy * gpsAlpha;
+            const nextHeading = (cur.heading + dHeading * headingAlpha + 360) % 360;
+
+            visualGpsRef.current = { x: nextX, y: nextY, heading: nextHeading };
+            setVisualGps({
+              x: nextX,
+              y: nextY,
+              heading: nextHeading,
+            });
+          }
         }
+      } else {
+        hasGpsFixRef.current = false;
       }
 
       // 2. Momentum Inertia Panning (when user released gesture)
@@ -836,7 +849,7 @@ function MapCanvas({
       active = false;
       cancelAnimationFrame(handle);
     };
-  }, [targetGpsPos, targetHeading, isFollowingUser, isNavigating, onBearingChange, gps?.speed, gps?.heading]);
+  }, [targetGpsPos, targetHeading, isFollowingUser, isNavigating, onBearingChange, gps?.speed, gps?.heading, gps?.isGpsActive]);
 
   // Recenter / Reset Action Trigger
   useEffect(() => {
@@ -844,13 +857,19 @@ function MapCanvas({
       cancelAnimationFrame(animFrameRef.current);
       animFrameRef.current = null;
     }
-    const hasLiveGps = gps && (gps.isGpsActive || gps.isTracking) && (gps.lat !== 0 || (gps.canvasPos && (gps.canvasPos.x !== 400 || gps.canvasPos.y !== 300)));
-    if (hasLiveGps) {
+    const hasLiveGps = Boolean(
+      gps &&
+      gps.isGpsActive &&
+      (gps.lat !== 0 || (gps.canvasPos && (gps.canvasPos.x !== 400 || gps.canvasPos.y !== 300)))
+    );
+    if (hasLiveGps && gps) {
       const targetCanvas = (gps.lat && gps.lng) ? gpsToCanvas(gps.lat, gps.lng) : gps.canvasPos;
-      const centerX = bounds.x + bounds.w / 2;
-      const centerY = bounds.y + bounds.h / 2;
-      setPan({ x: centerX - targetCanvas.x, y: centerY - targetCanvas.y });
-      setInternalZoom(0.85);
+      if (targetCanvas) {
+        const centerX = bounds.x + bounds.w / 2;
+        const centerY = bounds.y + bounds.h / 2;
+        setPan({ x: centerX - targetCanvas.x, y: centerY - targetCanvas.y });
+        setInternalZoom(0.85);
+      }
     } else if (livePosition) {
       const centerX = bounds.x + bounds.w / 2;
       const centerY = bounds.y + bounds.h / 2;
@@ -1056,16 +1075,33 @@ function MapCanvas({
       e.preventDefault();
       onUserPan?.();
 
-      const delta = e.deltaY;
-      const normalizedDelta = Math.min(120, Math.max(-120, delta));
-      const zoomMultiplier = Math.pow(0.9982, normalizedDelta);
+      let zoomMultiplier: number;
+      if (e.ctrlKey) {
+        // Laptop touchpad pinch gesture: continuous proportional exponential scale
+        const clampedDelta = Math.min(60, Math.max(-60, e.deltaY));
+        zoomMultiplier = Math.exp(-clampedDelta * 0.008);
+      } else if (e.deltaMode === WheelEvent.DOM_DELTA_PIXEL) {
+        // Laptop touchpad two-finger swipe up/down (continuous pixel stream)
+        const clampedDelta = Math.min(80, Math.max(-80, e.deltaY));
+        zoomMultiplier = Math.exp(-clampedDelta * 0.0012);
+      } else {
+        // Physical discrete mouse wheel (DOM_DELTA_LINE or DOM_DELTA_PAGE)
+        let delta = e.deltaY;
+        if (e.deltaMode === WheelEvent.DOM_DELTA_LINE) {
+          delta *= 20;
+        } else if (e.deltaMode === WheelEvent.DOM_DELTA_PAGE) {
+          delta *= 200;
+        }
+        const normalizedDelta = Math.min(120, Math.max(-120, delta));
+        zoomMultiplier = Math.exp(-normalizedDelta * 0.0018);
+      }
 
       const curInternal = internalZoomRef.current;
       const extZ = externalZoomRef.current || 1;
       const curTargetTotal = extZ * curInternal;
       const newTargetTotal = Math.min(5, Math.max(0.35, curTargetTotal * zoomMultiplier));
       const newInternal = newTargetTotal / extZ;
-      if (Math.abs(newInternal - curInternal) < 0.0004) return;
+      if (Math.abs(newInternal - curInternal) < 0.0001) return;
 
       const rect = svg.getBoundingClientRect();
       const mouseRatioX = (e.clientX - rect.left) / (rect.width || 1);
@@ -1090,8 +1126,8 @@ function MapCanvas({
 
       const nextPan = { x: panRef.current.x + dPanX, y: panRef.current.y + dPanY };
       panRef.current = nextPan;
-      setPan(nextPan);
-      setInternalZoom(newInternal);
+      internalZoomRef.current = newInternal;
+      targetZoomRef.current = newTargetTotal;
     };
 
     svg.addEventListener("wheel", handleWheel, { passive: false });
@@ -1249,11 +1285,13 @@ function MapCanvas({
         const extZ = externalZoomRef.current || 1;
         const targetTotal = Math.min(5, Math.max(0.35, gState.initialZoom * ratio));
         const newInternal = targetTotal / extZ;
-        setInternalZoom(newInternal);
+        internalZoomRef.current = newInternal;
+        targetZoomRef.current = targetTotal;
 
         // 2. Continuous Two-Finger Rotation
         const deltaAngle = currentAngle - gState.initialAngle;
         const newBearing = (gState.initialBearing + deltaAngle + 360) % 360;
+        bearingRef.current = newBearing;
         onBearingChange?.(newBearing);
 
         // 3. Two-Finger Pan Midpoint Tracking with Rotation Compensation
@@ -1262,7 +1300,7 @@ function MapCanvas({
         const rad = (-bearingRef.current * Math.PI) / 180;
         const dx = rawDx * Math.cos(rad) - rawDy * Math.sin(rad);
         const dy = rawDx * Math.sin(rad) + rawDy * Math.cos(rad);
-        setPan((prev) => ({ x: prev.x + dx, y: prev.y + dy }));
+        panRef.current = { x: panRef.current.x + dx, y: panRef.current.y + dy };
         gState.lastCenter = currentCenter;
       } else if (e.touches.length === 1) {
         e.preventDefault();
@@ -1613,10 +1651,7 @@ function MapCanvas({
             const roofSvgPath = getPolygonSvgPath(roofPts);
             const wallFacets = getWallFacets(canvasPts, roofPts);
 
-            const buildingEvents = showEvents ? allEvents.filter((ev) => ev.buildingId === b.id) : [];
-            const activeEvent = buildingEvents.find((ev) => isEventActive(ev, nowMs));
-
-            const strokeColor = activeEvent?.color || b.color || "#6366f1";
+            const strokeColor = b.color || "#6366f1";
             const bName = b.name;
             const badgeWidth = Math.max(140, bName.length * 8.5 + 32);
 
@@ -1650,7 +1685,7 @@ function MapCanvas({
                   d={roofSvgPath}
                   fill="url(#bldRoofGrad)"
                   stroke={strokeColor}
-                  strokeWidth={activeEvent ? "2.5" : "1.75"}
+                  strokeWidth="1.75"
                   strokeDasharray={floorId !== "f-out" && !isGroundFloor ? "6 4" : undefined}
                   strokeLinejoin="round"
                   className="transition-all"
@@ -1902,8 +1937,8 @@ function MapCanvas({
           );
         })}
 
-        {/* Multimodal Transfer Node Badge */}
-        {route?.transferNodeId && (() => {
+        {/* Multimodal Transfer Node Badge: Only show when EV Mode is selected and transitions to a pedestrian-only walkway */}
+        {route?.transferNodeId && (route.travelMode === "EV" || route.travelMode === "MULTIMODAL") && (route.evDistance ?? 0) > 0 && (() => {
           const transNode = allNodes.find((n) => n.id === route.transferNodeId);
           if (!transNode || (transNode.floorId !== floorId && floorId !== "f-out")) return null;
           return (
@@ -2109,7 +2144,7 @@ function MapCanvas({
         })}
 
         {/* ── Smoothed Device GPS Live Marker with Directional Cone & Accuracy Ring ── */}
-        {targetGpsPos && (
+        {targetGpsPos && gps?.isGpsActive && (
           <g transform={`translate(${visualGps.x}, ${visualGps.y})`}>
             {/* Accuracy Ring */}
             <circle
@@ -2161,7 +2196,7 @@ function MapCanvas({
         )}
 
         {/* Dynamic Connector Line: Live GPS to Nearest Route Entry Node */}
-        {targetGpsPos && fromSelected?.id === "dest-live-user-location" && route && route.nodes.length > 0 && (route.nodes[0].floorId === floorId || floorId === "f-out") && (
+        {targetGpsPos && gps?.isGpsActive && fromSelected?.id === "dest-live-user-location" && route && route.nodes.length > 0 && (route.nodes[0].floorId === floorId || floorId === "f-out") && (
           <g pointerEvents="none">
             <line
               x1={visualGps.x}
@@ -2185,8 +2220,8 @@ function MapCanvas({
           </g>
         )}
 
-        {/* Fallback Live Position marker */}
-        {showLiveHere && livePosition && !gps?.isGpsActive && !targetGpsPos && (
+        {/* Fallback Live Position marker (e.g. simulated route navigation) */}
+        {showLiveHere && livePosition && !gps?.isGpsActive && (
           <g>
             <circle
               cx={livePosition.x}

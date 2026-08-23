@@ -3,14 +3,13 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { motion, useReducedMotion } from "framer-motion";
-import { MapPin, Search, Sparkles } from "lucide-react";
+import { MapPin, Search } from "lucide-react";
 import { Input } from "@/shared/components/ui/input";
 import { Badge } from "@/shared/components/ui/badge";
 import { Button } from "@/shared/components/ui/button";
 import { campusStore } from "@/shared/lib/campus-store";
 import type { Destination } from "@/shared/data/campus";
 
-import { isEventActive } from "@/shared/lib/event-utils";
 import { isStairOrLiftOrUnnamed } from "@/shared/lib/destination-utils";
 
 const containerVariants = {
@@ -68,7 +67,7 @@ export function ExplorePanel() {
     (storeData.nodes || []).forEach((n) => nodeMap.set(n.id, n));
 
     // Destinations from store (exclude destinations whose linked node is hidden or stairs/lifts)
-    const destItems: (Destination & { isEvent?: boolean; eventTitle?: string })[] = (storeData.destinations || [])
+    const destItems: Destination[] = (storeData.destinations || [])
       .filter((d) => {
         if (!d.name || d.name.trim().length === 0) return false;
         if (d.nodeId) {
@@ -78,40 +77,17 @@ export function ExplorePanel() {
           }
         }
         return !isStairOrLiftOrUnnamed(d);
-      })
-      .map((d) => ({
-        ...d,
-        isEvent: false,
-      }));
+      });
 
     // Buildings from store
-    const buildingItems = (storeData.buildings || []).map((b) => {
-      const activeEv = (storeData.events || []).find((ev) => ev.buildingId === b.id && isEventActive(ev));
-      return {
-        id: b.id,
-        name: b.name,
-        category: activeEv ? "Events" : "Building",
-        floorId: "f-out",
-        nodeId: b.id,
-        aliases: [b.shortCode || "", b.name, activeEv?.title || ""].filter(Boolean),
-        isEvent: !!activeEv,
-        eventTitle: activeEv?.title,
-      };
-    });
-
-    // Standalone Events from store
-    const eventItems = (storeData.events || [])
-      .filter((ev) => isEventActive(ev) && !storeData.buildings.some((b) => b.id === ev.buildingId))
-      .map((ev) => ({
-        id: ev.id,
-        name: ev.title,
-        category: "Events",
-        floorId: "f-out",
-        nodeId: ev.id,
-        aliases: [ev.title, ev.description || ""].filter(Boolean),
-        isEvent: true,
-        eventTitle: ev.title,
-      }));
+    const buildingItems = (storeData.buildings || []).map((b) => ({
+      id: b.id,
+      name: b.name,
+      category: "Building",
+      floorId: "f-out",
+      nodeId: b.id,
+      aliases: [b.shortCode || "", b.name].filter(Boolean),
+    }));
 
     // Named Nodes (Gates, Entrances, Landmarks) from store
     const namedNodeItems = (storeData.nodes || [])
@@ -142,17 +118,13 @@ export function ExplorePanel() {
             ...(n.name!.toLowerCase().includes("gate") ? ["gate", "entrance", "main gate", "a gate"] : []),
             ...(n.name!.toLowerCase().includes("entrance") ? ["entrance", "entry", "door"] : []),
           ],
-          isEvent: false,
         };
       });
 
-    const map = new Map<string, Destination & { isEvent?: boolean; eventTitle?: string }>();
+    const map = new Map<string, Destination>();
     destItems.forEach((d) => map.set(d.id, d));
     buildingItems.forEach((b) => {
       if (!map.has(b.id)) map.set(b.id, b);
-    });
-    eventItems.forEach((e) => {
-      if (!map.has(e.id)) map.set(e.id, e);
     });
     namedNodeItems.forEach((n) => {
       if (!map.has(n.id)) map.set(n.id, n);
@@ -172,18 +144,14 @@ export function ExplorePanel() {
     });
   }, [items, q]);
 
-  // Ensure category chips order: "All" -> "Events" -> "Academic" / other categories
+  // Clean category chips
   const categories = useMemo(() => {
     const rawSet = new Set(searchResults.map((i) => i.category || "General"));
-    const rest = Array.from(rawSet).filter((c) => c !== "Events");
-    return ["Events", ...rest];
+    return Array.from(rawSet);
   }, [searchResults]);
 
   const filtered = useMemo(() => {
     if (!category) return searchResults;
-    if (category === "Events") {
-      return searchResults.filter((i) => i.category === "Events" || i.isEvent);
-    }
     return searchResults.filter((i) => (i.category || "General") === category);
   }, [searchResults, category]);
 
@@ -239,14 +207,13 @@ export function ExplorePanel() {
             <div className="flex items-start justify-between gap-2">
               <div className="min-w-0">
                 <div className="text-base font-semibold truncate flex items-center gap-1.5">
-                  {d.isEvent && <Sparkles className="h-4 w-4 text-amber-500 shrink-0" />}
                   <span>{d.name}</span>
                 </div>
                 <div className="mt-0.5 text-xs text-[rgb(var(--muted-fg))] truncate">
-                  {d.eventTitle ? `Event: ${d.eventTitle}` : (d.aliases ?? []).slice(0, 2).join(" · ") || d.name}
+                  {(d.aliases ?? []).slice(0, 2).join(" · ") || d.name}
                 </div>
               </div>
-              <Badge variant={d.isEvent ? "warning" : "primary"} className="shrink-0">
+              <Badge variant="primary" className="shrink-0">
                 {d.category}
               </Badge>
             </div>

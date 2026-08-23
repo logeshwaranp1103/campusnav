@@ -4,6 +4,8 @@ import { campusStore } from "@/shared/lib/campus-store";
 import { logAuditEvent } from "@/lib/services/audit-service";
 import { prisma } from "@/lib/db";
 
+import { generateShortId } from "@/shared/lib/id-generator";
+
 export async function GET(req: Request) {
   try {
     await requireAdminSession(req);
@@ -24,7 +26,7 @@ export async function POST(req: Request) {
     }
 
     const bld = campusStore.addBuilding({
-      id: body.id || `b-${Date.now().toString(36)}`,
+      id: body.id || generateShortId("b", campusStore.getWorkingData().buildings.map((b) => b.id)),
       campusId: "c1",
       name: body.name,
       shortCode: body.shortCode,

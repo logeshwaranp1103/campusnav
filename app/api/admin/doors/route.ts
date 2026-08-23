@@ -3,6 +3,8 @@ import { requireAdminSession } from "@/lib/auth/auth";
 import { campusStore } from "@/shared/lib/campus-store";
 import { logAuditEvent } from "@/lib/services/audit-service";
 
+import { generateShortId } from "@/shared/lib/id-generator";
+
 export async function GET(req: Request) {
   try {
     await requireAdminSession(req);
@@ -23,7 +25,7 @@ export async function POST(req: Request) {
     }
 
     const door = campusStore.addDoor({
-      id: body.id || `door-${Date.now().toString(36)}`,
+      id: body.id || generateShortId("door", campusStore.getWorkingData().doors.map((d) => d.id)),
       floorId: body.floorId,
       type: body.type || "ROOM_DOOR",
       name: body.name || "Door",

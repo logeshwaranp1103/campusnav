@@ -290,9 +290,18 @@ export function useVisitorGps(
         const gpsError = mapGeolocationError(err);
         const status = mapErrorToStatus(err);
 
+        useLocationStore.getState().setLocationState({
+          status,
+          isTracking: false,
+          isGpsActive: false,
+          error: gpsError.userMessage,
+          gpsError,
+        });
+
         setState((prev) => ({
           ...prev,
           isGpsActive: false,
+          isTracking: false,
           error: gpsError.userMessage,
           status,
           gpsError,
@@ -316,6 +325,12 @@ export function useVisitorGps(
       watchIdRef.current = null;
     }
     lastPositionRef.current = null;
+
+    useLocationStore.getState().setLocationState({
+      status: "stopped",
+      isTracking: false,
+      isGpsActive: false,
+    });
 
     setState((prev) => ({
       ...prev,

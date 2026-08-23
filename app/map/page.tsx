@@ -176,25 +176,57 @@ export default function VisitorPage() {
     };
   }, [toast]);
 
-  // ── Wheel zoom ──────────────────────────────────────────────────────────────
+  const wheelRafRef = useRef<number | null>(null);
+  const targetTransformRef = useRef(transform);
+  targetTransformRef.current = transform;
+
+  // ── Wheel zoom (Instant, Responsive & Cursor-Anchored) ──────────────────────
   const handleWheel = useCallback((e: WheelEvent) => {
     e.preventDefault();
     const container = svgContainerRef.current;
     if (!container) return;
 
+    let zoomMultiplier: number;
+    if (e.ctrlKey) {
+      // Laptop touchpad pinch gesture: continuous proportional exponential scale
+      const clampedDelta = Math.min(60, Math.max(-60, e.deltaY));
+      zoomMultiplier = Math.exp(-clampedDelta * 0.008);
+    } else if (e.deltaMode === WheelEvent.DOM_DELTA_PIXEL) {
+      // Laptop touchpad two-finger swipe up/down (continuous pixel stream)
+      const clampedDelta = Math.min(80, Math.max(-80, e.deltaY));
+      zoomMultiplier = Math.exp(-clampedDelta * 0.0012);
+    } else {
+      // Physical discrete mouse wheel (DOM_DELTA_LINE or DOM_DELTA_PAGE)
+      let delta = e.deltaY;
+      if (e.deltaMode === WheelEvent.DOM_DELTA_LINE) {
+        delta *= 20;
+      } else if (e.deltaMode === WheelEvent.DOM_DELTA_PAGE) {
+        delta *= 200;
+      }
+      const normalizedDelta = Math.min(120, Math.max(-120, delta));
+      zoomMultiplier = Math.exp(-normalizedDelta * 0.0018);
+    }
+
+    const prev = targetTransformRef.current;
+    const newScale = Math.min(MAX_SCALE, Math.max(MIN_SCALE, prev.scale * zoomMultiplier));
+    if (Math.abs(newScale - prev.scale) < 0.0001) return;
+
     const rect = container.getBoundingClientRect();
     const mouseX = e.clientX - rect.left;
     const mouseY = e.clientY - rect.top;
 
-    setTransform((prev) => {
-      const zoomFactor = e.deltaY < 0 ? 1 + ZOOM_STEP : 1 - ZOOM_STEP;
-      const newScale = Math.min(MAX_SCALE, Math.max(MIN_SCALE, prev.scale * zoomFactor));
-      const scaleDiff = newScale / prev.scale;
-      // Zoom toward mouse cursor
-      const newX = mouseX - scaleDiff * (mouseX - prev.x);
-      const newY = mouseY - scaleDiff * (mouseY - prev.y);
-      return { x: newX, y: newY, scale: newScale };
-    });
+    const scaleDiff = newScale / prev.scale;
+    const newX = mouseX - scaleDiff * (mouseX - prev.x);
+    const newY = mouseY - scaleDiff * (mouseY - prev.y);
+
+    targetTransformRef.current = { x: newX, y: newY, scale: newScale };
+
+    if (wheelRafRef.current === null) {
+      wheelRafRef.current = requestAnimationFrame(() => {
+        wheelRafRef.current = null;
+        setTransform(targetTransformRef.current);
+      });
+    }
   }, []);
 
   // Attach wheel listener with { passive: false } so we can preventDefault
@@ -202,7 +234,12 @@ export default function VisitorPage() {
     const container = svgContainerRef.current;
     if (!container) return;
     container.addEventListener("wheel", handleWheel, { passive: false });
-    return () => container.removeEventListener("wheel", handleWheel);
+    return () => {
+      container.removeEventListener("wheel", handleWheel);
+      if (wheelRafRef.current !== null) {
+        cancelAnimationFrame(wheelRafRef.current);
+      }
+    };
   }, [handleWheel]);
 
   const transformRef = useRef(transform);

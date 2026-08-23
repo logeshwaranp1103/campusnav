@@ -374,10 +374,10 @@ export function NavigateShell() {
       combinedInstructions = combinedInstructions.concat(segRoute.instructions || []);
     }
 
-    const isMultimodal = combinedEdges.some((e) => e.pathType === "EV") && combinedEdges.some((e) => e.pathType === "WALK");
-    const evDist = combinedEdges.filter((e) => e.pathType === "EV").reduce((acc, e) => acc + e.distance, 0);
-    const walkDist = combinedEdges.filter((e) => e.pathType !== "EV").reduce((acc, e) => acc + e.distance, 0);
-    const lastEvEdge = combinedEdges.filter((e) => e.pathType === "EV").pop();
+    const isMultimodal = mode === "EV" && combinedEdges.some((e) => e.pathType === "EV") && combinedEdges.some((e) => e.pathType === "WALK");
+    const evDist = mode === "EV" ? combinedEdges.filter((e) => e.pathType === "EV").reduce((acc, e) => acc + e.distance, 0) : 0;
+    const walkDist = mode === "EV" ? combinedEdges.filter((e) => e.pathType !== "EV").reduce((acc, e) => acc + e.distance, 0) : totalDistance;
+    const lastEvEdge = mode === "EV" ? combinedEdges.filter((e) => e.pathType === "EV").pop() : undefined;
     const isFallbackWalk = mode === "EV" && evDist === 0;
 
     const clientRoute: Route = {
@@ -390,7 +390,7 @@ export function NavigateShell() {
       travelMode: isFallbackWalk ? "WALK" : (isMultimodal ? "MULTIMODAL" : mode),
       evDistance: evDist,
       walkDistance: walkDist,
-      transferNodeId: isMultimodal && lastEvEdge ? lastEvEdge.to : undefined,
+      transferNodeId: mode === "EV" && isMultimodal && lastEvEdge ? lastEvEdge.to : undefined,
       hasObstacles,
       isFallbackWalk,
       fallbackReason: isFallbackWalk ? "EV path not available, Showing walkable route" : undefined,

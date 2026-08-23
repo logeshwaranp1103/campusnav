@@ -43,6 +43,7 @@ import {
   Rocket,
   Camera,
   RotateCcw,
+  Hash,
 } from "lucide-react";
 import { PublishModal } from "@/shared/components/publish-modal";
 import { campusStore } from "@/shared/lib/campus-store";
@@ -55,6 +56,7 @@ import { Button } from "@/shared/components/ui/button";
 import { Input } from "@/shared/components/ui/input";
 import { Badge } from "@/shared/components/ui/badge";
 import { useToast } from "@/shared/components/ui/toast";
+import { generateShortId } from "@/shared/lib/id-generator";
 import type {
   Building as BuildingType,
   Node,
@@ -906,7 +908,7 @@ export function EntityManager() {
           return;
         }
 
-        const bldId = `bld-${Date.now().toString(36)}`;
+        const bldId = generateShortId("b", campusStore.getWorkingData().buildings.map((b) => b.id));
         const center = getCenterFromCorners(parsedCorners);
         const centerLat = center.lat;
         const centerLng = center.lng;
@@ -2292,6 +2294,25 @@ export function EntityManager() {
             >
               <Upload className="h-4 w-4" />
               <span className="font-semibold text-xs">Feed Whole Data</span>
+            </Button>
+
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => {
+                const res = campusStore.compactAllIds();
+                setStoreData({ ...campusStore.getWorkingData() });
+                toast({
+                  type: "success",
+                  title: "All Object IDs Shortened & Cleaned",
+                  description: `Shortened ${res.stats.nodes} nodes, ${res.stats.edges} edges, ${res.stats.buildings} buildings, ${res.stats.destinations} rooms into clean short unique IDs!`,
+                });
+              }}
+              className="gap-1.5 shadow-xs border-indigo-500/40 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-500/10"
+              title="Shorten and clean all long object IDs across the campus graph"
+            >
+              <Hash className="h-4 w-4" />
+              <span className="font-semibold text-xs">Shorten All IDs</span>
             </Button>
 
             <Link href="/admin/editor">

@@ -263,6 +263,7 @@ function computeShortestPathForData(
 
   // Primary search: Evaluate candidate node combinations in ascending distance order
   let bestResult: ReturnType<typeof findShortestPath> = null;
+  let bestTotalTripDistance = Infinity;
   let isObstacleFree = false;
 
   const isStartingFromLiveLocation =
