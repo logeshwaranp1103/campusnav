@@ -1037,21 +1037,21 @@ function MapCanvas({
     const rect = svgRef.current.getBoundingClientRect();
     const curEffW = boundsRef.current.w / (visualZoomRef.current || 1);
     const curEffH = boundsRef.current.h / (visualZoomRef.current || 1);
-    const scaleX = curEffW / (rect.width || 1);
-    const scaleY = curEffH / (rect.height || 1);
+    // SVG viewBox with preserveAspectRatio="xMidYMid meet" maintains a single uniform scale across X and Y
+    const uniformScale = Math.max(curEffW / (rect.width || 1), curEffH / (rect.height || 1));
     const now = Date.now();
     const dt = Math.max(1, now - (lastTouchTimeRef.current || now));
 
-    const rawDx = (e.clientX - dragStart.x) * scaleX;
-    const rawDy = (e.clientY - dragStart.y) * scaleY;
+    const rawDx = (e.clientX - dragStart.x) * uniformScale;
+    const rawDy = (e.clientY - dragStart.y) * uniformScale;
 
     // Rotate screen gesture delta by -bearing so dragging on rotated canvas matches hand movement exactly
     const rad = (-bearingRef.current * Math.PI) / 180;
     const dx = rawDx * Math.cos(rad) - rawDy * Math.sin(rad);
     const dy = rawDx * Math.sin(rad) + rawDy * Math.cos(rad);
 
-    const rawVx = ((e.clientX - lastTouchPosRef.current.x) * scaleX) / (dt / 16);
-    const rawVy = ((e.clientY - lastTouchPosRef.current.y) * scaleY) / (dt / 16);
+    const rawVx = ((e.clientX - lastTouchPosRef.current.x) * uniformScale) / (dt / 16);
+    const rawVy = ((e.clientY - lastTouchPosRef.current.y) * uniformScale) / (dt / 16);
     const vx = rawVx * Math.cos(rad) - rawVy * Math.sin(rad);
     const vy = rawVx * Math.sin(rad) + rawVy * Math.cos(rad);
     velocityRef.current = { vx, vy };
@@ -1254,8 +1254,8 @@ function MapCanvas({
       const bH = boundsRef.current.h;
       const curEffW = bW / (visualZoomRef.current || 1);
       const curEffH = bH / (visualZoomRef.current || 1);
-      const scaleX = curEffW / (rect.width || 1);
-      const scaleY = curEffH / (rect.height || 1);
+      // SVG viewBox with preserveAspectRatio="xMidYMid meet" maintains a single uniform scale across X and Y
+      const uniformScale = Math.max(curEffW / (rect.width || 1), curEffH / (rect.height || 1));
       const now = Date.now();
       const dt = Math.max(1, now - (lastTouchTimeRef.current || now));
 
@@ -1295,8 +1295,8 @@ function MapCanvas({
         onBearingChange?.(newBearing);
 
         // 3. Two-Finger Pan Midpoint Tracking with Rotation Compensation
-        const rawDx = (currentCenter.x - gState.lastCenter.x) * scaleX;
-        const rawDy = (currentCenter.y - gState.lastCenter.y) * scaleY;
+        const rawDx = (currentCenter.x - gState.lastCenter.x) * uniformScale;
+        const rawDy = (currentCenter.y - gState.lastCenter.y) * uniformScale;
         const rad = (-bearingRef.current * Math.PI) / 180;
         const dx = rawDx * Math.cos(rad) - rawDy * Math.sin(rad);
         const dy = rawDx * Math.sin(rad) + rawDy * Math.cos(rad);
@@ -1321,16 +1321,16 @@ function MapCanvas({
           return;
         }
 
-        const rawDx = (touch.clientX - gState.lastPos.x) * scaleX;
-        const rawDy = (touch.clientY - gState.lastPos.y) * scaleY;
+        const rawDx = (touch.clientX - gState.lastPos.x) * uniformScale;
+        const rawDy = (touch.clientY - gState.lastPos.y) * uniformScale;
         const rad = (-bearingRef.current * Math.PI) / 180;
         const dx = rawDx * Math.cos(rad) - rawDy * Math.sin(rad);
         const dy = rawDx * Math.sin(rad) + rawDy * Math.cos(rad);
 
         setPan((prev) => ({ x: prev.x + dx, y: prev.y + dy }));
 
-        const rawVx = ((touch.clientX - lastTouchPosRef.current.x) * scaleX) / (dt / 16);
-        const rawVy = ((touch.clientY - lastTouchPosRef.current.y) * scaleY) / (dt / 16);
+        const rawVx = ((touch.clientX - lastTouchPosRef.current.x) * uniformScale) / (dt / 16);
+        const rawVy = ((touch.clientY - lastTouchPosRef.current.y) * uniformScale) / (dt / 16);
         const vx = rawVx * Math.cos(rad) - rawVy * Math.sin(rad);
         const vy = rawVx * Math.sin(rad) + rawVy * Math.cos(rad);
         velocityRef.current = { vx, vy };
