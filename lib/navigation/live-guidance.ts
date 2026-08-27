@@ -162,8 +162,9 @@ export function projectUserOntoRoute(
   let bestT = 0;
   let bestActualDistMeters = 0;
 
-  const startIndex = Math.max(0, previousSegmentIndex - 1);
-  const endIndex = numSegments - 1;
+  // Incremental forward lookahead: only check immediate current and next segment to prevent skipping steps
+  const startIndex = Math.max(0, previousSegmentIndex);
+  const endIndex = Math.min(numSegments - 1, previousSegmentIndex + 1);
 
   for (let i = startIndex; i <= endIndex; i++) {
     const n1 = routeNodes[i];

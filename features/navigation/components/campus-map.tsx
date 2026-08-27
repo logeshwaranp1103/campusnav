@@ -104,17 +104,6 @@ export function CampusMap({ route, livePosition, progress, gps: passedGps, onNav
     };
   }, []);
 
-  // Auto-switch floor view when live position, real GPS location, or route floor changes
-  useEffect(() => {
-    if (livePosition?.floorId) {
-      setView(livePosition.floorId);
-    } else if (gps.isGpsActive && gps.canvasPos?.floorId) {
-      setView(gps.canvasPos.floorId);
-    } else if (route && route.nodes.length > 0 && route.nodes[0].floorId) {
-      setView(route.nodes[0].floorId);
-    }
-  }, [livePosition?.floorId, gps.isGpsActive, gps.canvasPos?.floorId, route]);
-
   // Contextual Floor Filter
   const indoorFloors = useMemo(() => {
     const allFloors = publishedData.floors || [];
@@ -911,24 +900,6 @@ function MapCanvas({
             x: nextPanX,
             y: nextPanY,
           });
-        }
-
-        // Automatic Google-Maps-Style Map Auto-Rotation (Aligns map smoothly ONLY during active navigation AND real physical motion)
-        const isActuallyMoving = isNavigating && gps?.speed !== null && gps?.speed !== undefined && gps.speed >= 0.45;
-        if (isActuallyMoving && targetHeading >= 0) {
-          const targetMapBearing = (360 - targetHeading + 360) % 360;
-          const dMapBearing = calculateShortestAngleDelta(bearingRef.current, targetMapBearing);
-          // Stationary deadband & low-pass filter: ignore micro-noise under 2.0 degrees to eliminate jitter
-          if (Math.abs(dMapBearing) > 2.0) {
-            const rotateAlpha = 1 - Math.exp(-6.0 * dt);
-            const nextBearing = (bearingRef.current + dMapBearing * rotateAlpha + 360) % 360;
-            bearingRef.current = nextBearing;
-            targetBearingRef.current = nextBearing;
-            if (Math.abs(nextBearing - lastReportedBearingRef.current) > 1.5) {
-              lastReportedBearingRef.current = nextBearing;
-              onBearingChange?.(nextBearing);
-            }
-          }
         }
       }
 
