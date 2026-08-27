@@ -354,6 +354,7 @@ export function CampusMap({ route, livePosition, progress, gps: passedGps, onNav
     if (gps && !gps.isTracking) {
       gps.startTracking();
     }
+    useNavigationStore.getState().resetManualStepping();
     setIsFollowingUser(true);
     setResetTrigger((t) => t + 1);
   }, [gps]);

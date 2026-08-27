@@ -312,5 +312,28 @@ export function generateDirections(
     photoUrl: lastNode.photoUrl,
   });
 
-  return steps;
+  // Combine consecutive "Go straight" steps and sum their distances into one clean step
+  const merged: DirectionStep[] = [];
+  for (let i = 0; i < steps.length; i++) {
+    const current = steps[i];
+    const prev = merged[merged.length - 1];
+
+    const isStraight = current.icon === "straight";
+    const prevIsStraight = prev && prev.icon === "straight";
+    const noFloorChange = prev && !prev.floorChange && !current.floorChange;
+
+    if (prev && prevIsStraight && isStraight && noFloorChange && current.icon !== "arrive") {
+      prev.distanceMeters = Math.round(prev.distanceMeters + current.distanceMeters);
+      prev.targetNodeId = current.targetNodeId || prev.targetNodeId;
+      prev.targetNodeName = current.targetNodeName || prev.targetNodeName;
+      if (current.photoUrl) prev.photoUrl = current.photoUrl;
+      if (current.text && current.text !== "Go straight" && prev.text === "Go straight") {
+        prev.text = current.text;
+      }
+    } else {
+      merged.push({ ...current });
+    }
+  }
+
+  return merged;
 }

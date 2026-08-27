@@ -768,5 +768,33 @@ function buildInstructions(
     targetNodeName: last?.visibleToUser === false ? undefined : last?.name,
     photoUrl: last?.photoUrl,
   });
-  return out;
+
+  // Combine consecutive "Go straight" / straight steps into one clean step with summed distance
+  const merged: RouteInstruction[] = [];
+  for (let i = 0; i < out.length; i++) {
+    const current = out[i];
+    const prev = merged[merged.length - 1];
+
+    const isStraight = current.icon === "straight" && (!current.transition || current.transition === "outdoor->indoor");
+    const prevIsStraight = prev && prev.icon === "straight" && (!prev.transition || prev.transition === "outdoor->indoor");
+
+    const sameFloor = prev && (prev.floor === current.floor);
+    const sameBuilding = prev && (prev.building === current.building);
+    const sameMode = prev && (prev.mode === current.mode);
+
+    if (prev && prevIsStraight && isStraight && sameFloor && sameBuilding && sameMode && current.icon !== "arrive") {
+      // Sum distance into previous instruction
+      prev.distance = Math.round(prev.distance + current.distance);
+      prev.targetNodeId = current.targetNodeId || prev.targetNodeId;
+      prev.targetNodeName = current.targetNodeName || prev.targetNodeName;
+      if (current.photoUrl) prev.photoUrl = current.photoUrl;
+      if (current.text && current.text !== "Go straight" && prev.text === "Go straight") {
+        prev.text = current.text;
+      }
+    } else {
+      merged.push({ ...current });
+    }
+  }
+
+  return merged;
 }

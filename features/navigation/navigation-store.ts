@@ -69,6 +69,8 @@ export interface NavigationSessionState {
   activeRequestId: number;
   errorMessage: string | null;
 
+  isManualStepping: boolean;
+
   // Actions
   startNavigationSession: (
     origin: Destination,
@@ -99,6 +101,7 @@ export interface NavigationSessionState {
   cancelNavigationSession: () => void;
   advanceToNextStep: () => void;
   advanceToPrevStep: () => void;
+  resetManualStepping: () => void;
   setGpsSignalLost: () => void;
   setNavigationStatus: (status: NavigationStatus, errorMessage?: string) => void;
 }
@@ -134,6 +137,9 @@ export const useNavigationStore = create<NavigationSessionState>((set, get) => (
   arrivalThresholdMeters: ARRIVAL_THRESHOLD_METERS,
   activeRequestId: 0,
   errorMessage: null,
+  isManualStepping: false,
+
+  resetManualStepping: () => set({ isManualStepping: false }),
 
   setNavigationStatus: (status, errorMessage) =>
     set({ status, ...(errorMessage !== undefined ? { errorMessage } : {}) }),
@@ -201,6 +207,7 @@ export const useNavigationStore = create<NavigationSessionState>((set, get) => (
       lastRerouteTimestamp: Date.now(),
       activeRequestId: state.activeRequestId + 1,
       errorMessage: null,
+      isManualStepping: false,
     }));
   },
 
@@ -348,8 +355,10 @@ export const useNavigationStore = create<NavigationSessionState>((set, get) => (
     }
 
     // 4. ON-ROUTE UPDATE: Progress along segment & Phase 3 Indoor Mode / Floor Detection
-    const segmentIndex = guidance.currentSegmentIndex;
-    const currentNode = matchedNode ?? activeRoute.nodes[segmentIndex] ?? activeRoute.nodes[0];
+    const activeSegmentIndex = state.isManualStepping
+      ? state.currentSegmentIndex
+      : guidance.currentSegmentIndex;
+    const currentNode = matchedNode ?? activeRoute.nodes[activeSegmentIndex] ?? activeRoute.nodes[0];
 
     // Determine Phase 3 Navigation Mode & Floor Context
     let nextMode: NavigationMode = "OUTDOOR";
@@ -370,7 +379,24 @@ export const useNavigationStore = create<NavigationSessionState>((set, get) => (
       nextConfidence = "MEDIUM";
     }
 
-    const etaSeconds = Math.max(1, Math.round(guidance.distanceRemaining / AVERAGE_WALKING_SPEED_MPS));
+    const instructions = activeRoute.instructions || [];
+    const currentInstruction = state.isManualStepping
+      ? (instructions[state.currentSegmentIndex] ?? guidance.currentInstruction)
+      : guidance.currentInstruction;
+    const nextInstruction = state.isManualStepping
+      ? (instructions[state.currentSegmentIndex + 1] ?? guidance.nextInstruction)
+      : guidance.nextInstruction;
+
+    let distanceRemaining = guidance.distanceRemaining;
+    if (state.isManualStepping) {
+      let rem = 0;
+      for (let i = state.currentSegmentIndex; i < instructions.length; i++) {
+        rem += (instructions[i]?.distance ?? 0);
+      }
+      if (rem > 0) distanceRemaining = rem;
+    }
+
+    const etaSeconds = Math.max(1, Math.round(distanceRemaining / AVERAGE_WALKING_SPEED_MPS));
 
     set({
       status: "NAVIGATING",
@@ -379,12 +405,12 @@ export const useNavigationStore = create<NavigationSessionState>((set, get) => (
       currentBuildingId: (currentNode as any)?.buildingId ?? state.currentBuildingId,
       indoorPositionSource: nextSource,
       positionConfidence: nextConfidence,
-      currentSegmentIndex: segmentIndex,
+      currentSegmentIndex: activeSegmentIndex,
       matchedNodeId: matchedNode?.id ?? currentNode.id ?? state.matchedNodeId,
-      distanceRemaining: guidance.distanceRemaining,
+      distanceRemaining: Math.round(distanceRemaining),
       etaSeconds,
-      currentInstruction: guidance.currentInstruction,
-      nextInstruction: guidance.nextInstruction,
+      currentInstruction,
+      nextInstruction,
       consecutiveOffRouteCount: 0,
     });
   },
@@ -442,6 +468,7 @@ export const useNavigationStore = create<NavigationSessionState>((set, get) => (
       etaSeconds: Math.max(1, Math.round(remainingDistance / AVERAGE_WALKING_SPEED_MPS)),
       currentInstruction,
       nextInstruction,
+      isManualStepping: true,
     });
   },
   advanceToPrevStep: () => {
@@ -473,6 +500,7 @@ export const useNavigationStore = create<NavigationSessionState>((set, get) => (
       etaSeconds: Math.max(1, Math.round(remainingDistance / AVERAGE_WALKING_SPEED_MPS)),
       currentInstruction,
       nextInstruction,
+      isManualStepping: true,
     });
   },
 
