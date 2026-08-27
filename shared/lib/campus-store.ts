@@ -2550,14 +2550,32 @@ class CampusStore {
     return { version: this.publishedVersion, count: this.buildings.length };
   }
 
-  public async syncWithServer(): Promise<boolean> {
+  private lastFetchTime = 0;
+  private static readonly FETCH_COOLDOWN_MS = 5000; // 5-second deduplication cooldown across React components
+
+  public async syncWithServer(force = false): Promise<boolean> {
     if (typeof window === "undefined") return false;
+
+    // 1. If an in-flight sync request is currently active, all callers share the same Promise
     if (this.syncPromise) {
       return this.syncPromise;
     }
-    this.syncPromise = this.performSyncWithServer().finally(() => {
-      this.syncPromise = null;
-    });
+
+    // 2. Cooldown check: If data was loaded within the cooldown window and not forced, return immediately
+    const now = Date.now();
+    if (!force && this.isInitialized && now - this.lastFetchTime < CampusStore.FETCH_COOLDOWN_MS) {
+      return true;
+    }
+
+    this.syncPromise = this.performSyncWithServer()
+      .then((res) => {
+        this.lastFetchTime = Date.now();
+        return res;
+      })
+      .finally(() => {
+        this.syncPromise = null;
+      });
+
     return this.syncPromise;
   }
 
@@ -2803,9 +2821,9 @@ class CampusStore {
     }
   }
 
-  public async fetchPublishedData(force = true): Promise<ReturnType<CampusStore["getPublishedData"]>> {
+  public async fetchPublishedData(force = false): Promise<ReturnType<CampusStore["getPublishedData"]>> {
     if (typeof window === "undefined") return this.getPublishedData();
-    await this.syncWithServer();
+    await this.syncWithServer(force);
     return this.getPublishedData();
   }
 

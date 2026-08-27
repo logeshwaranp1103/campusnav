@@ -14,7 +14,7 @@ import { detectBuildingAtGps } from "@/lib/geo/containment";
 import { calculateShortestAngleDelta } from "@/lib/geo/haversine";
 import { DestinationDetailsDrawer } from "./destination-details-drawer";
 import { useNavigationStore } from "@/features/navigation/navigation-store";
-import { MAX_MAP_ZOOM, MIN_MAP_ZOOM } from "@/shared/lib/map-config";
+import { MAX_MAP_ZOOM, MIN_MAP_ZOOM, cleanStairLiftDisplayName } from "@/shared/lib/map-config";
 
 /**
  * Computes roof elevated points for lightweight 3D isometric building extrusion.
@@ -75,9 +75,9 @@ export function CampusMap({ route, livePosition, progress, gps: passedGps, onNav
   const [resetTrigger, setResetTrigger] = useState(0);
   const [isFollowingUser, setIsFollowingUser] = useState(true);
 
-  // User Layer Toggle for Obstacles & Node Names
+  // User Layer Toggle for Obstacles & Object/Node Names (hidden by default during live navigation)
   const [showObstacles, setShowObstacles] = useState(true);
-  const [showNodeNames, setShowNodeNames] = useState(true);
+  const [showNodeNames, setShowNodeNames] = useState(!isNavigating);
 
   // Avoid duplicate geolocation watcher by instantiating hook only when passedGps is missing
   const internalGps = useVisitorGps(undefined, { autoStart: !passedGps });
@@ -109,11 +109,11 @@ export function CampusMap({ route, livePosition, progress, gps: passedGps, onNav
   // ── Auto-select the starting floor & Auto-hide node names when Start Navigation is clicked ──
   const prevNavStatusRef = useRef(navStatus);
   useEffect(() => {
-    const isNowNavigating = navStatus === "NAVIGATING" || navStatus === "OFF_ROUTE" || navStatus === "REROUTING";
+    const isNowNavigating = navStatus === "NAVIGATING" || navStatus === "OFF_ROUTE" || navStatus === "REROUTING" || isNavigating;
     const wasNavigating = prevNavStatusRef.current === "NAVIGATING" || prevNavStatusRef.current === "OFF_ROUTE" || prevNavStatusRef.current === "REROUTING";
 
-    if (isNowNavigating && !wasNavigating) {
-      // Auto-hide node names instantly on start navigation
+    if (isNowNavigating && (!wasNavigating || !isNavigating)) {
+      // Auto-hide all object and node names instantly when navigation starts
       setShowNodeNames(false);
 
       // Find the starting floor from selected origin, route origin, or live location
@@ -134,7 +134,7 @@ export function CampusMap({ route, livePosition, progress, gps: passedGps, onNav
       }
     }
     prevNavStatusRef.current = navStatus;
-  }, [navStatus, fromSelected?.floorId, route, gps.canvasPos?.floorId]);
+  }, [navStatus, isNavigating, fromSelected?.floorId, route, gps.canvasPos?.floorId]);
 
   // Contextual Floor Filter
   const indoorFloors = useMemo(() => {
@@ -586,20 +586,33 @@ export function CampusMap({ route, livePosition, progress, gps: passedGps, onNav
             <ZoomOut className="h-5 w-5 stroke-[2.25]" />
           </button>
           <button
-            onClick={() => {
-              setZoomLevel(1);
-              setResetTrigger((t) => t + 1);
-            }}
-            className="flex h-11 w-11 items-center justify-center rounded-xl text-[rgb(var(--fg))] hover:bg-[rgb(var(--muted))] active:scale-95 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[rgb(var(--primary))]"
-            title="Fit / Reset View"
-            aria-label="Reset View"
+            onClick={toggleFullscreen}
+            className="flex h-11 w-11 items-center justify-center rounded-xl text-[rgb(var(--fg))] hover:bg-[rgb(var(--muted))] active:scale-95 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[rgb(var(--primary))] cursor-pointer"
+            title={isFullscreen ? "Exit Fullscreen" : "Fullscreen Map"}
+            aria-label={isFullscreen ? "Exit Fullscreen" : "Fullscreen Map"}
           >
-            <Maximize2 className="h-4.5 w-4.5 stroke-[2.25]" />
+            {isFullscreen ? (
+              <Minimize2 className="h-5 w-5 stroke-[2.25] text-indigo-600 dark:text-indigo-400" />
+            ) : (
+              <Maximize2 className="h-5 w-5 stroke-[2.25]" />
+            )}
           </button>
         </div>
 
-        {/* Hazard Layer Toggle */}
+        {/* Layer Toggles Stack (Object/Node Names & Hazards) */}
         <div className="flex flex-col gap-1 rounded-2xl border bg-[rgb(var(--card))]/90 p-1 shadow-lg backdrop-blur-md w-fit">
+          <button
+            onClick={() => setShowNodeNames(!showNodeNames)}
+            className={`flex h-11 w-11 items-center justify-center rounded-xl text-[11px] font-semibold active:scale-95 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 cursor-pointer ${
+              showNodeNames
+                ? "bg-indigo-500/15 text-indigo-600 dark:text-indigo-400 border border-indigo-500/30 shadow-xs"
+                : "text-[rgb(var(--muted-fg))] hover:bg-[rgb(var(--muted))]"
+            }`}
+            title={showNodeNames ? "Hide Object & Node Names" : "Show Object & Node Names"}
+            aria-label="Toggle Names"
+          >
+            <Tag className={`h-5 w-5 shrink-0 stroke-[2.25] ${showNodeNames ? "text-indigo-500" : "opacity-40"}`} />
+          </button>
           <button
             onClick={() => setShowObstacles(!showObstacles)}
             className={`flex h-11 w-11 items-center justify-center rounded-xl text-[11px] font-semibold active:scale-95 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500 cursor-pointer ${showObstacles
@@ -616,19 +629,9 @@ export function CampusMap({ route, livePosition, progress, gps: passedGps, onNav
 
       {/* ── Bottom-Right Recenter / Follow Location Floating Action Button (FAB) ── */}
       <div className={cn(
-        "absolute right-3.5 z-25 pointer-events-auto flex items-center gap-2 transition-all duration-300",
+        "absolute right-3.5 z-25 pointer-events-auto flex items-center transition-all duration-300",
         isNavigating || route ? "bottom-36 md:bottom-32" : "bottom-24 md:bottom-28"
       )}>
-        {!isFollowingUser && (gps?.isGpsActive || fromSelected?.id === "dest-live-user-location" || livePosition) && (
-          <button
-            onClick={handleRecenter}
-            className="flex h-11 items-center gap-1.5 rounded-full border border-blue-500/40 bg-[rgb(var(--card))]/95 px-3.5 text-xs font-bold text-blue-600 dark:text-blue-400 shadow-xl backdrop-blur-md hover:bg-blue-500/10 active:scale-95 transition-all cursor-pointer animate-in fade-in slide-in-from-bottom-2 duration-200"
-          >
-            <Locate className="h-4 w-4 animate-pulse stroke-[2.5]" />
-            <span>Re-center</span>
-          </button>
-        )}
-
         <button
           onClick={handleRecenter}
           className={`flex h-12 w-12 items-center justify-center rounded-2xl border shadow-xl backdrop-blur-md active:scale-95 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 cursor-pointer ${isFollowingUser
@@ -1122,11 +1125,22 @@ function MapCanvas({
   const isNodeOnActiveFloor = useCallback(
     (n: Node) => {
       if (isOutdoorFloor) {
-        return isNodeOutdoor(n) || isEntranceNode(n);
+        return isNodeOutdoor(n) || (isEntranceNode(n) && (n.floorId === "f-out" || n.floorId === "outdoor" || !n.floorId));
       }
-      return n.floorId === floorId || isEntranceNode(n);
+      if (n.floorId === floorId) {
+        return true;
+      }
+      if (isGroundFloor && isEntranceNode(n)) {
+        // Ground floor can show ground-floor entrances or entrances for this building
+        const bldId = currentFloorObj?.buildingId;
+        const nodeBldId = publishedData.floors.find((f) => f.id === n.floorId)?.buildingId;
+        const isAssignedToThisFloor = n.floorId === floorId;
+        const isOutdoorEntrance = n.floorId === "f-out" || n.floorId === "outdoor" || !n.floorId;
+        return isAssignedToThisFloor || (isOutdoorEntrance && (!nodeBldId || !bldId || nodeBldId === bldId));
+      }
+      return false;
     },
-    [isOutdoorFloor, isNodeOutdoor, isEntranceNode, floorId]
+    [isOutdoorFloor, isNodeOutdoor, isEntranceNode, isGroundFloor, floorId, currentFloorObj?.buildingId, publishedData.floors]
   );
 
   const scopeNodes = useMemo(() => {
@@ -1142,19 +1156,19 @@ function MapCanvas({
       if (isOutdoorFloor) {
         const fromOut = isNodeOutdoor(from);
         const toOut = isNodeOutdoor(to);
-        const fromEnt = isEntranceNode(from);
-        const toEnt = isEntranceNode(to);
+        const fromEnt = isEntranceNode(from) && (from.floorId === "f-out" || from.floorId === "outdoor" || !from.floorId);
+        const toEnt = isEntranceNode(to) && (to.floorId === "f-out" || to.floorId === "outdoor" || !to.floorId);
         return (fromOut && toOut) || (fromOut && toEnt) || (toOut && fromEnt);
       }
 
       const fromThisFloor = from.floorId === floorId;
       const toThisFloor = to.floorId === floorId;
-      const fromEnt = isEntranceNode(from);
-      const toEnt = isEntranceNode(to);
+      const fromEnt = isGroundFloor && isEntranceNode(from);
+      const toEnt = isGroundFloor && isEntranceNode(to);
 
       return (fromThisFloor && toThisFloor) || (fromThisFloor && toEnt) || (toThisFloor && fromEnt);
     });
-  }, [allEdges, findNode, isOutdoorFloor, isNodeOutdoor, isEntranceNode, floorId]);
+  }, [allEdges, findNode, isOutdoorFloor, isNodeOutdoor, isEntranceNode, isGroundFloor, floorId]);
 
   const routeNodes = useMemo(() => {
     if (!route?.nodes) return [];
@@ -1171,19 +1185,19 @@ function MapCanvas({
       if (isOutdoorFloor) {
         const fromOut = isNodeOutdoor(from);
         const toOut = isNodeOutdoor(to);
-        const fromEnt = isEntranceNode(from);
-        const toEnt = isEntranceNode(to);
+        const fromEnt = isEntranceNode(from) && (from.floorId === "f-out" || from.floorId === "outdoor" || !from.floorId);
+        const toEnt = isEntranceNode(to) && (to.floorId === "f-out" || to.floorId === "outdoor" || !to.floorId);
         return (fromOut && toOut) || (fromOut && toEnt) || (toOut && fromEnt);
       }
 
       const fromThisFloor = from.floorId === floorId;
       const toThisFloor = to.floorId === floorId;
-      const fromEnt = isEntranceNode(from);
-      const toEnt = isEntranceNode(to);
+      const fromEnt = isGroundFloor && isEntranceNode(from);
+      const toEnt = isGroundFloor && isEntranceNode(to);
 
       return (fromThisFloor && toThisFloor) || (fromThisFloor && toEnt) || (toThisFloor && fromEnt);
     });
-  }, [route?.edges, findNode, isOutdoorFloor, isNodeOutdoor, isEntranceNode, floorId]);
+  }, [route?.edges, findNode, isOutdoorFloor, isNodeOutdoor, isEntranceNode, isGroundFloor, floorId]);
 
   const blockedEdgeIds = useMemo(() => {
     return getObstructedEdgeIds(allNodes, allEdges, publishedData.obstacles);
@@ -1873,32 +1887,34 @@ function MapCanvas({
                 />
 
                 {/* 4. Clean Floating Google-Maps-Style Building Header Badge Centered on Polygon Centroid */}
-                <g transform={`translate(${centerPos.x}, ${centerPos.y})`}>
-                  <rect
-                    x={-badgeWidth / 2}
-                    y="-15"
-                    width={badgeWidth}
-                    height="30"
-                    rx="15"
-                    fill="#ffffff"
-                    stroke={strokeColor}
-                    strokeWidth="1.75"
-                    className="shadow-md"
-                  />
-                  <text
-                    x="0"
-                    y="4"
-                    textAnchor="middle"
-                    fill="#1e1b4b"
-                    fontSize="13"
-                    fontWeight="800"
-                    letterSpacing="0.01em"
-                    className="select-none pointer-events-none"
-                  >
-                    <tspan fontSize="14">🏢 </tspan>
-                    <tspan>{bName}</tspan>
-                  </text>
-                </g>
+                {showNodeNames && (
+                  <g transform={`translate(${centerPos.x}, ${centerPos.y})`}>
+                    <rect
+                      x={-badgeWidth / 2}
+                      y="-15"
+                      width={badgeWidth}
+                      height="30"
+                      rx="15"
+                      fill="#ffffff"
+                      stroke={strokeColor}
+                      strokeWidth="1.75"
+                      className="shadow-md"
+                    />
+                    <text
+                      x="0"
+                      y="4"
+                      textAnchor="middle"
+                      fill="#1e1b4b"
+                      fontSize="13"
+                      fontWeight="800"
+                      letterSpacing="0.01em"
+                      className="select-none pointer-events-none"
+                    >
+                      <tspan fontSize="14">🏢 </tspan>
+                      <tspan>{bName}</tspan>
+                    </text>
+                  </g>
+                )}
               </g>
             );
           })}
@@ -1918,30 +1934,32 @@ function MapCanvas({
                 <rect x="-22" y="-5" width="6" height="10" rx="2" fill="#d97706" stroke="#ffffff" strokeWidth="1" />
                 <rect x="16" y="-5" width="6" height="10" rx="2" fill="#d97706" stroke="#ffffff" strokeWidth="1" />
                 {/* Gate Badge */}
-                <g transform="translate(0, -18)">
-                  <rect
-                    x={-gateWidth / 2}
-                    y="-10"
-                    width={gateWidth}
-                    height="20"
-                    rx="10"
-                    fill="#d97706"
-                    stroke="#ffffff"
-                    strokeWidth="1.5"
-                    className="shadow-md"
-                  />
-                  <text
-                    x="0"
-                    y="3.5"
-                    textAnchor="middle"
-                    fill="#ffffff"
-                    fontSize="9.5"
-                    fontWeight="900"
-                    letterSpacing="0.02em"
-                  >
-                    ⛩️ {gateName}
-                  </text>
-                </g>
+                {showNodeNames && (
+                  <g transform="translate(0, -18)">
+                    <rect
+                      x={-gateWidth / 2}
+                      y="-10"
+                      width={gateWidth}
+                      height="20"
+                      rx="10"
+                      fill="#d97706"
+                      stroke="#ffffff"
+                      strokeWidth="1.5"
+                      className="shadow-md"
+                    />
+                    <text
+                      x="0"
+                      y="3.5"
+                      textAnchor="middle"
+                      fill="#ffffff"
+                      fontSize="9.5"
+                      fontWeight="900"
+                      letterSpacing="0.02em"
+                    >
+                      ⛩️ {gateName}
+                    </text>
+                  </g>
+                )}
               </g>
             );
           })}
@@ -1955,27 +1973,31 @@ function MapCanvas({
             return (
               <g key={`entrance-${en.id}`} transform={`translate(${en.x}, ${en.y})`}>
                 {/* Entrance Canopy Pill Badge */}
-                <rect
-                  x={-badgeW / 2}
-                  y="-9"
-                  width={badgeW}
-                  height="18"
-                  rx="9"
-                  fill="#059669"
-                  stroke="#ffffff"
-                  strokeWidth="1.5"
-                  className="shadow-sm"
-                />
-                <text
-                  x="0"
-                  y="3"
-                  textAnchor="middle"
-                  fill="#ffffff"
-                  fontSize="8.5"
-                  fontWeight="800"
-                >
-                  {entranceName}
-                </text>
+                {showNodeNames && (
+                  <>
+                    <rect
+                      x={-badgeW / 2}
+                      y="-9"
+                      width={badgeW}
+                      height="18"
+                      rx="9"
+                      fill="#059669"
+                      stroke="#ffffff"
+                      strokeWidth="1.5"
+                      className="shadow-sm"
+                    />
+                    <text
+                      x="0"
+                      y="3"
+                      textAnchor="middle"
+                      fill="#ffffff"
+                      fontSize="8.5"
+                      fontWeight="800"
+                    >
+                      {entranceName}
+                    </text>
+                  </>
+                )}
               </g>
             );
           })}
@@ -2161,7 +2183,8 @@ function MapCanvas({
             const nodeRadius = isDest ? 9 : isStairOrLift ? 7 : isRoom ? 6 : onRoute ? 6.5 : 4.5;
 
             const rawName = n.name || "";
-            const displayName = (n.photoUrl ? "📷 " : "") + (isStair ? `𓊍 ${rawName}` : isLift ? `🛗 ${rawName}` : rawName);
+            const cleanedName = isStairOrLift ? cleanStairLiftDisplayName(rawName) : rawName;
+            const displayName = (n.photoUrl ? "📷 " : "") + (isStair ? `𓊍 ${cleanedName}` : isLift ? `🛗 ${cleanedName}` : rawName);
             const labelWidth = Math.max(70, displayName.length * 7 + (isStair ? 20 : n.photoUrl ? 20 : 16));
             const badgeHeight = isStairOrLift ? 22 : 19;
 
@@ -2195,7 +2218,7 @@ function MapCanvas({
                   className={isDest ? "animate-pulse" : undefined}
                 />
 
-                {rawName.length > 0 && (showNodeNames || isDest || isStairOrLift) && (
+                {rawName.length > 0 && showNodeNames && (
                   <g transform={`translate(${n.x}, ${labelY})`}>
                     <rect
                       x={-labelWidth / 2}
@@ -2225,7 +2248,7 @@ function MapCanvas({
           })}
 
         {/* Floor Transition Badges for Stair & Lift Nodes on Route */}
-        {route &&
+        {route && showNodeNames &&
           routeNodes.map((n, idx) => {
             if (n.type !== "STAIR" && n.type !== "LIFT") return null;
             const nodeIdx = route.nodes.findIndex((rn) => rn.id === n.id);
@@ -2234,10 +2257,8 @@ function MapCanvas({
             const nextDifferentFloorNode = route.nodes.slice(nodeIdx + 1).find((rn) => rn.floorId !== n.floorId);
             if (!nextDifferentFloorNode) return null;
 
-            const targetFloorObj = publishedData.floors.find((f) => f.id === nextDifferentFloorNode.floorId);
-            const targetFloorName = targetFloorObj?.name || "Upper Floor";
-            const badgeText = `${n.type === "LIFT" ? "Take Lift" : "Take Stairs"} to ${targetFloorName} ↗`;
-            const badgeWidth = badgeText.length * 6.5 + 20;
+            const badgeText = `${n.type === "LIFT" ? "Take Lift" : "Take Stairs"} ↗`;
+            const badgeWidth = badgeText.length * 7.5 + 20;
 
             return (
               <g key={`stair-badge-${n.id}-${idx}`} transform={`translate(${n.x}, ${n.y - 45})`}>

@@ -70,7 +70,7 @@ import {
   Flame,
   Accessibility,
 } from "lucide-react";
-import { MAX_MAP_ZOOM, MIN_MAP_ZOOM } from "@/shared/lib/map-config";
+import { MAX_MAP_ZOOM, MIN_MAP_ZOOM, cleanStairLiftDisplayName } from "@/shared/lib/map-config";
 
 import { Button } from "@/shared/components/ui/button";
 import { Input } from "@/shared/components/ui/input";
@@ -2999,7 +2999,8 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
 
                   const nodeRadius = isSelected ? 8 : isEdgeStart ? 9 : isStairOrLift ? 7 : isRoom ? 6 : 4.5;
                   const rawName = n.name || "";
-                  const displayName = isStair ? `𓊍 ${rawName}` : isLift ? `🛗 ${rawName}` : rawName;
+                  const cleanedName = isStairOrLift ? cleanStairLiftDisplayName(rawName) : rawName;
+                  const displayName = isStair ? `𓊍 ${cleanedName}` : isLift ? `🛗 ${cleanedName}` : rawName;
                   const labelWidth = Math.max(70, displayName.length * 7 + (isStair ? 20 : 16));
                   const badgeHeight = isStairOrLift ? 22 : 19;
                   const labelY = isStairOrLift ? -20 : isSelected ? 20 : 14;
@@ -3080,12 +3081,12 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
                             {isStair ? (
                               <>
                                 <tspan fontSize="35">𓊍 </tspan>
-                                <tspan>{rawName}</tspan>
+                                <tspan>{cleanedName}</tspan>
                               </>
                             ) : isLift ? (
                               <>
                                 <tspan fontSize="14">🛗 </tspan>
-                                <tspan>{rawName}</tspan>
+                                <tspan>{cleanedName}</tspan>
                               </>
                             ) : (
                               displayName
@@ -3516,9 +3517,9 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
                               {/* Floor Transition Badge if destination is on another floor */}
                               {transitionNode && endNode && endNode.floorId !== transitionNode.floorId && (
                                 <g transform={`translate(${transitionNode.x}, ${transitionNode.y - 45})`}>
-                                  <rect x="-70" y="-12" width="140" height="22" rx="6" fill="#7c3aed" stroke="#6d28d9" strokeWidth="1.5" />
+                                  <rect x="-55" y="-12" width="110" height="22" rx="6" fill="#7c3aed" stroke="#6d28d9" strokeWidth="1.5" />
                                   <text x="0" y="2" textAnchor="middle" fill="white" className="text-[10px] font-extrabold select-none">
-                                    Take Stairs to {targetFloorObj?.name || "Target Floor"} ↗
+                                    Take Stairs ↗
                                   </text>
                                 </g>
                               )}
