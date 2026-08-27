@@ -218,7 +218,7 @@ export function TurnByTurnBar({
                       </h2>
                       <div className="flex items-center gap-2 mt-0.5 text-xs text-emerald-700 font-bold">
                         {currentStep.distanceMeters > 0 ? (
-                          <span>In {formatDistance(currentStep.distanceMeters)}</span>
+                          <span>{formatDistance(currentStep.distanceMeters)}</span>
                         ) : (
                           <span className="text-emerald-700">Arrived</span>
                         )}

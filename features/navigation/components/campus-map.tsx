@@ -104,6 +104,33 @@ export function CampusMap({ route, livePosition, progress, gps: passedGps, onNav
     };
   }, []);
 
+  // ── Auto-select the starting floor when Start Navigation is clicked ──
+  const prevNavStatusRef = useRef(navStatus);
+  useEffect(() => {
+    const isNowNavigating = navStatus === "NAVIGATING" || navStatus === "OFF_ROUTE" || navStatus === "REROUTING";
+    const wasNavigating = prevNavStatusRef.current === "NAVIGATING" || prevNavStatusRef.current === "OFF_ROUTE" || prevNavStatusRef.current === "REROUTING";
+
+    if (isNowNavigating && !wasNavigating) {
+      // Find the starting floor from selected origin, route origin, or live location
+      const storeFloorId = useNavigationStore.getState().currentFloorId;
+      const startFloorId =
+        (fromSelected?.floorId && fromSelected.floorId !== "outdoor")
+          ? fromSelected.floorId
+          : (storeFloorId && storeFloorId !== "outdoor")
+          ? storeFloorId
+          : (route?.nodes[0]?.floorId && route.nodes[0].floorId !== "outdoor")
+          ? route.nodes[0].floorId
+          : (gps.canvasPos?.floorId && gps.canvasPos.floorId !== "outdoor")
+          ? gps.canvasPos.floorId
+          : "f-out";
+
+      if (startFloorId) {
+        setView(startFloorId);
+      }
+    }
+    prevNavStatusRef.current = navStatus;
+  }, [navStatus, fromSelected?.floorId, route, gps.canvasPos?.floorId]);
+
   // Contextual Floor Filter
   const indoorFloors = useMemo(() => {
     const allFloors = publishedData.floors || [];

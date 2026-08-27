@@ -426,12 +426,11 @@ export const useNavigationStore = create<NavigationSessionState>((set, get) => (
     const matchedNode = activeRoute.nodes[nextIndex] ?? activeRoute.nodes[activeRoute.nodes.length - 1];
 
     let remainingDistance = 0;
-    for (let i = nextIndex; i < activeRoute.nodes.length - 1; i++) {
-      const n1 = activeRoute.nodes[i];
-      const n2 = activeRoute.nodes[i + 1];
-      if (n1 && n2) {
-        remainingDistance += Math.hypot(n2.x - n1.x, n2.y - n1.y);
-      }
+    for (let i = nextIndex; i < instructions.length; i++) {
+      remainingDistance += (instructions[i]?.distance ?? 0);
+    }
+    if (remainingDistance <= 0 && activeRoute.distance > 0) {
+      remainingDistance = Math.max(0, activeRoute.distance * ((instructions.length - nextIndex) / (instructions.length || 1)));
     }
 
     set({
@@ -458,12 +457,11 @@ export const useNavigationStore = create<NavigationSessionState>((set, get) => (
     const matchedNode = activeRoute.nodes[prevIndex] ?? activeRoute.nodes[0];
 
     let remainingDistance = 0;
-    for (let i = prevIndex; i < activeRoute.nodes.length - 1; i++) {
-      const n1 = activeRoute.nodes[i];
-      const n2 = activeRoute.nodes[i + 1];
-      if (n1 && n2) {
-        remainingDistance += Math.hypot(n2.x - n1.x, n2.y - n1.y);
-      }
+    for (let i = prevIndex; i < instructions.length; i++) {
+      remainingDistance += (instructions[i]?.distance ?? 0);
+    }
+    if (remainingDistance <= 0 && activeRoute.distance > 0) {
+      remainingDistance = Math.max(0, activeRoute.distance * ((instructions.length - prevIndex) / (instructions.length || 1)));
     }
 
     set({
