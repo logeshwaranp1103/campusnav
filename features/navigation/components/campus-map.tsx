@@ -1031,103 +1031,102 @@ function MapCanvas({
     () => publishedData.floors.find((f) => f.id === floorId),
     [publishedData.floors, floorId]
   );
-  const isGroundFloor = floorId === "f-out" || currentFloorObj?.ordinal === 0;
+  const isOutdoorFloor = floorId === "f-out" || floorId === "outdoor";
 
-  const connectedNodeIdsToActiveFloor = useMemo(() => {
-    const activeNodes = new Set(
-      allNodes.filter((n) => {
-        if (floorId === "f-out") {
-          return n.floorId === "f-out" || n.floorId === "outdoor" || !n.floorId;
-        }
-        return n.floorId === floorId;
-      }).map((n) => n.id)
+  const isGroundFloor = useMemo(() => {
+    if (isOutdoorFloor) return false;
+    const fl = publishedData.floors.find((f) => f.id === floorId);
+    return fl ? fl.ordinal === 0 : floorId.toLowerCase().includes("ground") || floorId.toLowerCase().includes("gnd") || floorId.endsWith("-0") || floorId.endsWith("-g");
+  }, [floorId, isOutdoorFloor, publishedData.floors]);
+
+  const isEntranceNode = useCallback((n?: Node | null) => {
+    if (!n) return false;
+    return (
+      n.type === "BUILDING_ENTRANCE" ||
+      n.type === "ENTRANCE" ||
+      Boolean(n.isEntranceNode) ||
+      (typeof n.name === "string" && n.name.toLowerCase().includes("entrance"))
     );
-    const connected = new Set<string>();
-    allEdges.forEach((e) => {
-      const from = e.fromNodeId ?? e.from;
-      const to = e.toNodeId ?? e.to;
-      const isFromActive = activeNodes.has(from);
-      const isToActive = activeNodes.has(to);
-      if (isFromActive || isToActive) {
-        connected.add(from);
-        connected.add(to);
-      }
-    });
-    return connected;
-  }, [allNodes, allEdges, floorId]);
+  }, []);
+
+  const isNodeOutdoor = useCallback((n?: Node | null) => {
+    if (!n) return false;
+    const fId = n.floorId || "f-out";
+    return (
+      fId === "f-out" ||
+      fId === "outdoor" ||
+      n.type === "GATE" ||
+      n.type === "ROAD_JUNCTION" ||
+      n.type === "OUTDOOR_PATH" ||
+      n.type === "PARKING"
+    );
+  }, []);
 
   const isNodeOnActiveFloor = useCallback(
     (n: Node) => {
-      if (floorId === "f-out") {
-        return (
-          n.floorId === "f-out" ||
-          n.floorId === "outdoor" ||
-          n.floorId === undefined ||
-          !n.floorId ||
-          n.type === "BUILDING_ENTRANCE" ||
-          n.isEntranceNode ||
-          connectedNodeIdsToActiveFloor.has(n.id)
-        );
+      if (isOutdoorFloor) {
+        return isNodeOutdoor(n) || isEntranceNode(n);
       }
-      return (
-        n.floorId === floorId ||
-        n.type === "BUILDING_ENTRANCE" ||
-        n.isEntranceNode ||
-        connectedNodeIdsToActiveFloor.has(n.id)
-      );
+      return n.floorId === floorId || isEntranceNode(n);
     },
-    [floorId, connectedNodeIdsToActiveFloor]
+    [isOutdoorFloor, isNodeOutdoor, isEntranceNode, floorId]
   );
 
   const scopeNodes = useMemo(() => {
-    return allNodes.filter((n) => {
-      if (floorId === "f-out") {
-        return (
-          n.floorId === "f-out" ||
-          n.floorId === "outdoor" ||
-          n.floorId === undefined ||
-          !n.floorId ||
-          n.type === "BUILDING_ENTRANCE" ||
-          n.isEntranceNode ||
-          connectedNodeIdsToActiveFloor.has(n.id)
-        );
-      }
-      return n.floorId === floorId || connectedNodeIdsToActiveFloor.has(n.id);
-    });
-  }, [allNodes, floorId, connectedNodeIdsToActiveFloor]);
+    return allNodes.filter(isNodeOnActiveFloor);
+  }, [allNodes, isNodeOnActiveFloor]);
 
   const scopeEdges = useMemo(() => {
-    const nodeSet = new Set(scopeNodes.map((n) => n.id));
     return allEdges.filter((e) => {
-      const from = e.fromNodeId ?? e.from;
-      const to = e.toNodeId ?? e.to;
-      return nodeSet.has(from) && nodeSet.has(to);
+      const from = findNode(e.fromNodeId ?? e.from);
+      const to = findNode(e.toNodeId ?? e.to);
+      if (!from || !to) return false;
+
+      if (isOutdoorFloor) {
+        const fromOut = isNodeOutdoor(from);
+        const toOut = isNodeOutdoor(to);
+        const fromEnt = isEntranceNode(from);
+        const toEnt = isEntranceNode(to);
+        return (fromOut && toOut) || (fromOut && toEnt) || (toOut && fromEnt);
+      }
+
+      const fromThisFloor = from.floorId === floorId;
+      const toThisFloor = to.floorId === floorId;
+      const fromEnt = isEntranceNode(from);
+      const toEnt = isEntranceNode(to);
+
+      return (fromThisFloor && toThisFloor) || (fromThisFloor && toEnt) || (toThisFloor && fromEnt);
     });
-  }, [allEdges, scopeNodes]);
+  }, [allEdges, findNode, isOutdoorFloor, isNodeOutdoor, isEntranceNode, floorId]);
 
   const routeNodes = useMemo(() => {
-    return (
-      route?.nodes.filter((n) => {
-        if (floorId === "f-out") return true;
-        return isNodeOnActiveFloor(n);
-      }) ?? []
-    );
-  }, [route?.nodes, isNodeOnActiveFloor, floorId]);
+    if (!route?.nodes) return [];
+    return route.nodes.filter(isNodeOnActiveFloor);
+  }, [route?.nodes, isNodeOnActiveFloor]);
 
   const routeEdges = useMemo(() => {
-    return (
-      route?.edges.filter((e) => {
-        const from = findNode(e.from);
-        const to = findNode(e.to);
-        if (!from || !to) return false;
-        return (
-          from.floorId === floorId ||
-          to.floorId === floorId ||
-          (isNodeOnActiveFloor(from) && isNodeOnActiveFloor(to))
-        );
-      }) ?? []
-    );
-  }, [route?.edges, findNode, isNodeOnActiveFloor, floorId]);
+    if (!route?.edges) return [];
+    return route.edges.filter((e) => {
+      const from = findNode(e.from);
+      const to = findNode(e.to);
+      if (!from || !to) return false;
+
+      if (isOutdoorFloor) {
+        const fromOut = isNodeOutdoor(from);
+        const toOut = isNodeOutdoor(to);
+        const fromEnt = isEntranceNode(from);
+        const toEnt = isEntranceNode(to);
+        return (fromOut && toOut) || (fromOut && toEnt) || (toOut && fromEnt);
+      }
+
+      const fromThisFloor = from.floorId === floorId;
+      const toThisFloor = to.floorId === floorId;
+      const fromEnt = isEntranceNode(from);
+      const toEnt = isEntranceNode(to);
+
+      return (fromThisFloor && toThisFloor) || (fromThisFloor && toEnt) || (toThisFloor && fromEnt);
+    });
+  }, [route?.edges, findNode, isOutdoorFloor, isNodeOutdoor, isEntranceNode, floorId]);
 
   const blockedEdgeIds = useMemo(() => {
     return getObstructedEdgeIds(allNodes, allEdges, publishedData.obstacles);

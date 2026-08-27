@@ -347,18 +347,11 @@ export async function publishDraftGraph(
             status: "PUBLISHED" as const,
           };
 
-          if (existingId) {
-            return prisma.edge.update({
-              where: { id: existingId },
-              data: edgeData,
-            }).catch((err) => console.warn(`Edge ${e.id} update notice:`, err?.message));
-          } else {
-            return prisma.edge.upsert({
-              where: { id: e.id },
-              update: edgeData,
-              create: { id: e.id, ...edgeData },
-            }).catch((err) => console.warn(`Edge ${e.id} upsert notice:`, err?.message));
-          }
+          return prisma.edge.upsert({
+            where: { id: e.id },
+            update: edgeData,
+            create: { id: e.id, ...edgeData },
+          }).catch((err) => console.warn(`Edge ${e.id} upsert notice:`, err?.message));
         });
       }
 
