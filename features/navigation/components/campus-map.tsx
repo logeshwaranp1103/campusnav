@@ -676,6 +676,13 @@ function MapCanvas({
   const visualZoomRef = useRef(visualZoom);
   visualZoomRef.current = visualZoom;
 
+  // ── Smooth Visual Bearing State (Interpolated Glide at 60/120 FPS via RAF loop) ──
+  const [visualBearing, setVisualBearing] = useState(bearing);
+  const visualBearingRef = useRef(bearing);
+  visualBearingRef.current = visualBearing;
+  const targetBearingRef = useRef(bearing);
+  targetBearingRef.current = bearing;
+
   // ── Smooth Visual Navigation Pitch State (0° in top-down mode, 48° in navigation mode) ──
   const [visualPitch, setVisualPitch] = useState(isNavigating ? TARGET_NAV_PITCH : 0);
   const visualPitchRef = useRef(visualPitch);
@@ -819,6 +826,21 @@ function MapCanvas({
         setVisualPitch(targetP);
       }
 
+      // 0c. Smooth Visual Bearing Glide (Shortest-angle continuous circular interpolation)
+      const targetB = targetBearingRef.current;
+      const curB = visualBearingRef.current;
+      const dB = (((targetB - curB + 540) % 360) - 180);
+      if (Math.abs(dB) > 0.04) {
+        const rotSpeed = isInteractingRef.current ? 24.0 : 8.5;
+        const rotAlpha = 1 - Math.exp(-rotSpeed * dt);
+        const nextB = (curB + dB * rotAlpha + 360) % 360;
+        visualBearingRef.current = nextB;
+        setVisualBearing(nextB);
+      } else if (curB !== targetB) {
+        visualBearingRef.current = targetB;
+        setVisualBearing(targetB);
+      }
+
       // 1. Visual GPS Marker Smooth Gliding
       if (targetGpsPos && gps?.isGpsActive) {
         if (!hasGpsFixRef.current) {
@@ -923,7 +945,8 @@ function MapCanvas({
             const rotateAlpha = 1 - Math.exp(-6.0 * dt);
             const nextBearing = (bearingRef.current + dMapBearing * rotateAlpha + 360) % 360;
             bearingRef.current = nextBearing;
-            if (Math.abs(nextBearing - lastReportedBearingRef.current) > 0.4) {
+            targetBearingRef.current = nextBearing;
+            if (Math.abs(nextBearing - lastReportedBearingRef.current) > 1.5) {
               lastReportedBearingRef.current = nextBearing;
               onBearingChange?.(nextBearing);
             }
@@ -947,6 +970,69 @@ function MapCanvas({
       cancelAnimationFrame(animFrameRef.current);
       animFrameRef.current = null;
     }
+    // ── Intelligent Auto-Fit for Active Route or Destination Pair ──
+    if (route && route.nodes && route.nodes.length >= 2) {
+      let minRx = Infinity, minRy = Infinity, maxRx = -Infinity, maxRy = -Infinity;
+      route.nodes.forEach((n) => {
+        if (typeof n.x === "number" && typeof n.y === "number" && !isNaN(n.x) && !isNaN(n.y)) {
+          minRx = Math.min(minRx, n.x);
+          minRy = Math.min(minRy, n.y);
+          maxRx = Math.max(maxRx, n.x);
+          maxRy = Math.max(maxRy, n.y);
+        }
+      });
+
+      if (isFinite(minRx) && isFinite(maxRx) && maxRx >= minRx) {
+        const routeCenterX = (minRx + maxRx) / 2;
+        const routeCenterY = (minRy + maxRy) / 2;
+        const routeSpanX = Math.max(140, maxRx - minRx);
+        const routeSpanY = Math.max(140, maxRy - minRy);
+
+        const centerX = bounds.x + bounds.w / 2;
+        const centerY = bounds.y + bounds.h / 2;
+
+        const isMobile = typeof window !== "undefined" && window.innerWidth < 768;
+        // Provide generous comfortable margin around route geometry so neither end is cramped
+        const availW = Math.max(280, isMobile ? bounds.w * 0.76 : bounds.w * 0.72);
+        const availH = Math.max(280, isMobile ? bounds.h * 0.56 : bounds.h * 0.68);
+
+        const fitZoomX = availW / routeSpanX;
+        const fitZoomY = availH / routeSpanY;
+        const routeFitZoom = Math.min(1.35, Math.max(0.45, Math.min(fitZoomX, fitZoomY)));
+
+        setPan({ x: centerX - routeCenterX, y: centerY - routeCenterY });
+        setInternalZoom(routeFitZoom);
+        return;
+      }
+    }
+
+    // ── Auto-Fit Selected Start and Destination Nodes ──
+    const startNode = fromSelected?.nodeId ? allNodes.find((n) => n.id === fromSelected.nodeId) : null;
+    const endNode = toSelected?.nodeId ? allNodes.find((n) => n.id === toSelected.nodeId) : null;
+
+    if (startNode && endNode) {
+      const minX = Math.min(startNode.x, endNode.x);
+      const maxX = Math.max(startNode.x, endNode.x);
+      const minY = Math.min(startNode.y, endNode.y);
+      const maxY = Math.max(startNode.y, endNode.y);
+      const spanX = Math.max(140, maxX - minX);
+      const spanY = Math.max(140, maxY - minY);
+      const cX = (minX + maxX) / 2;
+      const cY = (minY + maxY) / 2;
+
+      const centerX = bounds.x + bounds.w / 2;
+      const centerY = bounds.y + bounds.h / 2;
+
+      const isMobile = typeof window !== "undefined" && window.innerWidth < 768;
+      const availW = Math.max(280, isMobile ? bounds.w * 0.76 : bounds.w * 0.72);
+      const availH = Math.max(280, isMobile ? bounds.h * 0.56 : bounds.h * 0.68);
+      const fitZoom = Math.min(1.35, Math.max(0.45, Math.min(availW / spanX, availH / spanY)));
+
+      setPan({ x: centerX - cX, y: centerY - cY });
+      setInternalZoom(fitZoom);
+      return;
+    }
+
     const hasLiveGps = Boolean(
       gps &&
       gps.isGpsActive &&
@@ -965,19 +1051,16 @@ function MapCanvas({
       const centerY = bounds.y + bounds.h / 2;
       setPan({ x: centerX - livePosition.x, y: centerY - livePosition.y });
       setInternalZoom(0.85);
-    } else if (fromSelected && fromSelected.nodeId) {
-      const startNode = allNodes.find((n) => n.id === fromSelected.nodeId);
-      if (startNode) {
-        const centerX = bounds.x + bounds.w / 2;
-        const centerY = bounds.y + bounds.h / 2;
-        setPan({ x: centerX - startNode.x, y: centerY - startNode.y });
-        setInternalZoom(0.85);
-      }
+    } else if (startNode) {
+      const centerX = bounds.x + bounds.w / 2;
+      const centerY = bounds.y + bounds.h / 2;
+      setPan({ x: centerX - startNode.x, y: centerY - startNode.y });
+      setInternalZoom(0.85);
     } else {
       setInternalZoom(1);
       setPan({ x: 0, y: 0 });
     }
-  }, [floorId, resetTrigger]);
+  }, [floorId, resetTrigger, route, fromSelected?.id, toSelected?.id]);
 
   const nodeLookupMap = useMemo(() => {
     const map = new Map<string, Node>();
@@ -1378,11 +1461,13 @@ function MapCanvas({
         internalZoomRef.current = newInternal;
         targetZoomRef.current = targetTotal;
 
-        // 2. Continuous Two-Finger Rotation
+        // 2. Continuous Two-Finger Rotation with Instant Decoupled Visual Feedback
         const deltaAngle = currentAngle - gState.initialAngle;
         const newBearing = (gState.initialBearing + deltaAngle + 360) % 360;
         bearingRef.current = newBearing;
-        onBearingChange?.(newBearing);
+        targetBearingRef.current = newBearing;
+        visualBearingRef.current = newBearing;
+        setVisualBearing(newBearing);
 
         // 3. Two-Finger Pan Midpoint Tracking with Rotation Compensation
         const rawDx = (currentCenter.x - gState.lastCenter.x) * uniformScale;
@@ -1433,6 +1518,7 @@ function MapCanvas({
 
     const handleTouchEnd = (e: TouchEvent) => {
       isInteractingRef.current = false;
+      onBearingChange?.(bearingRef.current);
       const gState = touchGestureRef.current;
       if (e.touches.length === 0) {
         touchGestureRef.current = {
@@ -1506,9 +1592,9 @@ function MapCanvas({
   const rotationPivotX = (isFollowingUser || isNavigating) && targetGpsPos ? visualGps.x : boundsCenterX - pan.x;
   const rotationPivotY = (isFollowingUser || isNavigating) && targetGpsPos ? visualGps.y : boundsCenterY - pan.y;
 
-  // Compute pure SVG transformation string with smooth visual pitch tilt & bearing
+  // Compute pure SVG transformation string with smooth visual pitch tilt & visual bearing
   const mainTransform = useMemo(() => {
-    const hasBearing = bearing !== 0;
+    const hasBearing = Math.abs(visualBearing) > 0.05;
     const hasPitch = visualPitch > 0.05;
     if (!hasBearing && !hasPitch) return undefined;
 
@@ -1516,11 +1602,11 @@ function MapCanvas({
     const tiltScaleY = Math.cos(pitchRad); // 1.0 at 0°, ~0.669 at 48°
 
     if (!hasPitch) {
-      return `rotate(${bearing} ${rotationPivotX} ${rotationPivotY})`;
+      return `rotate(${visualBearing} ${rotationPivotX} ${rotationPivotY})`;
     }
 
-    return `translate(${rotationPivotX} ${rotationPivotY}) rotate(${bearing}) scale(1, ${tiltScaleY}) translate(${-rotationPivotX} ${-rotationPivotY})`;
-  }, [bearing, visualPitch, rotationPivotX, rotationPivotY]);
+    return `translate(${rotationPivotX} ${rotationPivotY}) rotate(${visualBearing}) scale(1, ${tiltScaleY}) translate(${-rotationPivotX} ${-rotationPivotY})`;
+  }, [visualBearing, visualPitch, rotationPivotX, rotationPivotY]);
 
   return (
     <svg

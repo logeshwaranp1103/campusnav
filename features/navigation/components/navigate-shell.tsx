@@ -398,6 +398,9 @@ export function NavigateShell() {
 
     setRoute(clientRoute);
     setLoading(false);
+    if (typeof window !== "undefined" && window.innerWidth < 768) {
+      setMobileView("map");
+    }
     if (live && clientRoute) {
       navSession.startNavigationSession(startDest, endDest, clientRoute);
     }
@@ -1213,6 +1216,51 @@ export function NavigateShell() {
               navSession.advanceToPrevStep();
             }}
           />
+        )}
+
+        {/* Floating Route Summary Bar on Mobile (when route is calculated and viewing map) */}
+        {!live && route && mobileView === "map" && toSelected && (
+          <div className="fixed bottom-16 left-3 right-3 z-40 md:hidden animate-in fade-in slide-in-from-bottom-4 duration-300">
+            <div className="rounded-2xl border border-[rgb(var(--border))] bg-[rgb(var(--card))]/95 p-3.5 shadow-2xl backdrop-blur-md space-y-2.5">
+              <div className="flex items-center justify-between">
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-xs font-bold truncate text-[rgb(var(--fg))]">
+                      To {toSelected.name}
+                    </span>
+                    <Badge variant={route.isFallbackWalk ? "warning" : "primary"} className="text-[9px] px-1.5 py-0">
+                      {travelMode === "EV" ? (route.isFallbackWalk ? "🚶 Walk" : "🚗 EV") : "🚶 Walk"}
+                    </Badge>
+                  </div>
+                  <div className="text-[11px] font-semibold text-[rgb(var(--muted-fg))] mt-0.5">
+                    {Math.round(route.distance)} m · ~{Math.max(1, Math.round(route.durationSec / 60))} min ETA
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => setMobileView("panel")}
+                  className="shrink-0 rounded-xl bg-[rgb(var(--muted))] px-2.5 py-1.5 text-xs font-semibold text-[rgb(var(--fg))] hover:bg-[rgb(var(--muted))/0.8] transition-colors cursor-pointer"
+                >
+                  Steps & Details
+                </button>
+              </div>
+
+              <Button
+                onClick={() => {
+                  if (!live) {
+                    setShowTransportPrompt(true);
+                  }
+                }}
+                variant="gradient"
+                className="w-full flex items-center justify-center gap-2 py-2.5 min-h-[42px] text-xs font-bold shadow-md"
+              >
+                <Navigation2 className="h-3.5 w-3.5" />
+                <span>Start Live Navigation</span>
+                <ArrowRight className="h-3.5 w-3.5" />
+              </Button>
+            </div>
+          </div>
         )}
       </div>
 
