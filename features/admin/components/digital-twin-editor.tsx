@@ -44,7 +44,33 @@ import {
   Camera,
   CheckCircle2,
   Hash,
+  Spline,
+  CornerDownRight,
+  ShieldCheck,
+  Filter,
+  Grid,
+  FileCode,
+  Crosshair,
+  Sliders,
+  ChevronDown,
+  ChevronRight,
+  CornerUpRight,
+  FileSpreadsheet,
+  Image as ImageIcon,
+  FolderOpen,
+  Download,
+  Upload,
+  ArrowRight,
+  Route as RouteIcon,
+  HelpCircle,
+  Info,
+  ShieldAlert,
+  Loader2,
+  MapPin,
+  Flame,
+  Accessibility,
 } from "lucide-react";
+import { MAX_MAP_ZOOM, MIN_MAP_ZOOM } from "@/shared/lib/map-config";
 
 import { Button } from "@/shared/components/ui/button";
 import { Input } from "@/shared/components/ui/input";
@@ -755,7 +781,7 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
       const worldX = (mouseX - currentPan.x) / currentZoom;
       const worldY = (mouseY - currentPan.y) / currentZoom;
 
-      const nextZoom = Math.min(5.0, Math.max(0.1, currentZoom * zoomMultiplier));
+      const nextZoom = Math.min(MAX_MAP_ZOOM, Math.max(MIN_MAP_ZOOM, currentZoom * zoomMultiplier));
       if (Math.abs(nextZoom - currentZoom) < 0.00001) return;
 
       // Exact new pan to keep worldX, worldY precisely pinned to mouseX, mouseY (zero shake)
@@ -811,7 +837,7 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
         const ratio = dist / state.initialDist;
         const currentZoom = zoomRef.current || 1;
         const currentPan = panOffsetRef.current;
-        const nextZoom = Math.min(5.0, Math.max(0.1, state.initialZoom * ratio));
+        const nextZoom = Math.min(MAX_MAP_ZOOM, Math.max(MIN_MAP_ZOOM, state.initialZoom * ratio));
         if (Math.abs(nextZoom - currentZoom) < 0.00001) return;
 
         const rect = canvas.getBoundingClientRect();
@@ -3610,7 +3636,7 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
               <button
                 onClick={() => {
                   const prev = zoomRef.current || 1;
-                  const next = Math.min(5.0, Number((prev + 0.15).toFixed(2)));
+                  const next = Math.min(MAX_MAP_ZOOM, Number((prev + 0.25).toFixed(2)));
                   if (canvasRef.current && prev > 0) {
                     const rect = canvasRef.current.getBoundingClientRect();
                     const cx = rect.width / 2;
@@ -3625,7 +3651,7 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
                   setZoom(next);
                 }}
                 className="rounded p-1 text-[rgb(var(--fg))] hover:bg-[rgb(var(--muted))] transition-colors shrink-0"
-                title="Zoom In (+15%)"
+                title="Zoom In (+25%)"
               >
                 <ZoomIn className="h-4 w-4 text-[rgb(var(--primary))]" />
               </button>
@@ -3634,7 +3660,7 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
 
               {(() => {
                 const currentPct = Math.round(zoom * 100);
-                const zoomOptions = Array.from(new Set([25, 50, 63, 75, 100, 125, 150, 200, 300, currentPct])).sort((a, b) => a - b);
+                const zoomOptions = Array.from(new Set([25, 50, 75, 100, 150, 200, 300, 500, 1000, 2000, 4000, currentPct])).filter((v) => v <= MAX_MAP_ZOOM * 100).sort((a, b) => a - b);
                 return (
                   <select
                     value={currentPct}

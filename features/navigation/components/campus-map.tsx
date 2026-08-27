@@ -6,7 +6,7 @@ import { campusStore } from "@/shared/lib/campus-store";
 import type { Node, Building, Floor, Edge, Destination } from "@/shared/data/campus";
 import type { Route } from "@/features/navigation/services/graph";
 import { getObstructedEdgeIds } from "@/lib/routing/graph";
-import { Building2, Layers, Compass, Locate, AlertTriangle, ZoomIn, ZoomOut, Maximize2, ChevronDown, Navigation } from "lucide-react";
+import { Building2, Layers, Compass, Locate, AlertTriangle, ZoomIn, ZoomOut, Maximize2, Minimize2, ChevronDown, Navigation, Tag } from "lucide-react";
 import { useVisitorGps } from "@/shared/hooks/use-visitor-gps";
 import { PIXELS_PER_METER, gpsToCanvas } from "@/lib/geo/projection";
 import { getBuildingCanvasPoints, getBuildingCenter, getPolygonSvgPath, isPointInsideBuilding, isPointOutsideAllBuildings } from "@/lib/geo/building-geometry";
@@ -14,6 +14,7 @@ import { detectBuildingAtGps } from "@/lib/geo/containment";
 import { calculateShortestAngleDelta } from "@/lib/geo/haversine";
 import { DestinationDetailsDrawer } from "./destination-details-drawer";
 import { useNavigationStore } from "@/features/navigation/navigation-store";
+import { MAX_MAP_ZOOM, MIN_MAP_ZOOM } from "@/shared/lib/map-config";
 
 /**
  * Computes roof elevated points for lightweight 3D isometric building extrusion.
@@ -74,8 +75,9 @@ export function CampusMap({ route, livePosition, progress, gps: passedGps, onNav
   const [resetTrigger, setResetTrigger] = useState(0);
   const [isFollowingUser, setIsFollowingUser] = useState(true);
 
-  // User Layer Toggle for Obstacles
+  // User Layer Toggle for Obstacles & Node Names
   const [showObstacles, setShowObstacles] = useState(true);
+  const [showNodeNames, setShowNodeNames] = useState(true);
 
   // Avoid duplicate geolocation watcher by instantiating hook only when passedGps is missing
   const internalGps = useVisitorGps(undefined, { autoStart: !passedGps });
@@ -104,13 +106,16 @@ export function CampusMap({ route, livePosition, progress, gps: passedGps, onNav
     };
   }, []);
 
-  // ── Auto-select the starting floor when Start Navigation is clicked ──
+  // ── Auto-select the starting floor & Auto-hide node names when Start Navigation is clicked ──
   const prevNavStatusRef = useRef(navStatus);
   useEffect(() => {
     const isNowNavigating = navStatus === "NAVIGATING" || navStatus === "OFF_ROUTE" || navStatus === "REROUTING";
     const wasNavigating = prevNavStatusRef.current === "NAVIGATING" || prevNavStatusRef.current === "OFF_ROUTE" || prevNavStatusRef.current === "REROUTING";
 
     if (isNowNavigating && !wasNavigating) {
+      // Auto-hide node names instantly on start navigation
+      setShowNodeNames(false);
+
       // Find the starting floor from selected origin, route origin, or live location
       const storeFloorId = useNavigationStore.getState().currentFloorId;
       const startFloorId =
@@ -349,6 +354,43 @@ export function CampusMap({ route, livePosition, progress, gps: passedGps, onNav
     setIsFollowingUser(false);
   }, []);
 
+  // ── Fullscreen Toggle ──
+  const mapContainerRef = useRef<HTMLDivElement>(null);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+
+  useEffect(() => {
+    const onFullscreenChange = () => {
+      setIsFullscreen(Boolean(document.fullscreenElement));
+    };
+    document.addEventListener("fullscreenchange", onFullscreenChange);
+    document.addEventListener("webkitfullscreenchange", onFullscreenChange);
+    return () => {
+      document.removeEventListener("fullscreenchange", onFullscreenChange);
+      document.removeEventListener("webkitfullscreenchange", onFullscreenChange);
+    };
+  }, []);
+
+  const toggleFullscreen = useCallback(async () => {
+    try {
+      if (!document.fullscreenElement) {
+        const elem = mapContainerRef.current || document.documentElement;
+        if (elem.requestFullscreen) {
+          await elem.requestFullscreen();
+        } else if ((elem as any).webkitRequestFullscreen) {
+          await (elem as any).webkitRequestFullscreen();
+        }
+      } else {
+        if (document.exitFullscreen) {
+          await document.exitFullscreen();
+        } else if ((document as any).webkitExitFullscreen) {
+          await (document as any).webkitExitFullscreen();
+        }
+      }
+    } catch (err) {
+      console.warn("Fullscreen toggle error:", err);
+    }
+  }, []);
+
   // ── Re-center Location Action (Only on explicit click) ──
   const handleRecenter = useCallback(() => {
     if (gps && !gps.isTracking) {
@@ -371,7 +413,7 @@ export function CampusMap({ route, livePosition, progress, gps: passedGps, onNav
   }
 
   return (
-    <div className="relative h-full w-full select-none overflow-hidden touch-none" suppressHydrationWarning>
+    <div ref={mapContainerRef} className="relative h-full w-full select-none overflow-hidden touch-none" suppressHydrationWarning>
       <MapCanvas
         floorId={activeView === "f-out" ? "f-out" : activeView}
         route={route}
@@ -382,6 +424,7 @@ export function CampusMap({ route, livePosition, progress, gps: passedGps, onNav
         bearing={bearing}
         onBearingChange={setBearing}
         showObstacles={showObstacles}
+        showNodeNames={showNodeNames}
         externalZoom={zoomLevel}
         resetTrigger={resetTrigger}
         isFollowingUser={isFollowingUser}
@@ -414,69 +457,81 @@ export function CampusMap({ route, livePosition, progress, gps: passedGps, onNav
 
         {/* Expandable / Collapsible Floor Stack Card */}
         {isFloorMenuOpen && (
-          <div
-            className="flex flex-col gap-1 rounded-2xl border border-[rgb(var(--border))] bg-[rgb(var(--card))]/98 p-2 shadow-2xl backdrop-blur-md w-fit min-w-[180px] max-h-64 overflow-y-auto animate-in fade-in slide-in-from-top-2 duration-200"
-          >
-            <div className="flex items-center justify-between border-b border-[rgb(var(--border)/0.6)] px-2 py-1 mb-1">
-              <span className="text-[10px] font-bold uppercase tracking-wider text-[rgb(var(--muted-fg))]">Select Level</span>
-              <button
-                onClick={() => setIsFloorMenuOpen(false)}
-                className="text-[10px] font-bold text-[rgb(var(--primary))] hover:underline flex items-center gap-0.5 cursor-pointer px-1 py-0.5 rounded-md hover:bg-[rgb(var(--primary)/0.08)]"
-              >
-                <span>Hide</span>
-                <ChevronDown className="h-3 w-3 rotate-180" />
-              </button>
-            </div>
+          <div className="flex max-h-[60vh] w-48 flex-col gap-1 overflow-y-auto rounded-2xl border bg-[rgb(var(--card))]/95 p-1.5 shadow-2xl backdrop-blur-md animate-in fade-in zoom-in-95 duration-150">
+            <span className="px-2.5 py-1 text-[10px] font-black uppercase tracking-wider text-[rgb(var(--muted-fg))]">
+              Select Level
+            </span>
 
-            <FloorButton
-              active={activeView === "f-out"}
+            {/* Outdoor Master Option */}
+            <button
               onClick={() => {
                 setView("f-out");
                 setIsFloorMenuOpen(false);
               }}
-              icon={<Building2 className="h-4 w-4 shrink-0" />}
-              label="Outdoor"
-            />
+              className={cn(
+                "flex items-center gap-2.5 rounded-xl px-2.5 py-2 text-left text-xs font-bold transition-all active:scale-98 cursor-pointer",
+                activeView === "f-out"
+                  ? "bg-indigo-600 text-white shadow-md shadow-indigo-500/20"
+                  : "text-[rgb(var(--fg))] hover:bg-[rgb(var(--muted))]"
+              )}
+            >
+              <Building2 className="h-4 w-4 shrink-0" />
+              <span className="truncate">Outdoor</span>
+            </button>
+
+            {/* Dynamic Indoor Floors Grouped Cleanly */}
             {indoorFloors.map((fid) => {
               const f = allFloors.find((x) => x.id === fid);
+              if (!f) return null;
+              
+              const bld = publishedData.buildings?.find((b) => b.id === f.buildingId);
+              const bldCode = resolveCleanBuildingCode(bld, f.buildingId);
+              const floorDisplay = f.name.replace(/^(Building\s+[A-Z0-9_-]+|BLD\s+[A-Z0-9_-]+)\s*[-:]?\s*/i, "").trim() || f.name;
+              const cleanLabel = `${bldCode} - ${floorDisplay}`;
+
               return (
-                <FloorButton
+                <button
                   key={fid}
-                  active={activeView === fid}
                   onClick={() => {
                     setView(fid);
                     setIsFloorMenuOpen(false);
                   }}
-                  icon={<Layers className="h-4 w-4 shrink-0" />}
-                  label={getFloorButtonLabel(f)}
-                />
+                  className={cn(
+                    "flex items-center gap-2.5 rounded-xl px-2.5 py-2 text-left text-xs font-bold transition-all active:scale-98 cursor-pointer",
+                    activeView === fid
+                      ? "bg-indigo-600 text-white shadow-md shadow-indigo-500/20"
+                      : "text-[rgb(var(--fg))] hover:bg-[rgb(var(--muted))]"
+                  )}
+                >
+                  <Layers className="h-4 w-4 shrink-0 opacity-80" />
+                  <span className="truncate">{cleanLabel}</span>
+                </button>
               );
             })}
           </div>
         )}
       </div>
 
-      {/* ── Right-Center Tools Stack (4-Direction Compass Rose, Zoom, Obstacles) ── */}
-      <div className="absolute right-3 top-1/2 -translate-y-1/2 z-20 pointer-events-auto flex flex-col items-end gap-2.5">
-        {/* 🧭 4-Cardinal Compass Rose & North-Up Button */}
+      {/* ── Mid-Right Floating Map Tool Controls (Zoom, Fullscreen, Hazards, Node Labels, Compass) ── */}
+      <div className={cn(
+        "absolute right-3 z-20 pointer-events-auto flex flex-col gap-2 items-center transition-all duration-300",
+        isNavigating ? "top-40 md:top-44" : "top-20 md:top-22"
+      )}>
+        {/* Interactive Magnetic Compass Widget */}
         <button
           onClick={resetBearingToNorth}
-          className={cn(
-            "relative flex h-12 w-12 items-center justify-center rounded-2xl border bg-[rgb(var(--card))]/95 p-1 shadow-xl backdrop-blur-md transition-all active:scale-95 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[rgb(var(--primary))]",
-            Math.abs(bearing) > 2 ? "border-red-500/50 shadow-red-500/25 ring-1 ring-red-500/30" : "border-[rgb(var(--border))]"
-          )}
-          title={Math.abs(bearing) > 2 ? `Bearing ${Math.round(((bearing % 360) + 360) % 360)}° · Tap to reset North-Up` : "North-Up Active"}
-          aria-label={`Compass bearing ${Math.round(bearing)} degrees. Tap to reset North-Up.`}
+          className="relative flex h-11 w-11 items-center justify-center rounded-2xl border bg-[rgb(var(--card))]/90 shadow-lg backdrop-blur-md hover:bg-[rgb(var(--muted))] active:scale-95 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[rgb(var(--primary))] cursor-pointer group"
+          title="Reset map to North (0°)"
+          aria-label="Compass - Reset to North"
         >
-          {/* Compass Rose SVG Dial */}
           <div
-            className="relative h-10 w-10 flex items-center justify-center transition-transform duration-100 ease-out"
+            className="transition-transform duration-200 ease-out"
             style={{ transform: `rotate(${-bearing}deg)` }}
           >
-            <svg viewBox="0 0 40 40" className="h-full w-full select-none pointer-events-none">
+            <svg width="40" height="40" viewBox="0 0 40 40" fill="none" className="select-none">
               {/* Outer Dial Circle */}
-              <circle cx="20" cy="20" r="18" fill="none" stroke="#cbd5e1" strokeWidth="1" opacity="0.6" />
-
+              <circle cx="20" cy="20" r="18.5" stroke="#cbd5e1" strokeWidth="1.5" fill="none" opacity="0.6" />
+              
               {/* Cardinal Tick Marks */}
               <line x1="20" y1="3" x2="20" y2="7" stroke="#ef4444" strokeWidth="2" strokeLinecap="round" />
               <line x1="20" y1="33" x2="20" y2="37" stroke="#94a3b8" strokeWidth="1.5" strokeLinecap="round" />
@@ -506,11 +561,11 @@ export function CampusMap({ route, livePosition, progress, gps: passedGps, onNav
           )}
         </button>
 
-        {/* Zoom & Fit Controls Stack */}
+        {/* Zoom & Fullscreen Controls Stack */}
         <div className="flex flex-col gap-1 rounded-2xl border bg-[rgb(var(--card))]/90 p-1 shadow-lg backdrop-blur-md w-fit">
           <button
             onClick={() => {
-              setZoomLevel((z) => Math.min(4, z * 1.25));
+              setZoomLevel((z) => Math.min(4, z * 1.35));
               setIsFollowingUser(false);
             }}
             className="flex h-11 w-11 items-center justify-center rounded-xl text-[rgb(var(--fg))] hover:bg-[rgb(var(--muted))] active:scale-95 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[rgb(var(--primary))]"
@@ -636,6 +691,7 @@ function MapCanvas({
   bearing = 0,
   onBearingChange,
   showObstacles = true,
+  showNodeNames = true,
   showEvents = true,
   externalZoom = 1,
   resetTrigger = 0,
@@ -655,6 +711,7 @@ function MapCanvas({
   bearing?: number;
   onBearingChange?: (bearing: number) => void;
   showObstacles?: boolean;
+  showNodeNames?: boolean;
   showEvents?: boolean;
   externalZoom?: number;
   resetTrigger?: number;
@@ -694,7 +751,7 @@ function MapCanvas({
   externalZoomRef.current = externalZoom;
 
   // ── Smooth Visual Zoom State (Interpolated Glide via RAF loop) ──
-  const targetZoom = Math.min(5, Math.max(0.35, externalZoom * internalZoom));
+  const targetZoom = Math.min(MAX_MAP_ZOOM, Math.max(MIN_MAP_ZOOM, externalZoom * internalZoom));
   const targetZoomRef = useRef(targetZoom);
   targetZoomRef.current = targetZoom;
 
@@ -1226,7 +1283,7 @@ function MapCanvas({
       const curInternal = internalZoomRef.current;
       const extZ = externalZoomRef.current || 1;
       const curTargetTotal = extZ * curInternal;
-      const newTargetTotal = Math.min(5, Math.max(0.35, curTargetTotal * zoomMultiplier));
+      const newTargetTotal = Math.min(MAX_MAP_ZOOM, Math.max(MIN_MAP_ZOOM, curTargetTotal * zoomMultiplier));
       const newInternal = newTargetTotal / extZ;
       if (Math.abs(newInternal - curInternal) < 0.0001) return;
 
@@ -1313,7 +1370,7 @@ function MapCanvas({
           const curInternal = internalZoomRef.current;
           const extZ = externalZoomRef.current || 1;
           const curTargetTotal = extZ * curInternal;
-          const newTargetTotal = Math.min(5, curTargetTotal * 1.5);
+          const newTargetTotal = Math.min(MAX_MAP_ZOOM, curTargetTotal * 1.5);
           const newInternal = newTargetTotal / extZ;
 
           const bW = boundsRef.current.w;
@@ -1410,7 +1467,7 @@ function MapCanvas({
         // 1. Pinch Zoom Scaling (Pure Zoom & Pan, Locked North-Up)
         const ratio = currentDist / gState.initialDist;
         const extZ = externalZoomRef.current || 1;
-        const targetTotal = Math.min(5, Math.max(0.35, gState.initialZoom * ratio));
+        const targetTotal = Math.min(MAX_MAP_ZOOM, Math.max(MIN_MAP_ZOOM, gState.initialZoom * ratio));
         const newInternal = targetTotal / extZ;
         internalZoomRef.current = newInternal;
         targetZoomRef.current = targetTotal;
@@ -2138,7 +2195,7 @@ function MapCanvas({
                   className={isDest ? "animate-pulse" : undefined}
                 />
 
-                {rawName.length > 0 && (
+                {rawName.length > 0 && (showNodeNames || isDest || isStairOrLift) && (
                   <g transform={`translate(${n.x}, ${labelY})`}>
                     <rect
                       x={-labelWidth / 2}
