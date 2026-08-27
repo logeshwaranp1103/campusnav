@@ -162,7 +162,15 @@ class CampusStore {
   private broadcastChannel: BroadcastChannel | null = null;
 
   constructor() {
+    this.loadWorkingDraftFromLocalStorage();
     this.initializeStore();
+
+    if (typeof window !== "undefined") {
+      const flush = () => this.flushWorkingDraftSync();
+      window.addEventListener("beforeunload", flush);
+      window.addEventListener("pagehide", flush);
+    }
+
     if (typeof window !== "undefined" && "BroadcastChannel" in window) {
       try {
         this.broadcastChannel = new BroadcastChannel("campusnav_store_sync");
@@ -203,8 +211,69 @@ class CampusStore {
     if (Array.isArray(snapshot.stairGroups)) this.stairGroups = snapshot.stairGroups;
     if (Array.isArray(snapshot.liftGroups)) this.liftGroups = snapshot.liftGroups;
     if (Array.isArray(snapshot.doors)) this.doors = snapshot.doors;
+    if (typeof window !== "undefined") {
+      try {
+        localStorage.setItem("campusnav_draft_cache", JSON.stringify(this.getWorkingData()));
+      } catch {}
+    }
     // Notify local subscribers without re-broadcasting
     this.listeners.forEach((l) => l());
+  }
+
+  private loadWorkingDraftFromLocalStorage() {
+    if (typeof window === "undefined") return;
+    try {
+      const cachedStr = localStorage.getItem("campusnav_draft_cache");
+      if (cachedStr) {
+        const cached = JSON.parse(cachedStr);
+        if (cached && typeof cached === "object") {
+          if (Array.isArray(cached.buildings) && cached.buildings.length > 0) this.buildings = cached.buildings;
+          if (Array.isArray(cached.floors) && cached.floors.length > 0) this.floors = cached.floors;
+          if (Array.isArray(cached.nodes) && cached.nodes.length > 0) this.nodes = cached.nodes;
+          if (Array.isArray(cached.edges) && cached.edges.length > 0) this.edges = cached.edges;
+          if (Array.isArray(cached.destinations) && cached.destinations.length > 0) this.destinations = cached.destinations;
+          if (Array.isArray(cached.events)) this.events = cached.events;
+          if (Array.isArray(cached.obstacles)) this.obstacles = cached.obstacles;
+          if (Array.isArray(cached.stairGroups)) this.stairGroups = cached.stairGroups;
+          if (Array.isArray(cached.liftGroups)) this.liftGroups = cached.liftGroups;
+          if (Array.isArray(cached.doors)) this.doors = cached.doors;
+          this.ensureDefaultGroundFloors();
+        }
+      }
+    } catch (e) {
+      console.warn("[CampusStore] Notice reading local draft cache:", e);
+    }
+  }
+
+  public flushWorkingDraftSync(isExplicitReset = false) {
+    if (typeof window === "undefined") return;
+    if (this.syncTimeout) {
+      clearTimeout(this.syncTimeout);
+      this.syncTimeout = null;
+    }
+    const hasEntities =
+      this.buildings.length > 0 ||
+      this.nodes.length > 0 ||
+      this.floors.length > 0 ||
+      this.destinations.length > 0;
+
+    if (!hasEntities && !isExplicitReset) {
+      return;
+    }
+    try {
+      const payload = JSON.stringify({ snapshot: this.getWorkingData(), isExplicitReset });
+      if (typeof navigator !== "undefined" && navigator.sendBeacon) {
+        const blob = new Blob([payload], { type: "application/json" });
+        navigator.sendBeacon("/api/admin/campus-graph/draft", blob);
+      } else {
+        fetch("/api/admin/campus-graph/draft", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: payload,
+          keepalive: true,
+        }).catch(() => {});
+      }
+    } catch {}
   }
 
   private saveWorkingDraftToDatabase(isExplicitReset = false) {
@@ -234,6 +303,7 @@ class CampusStore {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ snapshot: this.getWorkingData(), isExplicitReset }),
+          keepalive: true,
         }).catch((e) => console.warn("Failed to sync working draft to database:", e));
       } catch (e) {
         console.warn("Failed to persist draft to server database:", e);
@@ -243,11 +313,19 @@ class CampusStore {
     if (isExplicitReset) {
       performSync();
     } else {
-      this.syncTimeout = setTimeout(performSync, 2000);
+      this.syncTimeout = setTimeout(performSync, 300);
     }
   }
 
   private persistWorkingDraft() {
+    if (typeof window !== "undefined") {
+      try {
+        const working = this.getWorkingData();
+        localStorage.setItem("campusnav_draft_cache", JSON.stringify(working));
+      } catch (e) {
+        console.warn("[CampusStore] Notice saving local draft cache:", e);
+      }
+    }
     this.saveWorkingDraftToDatabase();
   }
 
@@ -338,6 +416,11 @@ class CampusStore {
     this.redoStack = [];
     this.saveSnapshotToUndo();
     if (isExplicit) {
+      if (typeof window !== "undefined") {
+        try {
+          localStorage.removeItem("campusnav_draft_cache");
+        } catch {}
+      }
       this.saveWorkingDraftToDatabase(true);
     }
     this.notify();
@@ -2466,19 +2549,37 @@ class CampusStore {
           const jsonDraft = await resDraft.json();
           const draft = jsonDraft?.draft;
           if (draft && typeof draft === "object") {
-            this.buildings = Array.isArray(draft.buildings) ? draft.buildings : [];
-            this.floors = Array.isArray(draft.floors) ? draft.floors : [];
-            this.nodes = Array.isArray(draft.nodes) ? draft.nodes : [];
-            this.edges = Array.isArray(draft.edges) ? draft.edges : [];
-            this.destinations = Array.isArray(draft.destinations) ? draft.destinations : [];
-            this.events = Array.isArray(draft.events) ? draft.events : [];
-            this.obstacles = Array.isArray(draft.obstacles) ? draft.obstacles : [];
-            this.stairGroups = Array.isArray(draft.stairGroups) ? draft.stairGroups : [];
-            this.liftGroups = Array.isArray(draft.liftGroups) ? draft.liftGroups : [];
-            this.doors = Array.isArray(draft.doors) ? draft.doors : [];
-            this.ensureDefaultGroundFloors();
-            (this.stairGroups || []).forEach((sg) => this.rebuildStairGroupConnections(sg));
-            draftLoaded = true;
+            const hasServerEntities =
+              (Array.isArray(draft.buildings) && draft.buildings.length > 0) ||
+              (Array.isArray(draft.nodes) && draft.nodes.length > 0);
+
+            if (hasServerEntities) {
+              this.buildings = Array.isArray(draft.buildings) ? draft.buildings : [];
+              this.floors = Array.isArray(draft.floors) ? draft.floors : [];
+              this.nodes = Array.isArray(draft.nodes) ? draft.nodes : [];
+              this.edges = Array.isArray(draft.edges) ? draft.edges : [];
+              this.destinations = Array.isArray(draft.destinations) ? draft.destinations : [];
+              this.events = Array.isArray(draft.events) ? draft.events : [];
+              this.obstacles = Array.isArray(draft.obstacles) ? draft.obstacles : [];
+              this.stairGroups = Array.isArray(draft.stairGroups) ? draft.stairGroups : [];
+              this.liftGroups = Array.isArray(draft.liftGroups) ? draft.liftGroups : [];
+              this.doors = Array.isArray(draft.doors) ? draft.doors : [];
+              this.ensureDefaultGroundFloors();
+              (this.stairGroups || []).forEach((sg) => this.rebuildStairGroupConnections(sg));
+              draftLoaded = true;
+              if (typeof window !== "undefined") {
+                try {
+                  localStorage.setItem("campusnav_draft_cache", JSON.stringify(this.getWorkingData()));
+                } catch {}
+              }
+            } else {
+              // Server has no draft, but if local memory/storage has entities, keep local and sync to server
+              const hasLocal = this.buildings.length > 0 || this.nodes.length > 0;
+              if (hasLocal) {
+                draftLoaded = true;
+                this.saveWorkingDraftToDatabase(false);
+              }
+            }
           }
         }
 
@@ -2511,7 +2612,11 @@ class CampusStore {
               this.stairGroups = JSON.parse(JSON.stringify(this.publishedGraph.stairGroups || []));
               this.liftGroups = JSON.parse(JSON.stringify(this.publishedGraph.liftGroups || []));
               this.doors = JSON.parse(JSON.stringify(this.publishedGraph.doors || []));
-              // Sync draft cache into memory only
+              if (typeof window !== "undefined") {
+                try {
+                  localStorage.setItem("campusnav_draft_cache", JSON.stringify(this.getWorkingData()));
+                } catch {}
+              }
             }
           }
         }

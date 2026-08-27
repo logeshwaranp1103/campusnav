@@ -37,7 +37,31 @@ export default function RootLayout({
       <head>
         <script
           dangerouslySetInnerHTML={{
-            __html: `(function(){try{var t=localStorage.getItem('theme')||'system';var d=t==='dark'||(t==='system'&&matchMedia('(prefers-color-scheme: dark)').matches);document.documentElement.classList.toggle('dark',d)}catch(e){}})();`,
+            __html: `(function(){
+              if (typeof window !== 'undefined') {
+                window.addEventListener('error', function(e) {
+                  if (e.message && (
+                    e.message.indexOf('Could not establish connection') !== -1 ||
+                    e.message.indexOf('Receiving end does not exist') !== -1 ||
+                    e.message.indexOf('message channel closed') !== -1
+                  )) {
+                    e.preventDefault();
+                    e.stopImmediatePropagation();
+                  }
+                });
+                window.addEventListener('unhandledrejection', function(e) {
+                  var reason = e.reason && (e.reason.message || String(e.reason));
+                  if (reason && (
+                    reason.indexOf('Could not establish connection') !== -1 ||
+                    reason.indexOf('Receiving end does not exist') !== -1 ||
+                    reason.indexOf('message channel closed') !== -1
+                  )) {
+                    e.preventDefault();
+                    e.stopImmediatePropagation();
+                  }
+                });
+              }
+            })();`,
           }}
         />
       </head>

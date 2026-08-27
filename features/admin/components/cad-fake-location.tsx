@@ -20,6 +20,7 @@ import { calculateGeographicDistance } from "@/lib/geo/haversine";
 import { buildAdjacencyGraph } from "@/lib/routing/graph";
 import { findShortestPath, type PathResult } from "@/lib/routing/dijkstra";
 import { isPointInsideBuilding } from "@/lib/geo/building-geometry";
+import { computeEdgeSnappedShortestPath } from "@/lib/geo/edge-snapping";
 import type { TravelMode } from "@/lib/routing/edge-accessibility";
 import type { Node, Edge, Obstacle, Destination, Building, Floor } from "@/shared/data/campus";
 
@@ -116,6 +117,9 @@ export function useCadFakeLocation({
             n.type === "GATE" ||
             n.type === "BUILDING_ENTRANCE" ||
             n.type === "CORRIDOR" ||
+            n.type === "JUNCTION" ||
+            n.type === "ENTRANCE" ||
+            n.type === "EXIT" ||
             n.isEntranceNode;
 
           return isOutdoorFloor || isOutdoorType;
@@ -145,69 +149,27 @@ export function useCadFakeLocation({
     [nodes, buildings, floors]
   );
 
-  // Global Shortest Path Optimization:
-  // When a destination is selected, evaluate all nearby candidate start nodes
-  // and pick the node that minimizes the Total Trip Distance (dist(Pin, StartNode) + Dijkstra(StartNode, Destination))
+  // Real-World Continuous Pathfinding Entry Resolution:
+  // Dynamically snaps the user to the nearest edge projection point or closest node,
+  // connecting anywhere along the edge without forcing backtracking.
   const { matchedNode, matchedDistanceMeters, routeResult } = useMemo(() => {
     if (!pos) {
       return { matchedNode: null, matchedDistanceMeters: 0, routeResult: null };
     }
 
-    const candidates = findNearbyCandidateNodes(pos.x, pos.y, pos.floorId);
-    if (candidates.length === 0) {
-      return { matchedNode: null, matchedDistanceMeters: 0, routeResult: null };
-    }
-
-    // Default fallback: closest node
-    let bestNode: Node = candidates[0].node;
-    let bestDistanceMeters: number = candidates[0].distanceMeters;
-    let bestPath: PathResult | null = null;
-    let minTotalTripDistance = Infinity;
-
-    if (targetNodeId) {
-      try {
-        const { graph, nodeMap } = buildAdjacencyGraph(nodes, edges, {
-          obstacles,
-          allowObstaclePenalties: true,
-          travelMode,
-        });
-
-        for (const cand of candidates) {
-          if (cand.node.id === targetNodeId) {
-            bestNode = cand.node;
-            bestDistanceMeters = cand.distanceMeters;
-            bestPath = {
-              nodes: [cand.node],
-              edges: [],
-              totalDistance: 0,
-              totalWeight: 0,
-            };
-            minTotalTripDistance = cand.distanceMeters;
-            break;
-          }
-
-          const path = findShortestPath(graph, nodeMap, cand.node.id, targetNodeId);
-          if (path && path.edges.length > 0) {
-            const totalTrip = cand.distanceMeters + path.totalDistance;
-            if (totalTrip < minTotalTripDistance) {
-              minTotalTripDistance = totalTrip;
-              bestNode = cand.node;
-              bestDistanceMeters = cand.distanceMeters;
-              bestPath = path;
-            }
-          }
-        }
-      } catch (e) {
-        console.warn("Fake location optimal route calculation error:", e);
-      }
-    }
-
-    return {
-      matchedNode: bestNode,
-      matchedDistanceMeters: bestDistanceMeters,
-      routeResult: bestPath,
-    };
-  }, [pos, targetNodeId, nodes, edges, obstacles, travelMode, findNearbyCandidateNodes]);
+    return computeEdgeSnappedShortestPath(
+      pos.x,
+      pos.y,
+      targetNodeId,
+      nodes,
+      edges,
+      obstacles,
+      travelMode,
+      pos.floorId,
+      pos.lat,
+      pos.lng
+    );
+  }, [pos, targetNodeId, nodes, edges, obstacles, travelMode]);
 
   // Set fake position at given canvas coordinates
   const setFakePosition = useCallback(

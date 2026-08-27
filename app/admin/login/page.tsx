@@ -25,9 +25,7 @@ function AdminLoginForm() {
 
   useEffect(() => {
     if (typeof window !== "undefined") {
-      const stored =
-        sessionStorage.getItem("campusnav_admin_auth") === "true" ||
-        localStorage.getItem("campusnav_admin_auth") === "true";
+      const stored = sessionStorage.getItem("campusnav_admin_auth") === "true";
       if (stored) {
         window.location.replace(redirectUrl);
       }
@@ -51,7 +49,6 @@ function AdminLoginForm() {
 
       if (isValid) {
         sessionStorage.setItem("campusnav_admin_auth", "true");
-        localStorage.setItem("campusnav_admin_auth", "true");
         toast({
           type: "success",
           title: "Authenticated",

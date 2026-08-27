@@ -27,14 +27,13 @@ export function AdminGuard({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     setIsMounted(true);
+
     if (isLoginPage) {
       setIsAuthenticated(true);
       return;
     }
 
-    const isAuthed =
-      sessionStorage.getItem("campusnav_admin_auth") === "true" ||
-      localStorage.getItem("campusnav_admin_auth") === "true";
+    const isAuthed = sessionStorage.getItem("campusnav_admin_auth") === "true";
 
     if (isAuthed) {
       setIsAuthenticated(true);
@@ -48,7 +47,6 @@ export function AdminGuard({ children }: { children: React.ReactNode }) {
   const logout = () => {
     if (typeof window !== "undefined") {
       sessionStorage.removeItem("campusnav_admin_auth");
-      localStorage.removeItem("campusnav_admin_auth");
     }
     setIsAuthenticated(false);
     toast({

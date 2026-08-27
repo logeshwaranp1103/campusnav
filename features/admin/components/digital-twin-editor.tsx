@@ -2237,24 +2237,9 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
             icon={AlertTriangle}
             label="Obstacle (O)"
           />
-
-          <ToolButton
-            active={false}
-            onClick={() => {
-              setActiveTool("SELECT");
-              setSelectedElement(null);
-              setSelectedEntityIds(new Set());
-              setSimResult(null);
-
-              setEdgeStartNodeId(null);
-              toast({ type: "info", title: "Tools Deselected (Esc)", description: "Unselected all toolbar tools, routes & active elements." });
-            }}
-            icon={XCircle}
-            label="Deselect (Esc)"
-          />
         </div>
 
-        {/* Right Actions: Floor View Selector, Draft Status, Hide Node Name, Fullscreen & Publish */}
+        {/* Right Actions: Floor View Selector, Draft Status, Fullscreen & Publish */}
         <div className="flex items-center gap-2 shrink-0 ml-auto">
           {/* Floor View Selector Dropdown */}
           <select
@@ -2289,30 +2274,6 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
               {campusStore.hasUnsavedEdits() ? "Unsaved Draft" : "Draft Clean"}
             </span>
           </div>
-
-          {/* Hide / Show Node Name Button */}
-          <Button
-            size="sm"
-            variant={hideNodeNames ? "secondary" : "outline"}
-            onClick={() => {
-              setHideNodeNames((prev) => !prev);
-              toast({
-                type: "info",
-                title: hideNodeNames ? "Node Names Visible" : "Node Names Hidden",
-                description: hideNodeNames ? "Showing node name labels on canvas." : "Node names hidden. Node circles remain visible and interactive.",
-              });
-            }}
-            className={cn(
-              "h-8 px-2.5 text-xs font-semibold shrink-0 gap-1.5 transition-colors whitespace-nowrap rounded-lg flex items-center",
-              hideNodeNames
-                ? "bg-amber-500/15 text-amber-600 dark:text-amber-400 border-amber-500/30 hover:bg-amber-500/25"
-                : "border-[rgb(var(--border))] text-[rgb(var(--fg))] hover:bg-[rgb(var(--muted))]"
-            )}
-            title={hideNodeNames ? "Show Node Names" : "Hide Node Names (nodes stay visible)"}
-          >
-            {hideNodeNames ? <EyeOff className="h-3.5 w-3.5 text-amber-500 shrink-0" /> : <Eye className="h-3.5 w-3.5 text-[rgb(var(--primary))] shrink-0" />}
-            <span>{hideNodeNames ? "Show Node Name" : "Hide Node Name"}</span>
-          </Button>
 
           <Button
             size="sm"

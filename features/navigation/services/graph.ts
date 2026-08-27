@@ -335,11 +335,18 @@ function computeShortestPathForData(
       for (const eId of endNodeIds) {
         const res = findShortestPath(fallbackGraph, nodeMap, sId, eId);
         if (res && res.edges.length > 0) {
-          if (!bestResult || res.totalDistance < bestResult.totalDistance) {
+          if (isStartingFromLiveLocation) {
+            bestResult = res;
+            isObstacleFree = false;
+            break;
+          } else if (!bestResult || res.totalDistance < bestResult.totalDistance) {
             bestResult = res;
             isObstacleFree = false;
           }
         }
+      }
+      if (isStartingFromLiveLocation && bestResult) {
+        break;
       }
     }
   }

@@ -294,12 +294,16 @@ export function findContextAwareNearestNodes(
   const outdoorNodes = validNodes.filter((n) =>
     n.floorId === "f-out" ||
     n.floorId === "outdoor" ||
+    !n.floorId ||
     n.type === "OUTDOOR" ||
     n.type === "OUTDOOR_PATH" ||
     n.type === "ROAD_JUNCTION" ||
     n.type === "BUILDING_ENTRANCE" ||
     n.type === "GATE" ||
     n.type === "CORRIDOR" ||
+    n.type === "JUNCTION" ||
+    n.type === "ENTRANCE" ||
+    n.type === "EXIT" ||
     n.isEntranceNode
   );
   if (outdoorNodes.length > 0) {
