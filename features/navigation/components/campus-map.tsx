@@ -664,11 +664,8 @@ function MapCanvas({
   const externalZoomRef = useRef(externalZoom);
   externalZoomRef.current = externalZoom;
 
-  const TARGET_NAV_PITCH = 48;
-
   // ── Smooth Visual Zoom State (Interpolated Glide via RAF loop) ──
-  const navZoomMultiplier = isNavigating ? 1.65 : 1.0;
-  const targetZoom = Math.min(5, Math.max(0.35, externalZoom * internalZoom * navZoomMultiplier));
+  const targetZoom = Math.min(5, Math.max(0.35, externalZoom * internalZoom));
   const targetZoomRef = useRef(targetZoom);
   targetZoomRef.current = targetZoom;
 
@@ -682,11 +679,6 @@ function MapCanvas({
   visualBearingRef.current = visualBearing;
   const targetBearingRef = useRef(bearing);
   targetBearingRef.current = bearing;
-
-  // ── Smooth Visual Navigation Pitch State (0° in top-down mode, 48° in navigation mode) ──
-  const [visualPitch, setVisualPitch] = useState(isNavigating ? TARGET_NAV_PITCH : 0);
-  const visualPitchRef = useRef(visualPitch);
-  visualPitchRef.current = visualPitch;
 
   // ── Smooth Visual GPS Marker State (Interpolated Glide) ──
   const [visualGps, setVisualGps] = useState<{ x: number; y: number; heading: number }>({
@@ -714,30 +706,6 @@ function MapCanvas({
   // ── Navigation Start/End Initial Bearing Alignment ──
   const prevNavigatingRef = useRef(isNavigating);
   useEffect(() => {
-    if (isNavigating && !prevNavigatingRef.current) {
-      // Transitioning into Navigation Mode: orient map along the route direction
-      if (route && route.nodes && route.nodes.length >= 2) {
-        const n0 = route.nodes[0];
-        const n1 = route.nodes.slice(1).find((n) => Math.hypot(n.x - n0.x, n.y - n0.y) > 2) || route.nodes[1];
-        const segDx = n1.x - n0.x;
-        const segDy = n1.y - n0.y;
-        const segAngleDeg = (Math.atan2(segDx, -segDy) * 180) / Math.PI;
-        const initialBearing = (360 - segAngleDeg + 360) % 360;
-        bearingRef.current = initialBearing;
-        lastReportedBearingRef.current = initialBearing;
-        onBearingChange?.(initialBearing);
-      } else if (gps?.heading !== undefined && gps.heading >= 0) {
-        const initialBearing = (360 - gps.heading + 360) % 360;
-        bearingRef.current = initialBearing;
-        lastReportedBearingRef.current = initialBearing;
-        onBearingChange?.(initialBearing);
-      }
-    } else if (!isNavigating && prevNavigatingRef.current) {
-      // Transitioning out of Navigation Mode: smoothly return to North-Up
-      bearingRef.current = 0;
-      lastReportedBearingRef.current = 0;
-      onBearingChange?.(0);
-    }
     prevNavigatingRef.current = isNavigating;
   }, [isNavigating, route, gps?.heading, onBearingChange]);
 
@@ -810,20 +778,6 @@ function MapCanvas({
         setVisualZoom(targetZ);
         setPan(panRef.current);
         setInternalZoom(internalZoomRef.current);
-      }
-
-      // 0b. Smooth Visual Navigation Pitch Glide (500–800ms natural convergence)
-      const targetP = isNavigating ? TARGET_NAV_PITCH : 0;
-      const curP = visualPitchRef.current;
-      const dP = targetP - curP;
-      if (Math.abs(dP) > 0.02) {
-        const pitchAlpha = 1 - Math.exp(-6.0 * dt);
-        const nextP = curP + dP * pitchAlpha;
-        visualPitchRef.current = nextP;
-        setVisualPitch(nextP);
-      } else if (curP !== targetP) {
-        visualPitchRef.current = targetP;
-        setVisualPitch(targetP);
       }
 
       // 0c. Smooth Visual Bearing Glide (Shortest-angle continuous circular interpolation)
@@ -906,18 +860,8 @@ function MapCanvas({
         const centerX = boundsRef.current.x + boundsRef.current.w / 2;
         const centerY = boundsRef.current.y + boundsRef.current.h / 2;
 
-        // Dynamic Lookahead along current map viewing direction
-        // In navigation mode, positions the user ~68% down the screen, revealing 68% of forward path ahead
-        const curPitchVal = visualPitchRef.current;
-        const navLookaheadProgress = curPitchVal / TARGET_NAV_PITCH;
-        const curEffH = boundsRef.current.h / (visualZoomRef.current || 1);
-        const lookaheadDist = (curEffH * 0.18) * navLookaheadProgress;
-        const rad = (-bearingRef.current * Math.PI) / 180;
-        const lookaheadTargetX = targetFollowX - Math.sin(rad) * lookaheadDist;
-        const lookaheadTargetY = targetFollowY - Math.cos(rad) * lookaheadDist;
-
-        const targetPanX = centerX - lookaheadTargetX;
-        const targetPanY = centerY - lookaheadTargetY;
+        const targetPanX = centerX - targetFollowX;
+        const targetPanY = centerY - targetFollowY;
 
         const curPan = panRef.current;
         const panDx = targetPanX - curPan.x;
@@ -1592,21 +1536,12 @@ function MapCanvas({
   const rotationPivotX = (isFollowingUser || isNavigating) && targetGpsPos ? visualGps.x : boundsCenterX - pan.x;
   const rotationPivotY = (isFollowingUser || isNavigating) && targetGpsPos ? visualGps.y : boundsCenterY - pan.y;
 
-  // Compute pure SVG transformation string with smooth visual pitch tilt & visual bearing
+  // Compute pure 2D SVG transformation string with smooth visual bearing
   const mainTransform = useMemo(() => {
     const hasBearing = Math.abs(visualBearing) > 0.05;
-    const hasPitch = visualPitch > 0.05;
-    if (!hasBearing && !hasPitch) return undefined;
-
-    const pitchRad = (visualPitch * Math.PI) / 180;
-    const tiltScaleY = Math.cos(pitchRad); // 1.0 at 0°, ~0.669 at 48°
-
-    if (!hasPitch) {
-      return `rotate(${visualBearing} ${rotationPivotX} ${rotationPivotY})`;
-    }
-
-    return `translate(${rotationPivotX} ${rotationPivotY}) rotate(${visualBearing}) scale(1, ${tiltScaleY}) translate(${-rotationPivotX} ${-rotationPivotY})`;
-  }, [visualBearing, visualPitch, rotationPivotX, rotationPivotY]);
+    if (!hasBearing) return undefined;
+    return `rotate(${visualBearing} ${rotationPivotX} ${rotationPivotY})`;
+  }, [visualBearing, rotationPivotX, rotationPivotY]);
 
   return (
     <svg
