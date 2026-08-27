@@ -1380,7 +1380,7 @@ function MapCanvas({
           return;
         }
 
-        // 1. Pinch Zoom Scaling
+        // 1. Pinch Zoom Scaling (Pure Zoom & Pan, Locked North-Up)
         const ratio = currentDist / gState.initialDist;
         const extZ = externalZoomRef.current || 1;
         const targetTotal = Math.min(5, Math.max(0.35, gState.initialZoom * ratio));
@@ -1388,21 +1388,10 @@ function MapCanvas({
         internalZoomRef.current = newInternal;
         targetZoomRef.current = targetTotal;
 
-        // 2. Continuous Two-Finger Rotation with Instant Decoupled Visual Feedback
-        const deltaAngle = currentAngle - gState.initialAngle;
-        const newBearing = (gState.initialBearing + deltaAngle + 360) % 360;
-        bearingRef.current = newBearing;
-        targetBearingRef.current = newBearing;
-        visualBearingRef.current = newBearing;
-        setVisualBearing(newBearing);
-
-        // 3. Two-Finger Pan Midpoint Tracking with Rotation Compensation
+        // 2. Two-Finger Pan Midpoint Tracking
         const rawDx = (currentCenter.x - gState.lastCenter.x) * uniformScale;
         const rawDy = (currentCenter.y - gState.lastCenter.y) * uniformScale;
-        const rad = (-bearingRef.current * Math.PI) / 180;
-        const dx = rawDx * Math.cos(rad) - rawDy * Math.sin(rad);
-        const dy = rawDx * Math.sin(rad) + rawDy * Math.cos(rad);
-        panRef.current = { x: panRef.current.x + dx, y: panRef.current.y + dy };
+        panRef.current = { x: panRef.current.x + rawDx, y: panRef.current.y + rawDy };
         gState.lastCenter = currentCenter;
       } else if (e.touches.length === 1) {
         e.preventDefault();
