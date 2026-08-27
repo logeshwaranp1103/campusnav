@@ -474,10 +474,10 @@ export const useNavigationStore = create<NavigationSessionState>((set, get) => (
   advanceToPrevStep: () => {
     const state = get();
     const { activeRoute, currentSegmentIndex } = state;
-    if (!activeRoute || currentSegmentIndex <= 0) return;
+    if (!activeRoute) return;
 
     const instructions = activeRoute.instructions || [];
-    const prevIndex = currentSegmentIndex - 1;
+    const prevIndex = Math.max(0, currentSegmentIndex - 1);
 
     const currentInstruction = instructions[prevIndex] ?? null;
     const nextInstruction = instructions[prevIndex + 1] ?? null;

@@ -1152,71 +1152,60 @@ export function NavigateShell() {
         />
 
         {/* Turn-by-turn Guidance Banner */}
-        {live && (navSession.status === "NAVIGATING" || navSession.status === "OFF_ROUTE" || navSession.status === "REROUTING" || navSession.status === "ARRIVED" || navSession.status === "GPS_SIGNAL_LOST") && (
-          <TurnByTurnBar
-            currentStep={
-              navSession.currentInstruction
-                ? {
-                    text: navSession.currentInstruction.text,
-                    distanceMeters: Math.round(navSession.currentInstruction.distance),
-                    icon: navSession.currentInstruction.icon ?? (navSession.currentInstruction.transition === "arrive" ? "arrive" : "straight"),
-                    targetNodeId: navSession.currentInstruction.targetNodeId ?? "",
-                    targetNodeName: navSession.currentInstruction.targetNodeName,
-                    photoUrl: navSession.currentInstruction.photoUrl,
-                  }
-                : (route?.instructions && route.instructions[navSession.currentSegmentIndex]
-                    ? {
-                        text: route.instructions[navSession.currentSegmentIndex].text,
-                        distanceMeters: Math.round(route.instructions[navSession.currentSegmentIndex].distance),
-                        icon: route.instructions[navSession.currentSegmentIndex].icon ?? "straight",
-                        targetNodeId: route.instructions[navSession.currentSegmentIndex].targetNodeId ?? "",
-                        targetNodeName: route.instructions[navSession.currentSegmentIndex].targetNodeName,
-                        photoUrl: route.instructions[navSession.currentSegmentIndex].photoUrl,
-                      }
-                    : null)
-            }
-            nextStep={
-              navSession.nextInstruction
-                ? {
-                    text: navSession.nextInstruction.text,
-                    distanceMeters: Math.round(navSession.nextInstruction.distance),
-                    icon: navSession.nextInstruction.icon ?? (navSession.nextInstruction.transition === "arrive" ? "arrive" : "straight"),
-                    targetNodeId: navSession.nextInstruction.targetNodeId ?? "",
-                    targetNodeName: navSession.nextInstruction.targetNodeName,
-                    photoUrl: navSession.nextInstruction.photoUrl,
-                  }
-                : (route?.instructions && route.instructions[navSession.currentSegmentIndex + 1]
-                    ? {
-                        text: route.instructions[navSession.currentSegmentIndex + 1].text,
-                        distanceMeters: Math.round(route.instructions[navSession.currentSegmentIndex + 1].distance),
-                        icon: route.instructions[navSession.currentSegmentIndex + 1].icon ?? "straight",
-                        targetNodeId: route.instructions[navSession.currentSegmentIndex + 1].targetNodeId ?? "",
-                        targetNodeName: route.instructions[navSession.currentSegmentIndex + 1].targetNodeName,
-                        photoUrl: route.instructions[navSession.currentSegmentIndex + 1].photoUrl,
-                      }
-                    : null)
-            }
-            allSteps={navSession.activeRoute?.instructions || route?.instructions || []}
-            totalDistanceMeters={Math.round(navSession.activeRoute?.distance ?? route?.distance ?? 0)}
-            remainingDistanceMeters={navSession.distanceRemaining}
-            currentStepIndex={navSession.currentSegmentIndex}
-            totalStepsCount={navSession.activeRoute?.instructions.length ?? route?.instructions?.length ?? 1}
-            isOffRoute={navSession.status === "OFF_ROUTE" || navSession.status === "REROUTING"}
-            onEndNavigation={() => {
-              setLive(false);
-              navSession.cancelNavigationSession();
-            }}
-            onRecalculate={() => {
-              if (fromSelected && toSelected) calculateRoute(fromSelected, toSelected, stops, selectedFloorId, detectedBuilding?.id, travelMode);
-            }}
-            onNextStep={() => {
-              navSession.advanceToNextStep();
-            }}
-            onPrevStep={() => {
-              navSession.advanceToPrevStep();
-            }}
-          />
-        )}
+        {live && (navSession.status === "NAVIGATING" || navSession.status === "OFF_ROUTE" || navSession.status === "REROUTING" || navSession.status === "ARRIVED" || navSession.status === "GPS_SIGNAL_LOST") && (() => {
+          const allRouteSteps = navSession.activeRoute?.instructions || route?.instructions || [];
+          const stepIndex = Math.max(0, Math.min(Math.max(0, allRouteSteps.length - 1), navSession.currentSegmentIndex));
+          const activeStep = navSession.currentInstruction || allRouteSteps[stepIndex] || null;
+          const upcomingStep = navSession.nextInstruction || allRouteSteps[stepIndex + 1] || null;
+
+          return (
+            <TurnByTurnBar
+              currentStep={
+                activeStep
+                  ? {
+                      text: activeStep.text,
+                      distanceMeters: Math.round(activeStep.distance),
+                      icon: activeStep.icon ?? (activeStep.transition === "arrive" ? "arrive" : "straight"),
+                      targetNodeId: activeStep.targetNodeId ?? "",
+                      targetNodeName: activeStep.targetNodeName,
+                      photoUrl: activeStep.photoUrl,
+                    }
+                  : null
+              }
+              nextStep={
+                upcomingStep
+                  ? {
+                      text: upcomingStep.text,
+                      distanceMeters: Math.round(upcomingStep.distance),
+                      icon: upcomingStep.icon ?? (upcomingStep.transition === "arrive" ? "arrive" : "straight"),
+                      targetNodeId: upcomingStep.targetNodeId ?? "",
+                      targetNodeName: upcomingStep.targetNodeName,
+                      photoUrl: upcomingStep.photoUrl,
+                    }
+                  : null
+              }
+              allSteps={allRouteSteps}
+              totalDistanceMeters={Math.round(navSession.activeRoute?.distance ?? route?.distance ?? 0)}
+              remainingDistanceMeters={navSession.distanceRemaining}
+              currentStepIndex={stepIndex}
+              totalStepsCount={Math.max(1, allRouteSteps.length)}
+              isOffRoute={navSession.status === "OFF_ROUTE" || navSession.status === "REROUTING"}
+              onEndNavigation={() => {
+                setLive(false);
+                navSession.cancelNavigationSession();
+              }}
+              onRecalculate={() => {
+                if (fromSelected && toSelected) calculateRoute(fromSelected, toSelected, stops, selectedFloorId, detectedBuilding?.id, travelMode);
+              }}
+              onNextStep={() => {
+                navSession.advanceToNextStep();
+              }}
+              onPrevStep={() => {
+                navSession.advanceToPrevStep();
+              }}
+            />
+          );
+        })()}
 
         {/* Floating Route Summary Bar on Mobile (when route is calculated and viewing map) */}
         {!live && route && mobileView === "map" && toSelected && (
