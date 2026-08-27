@@ -1164,14 +1164,14 @@ export function NavigateShell() {
                     targetNodeName: navSession.currentInstruction.targetNodeName,
                     photoUrl: navSession.currentInstruction.photoUrl,
                   }
-                : (route?.instructions[0]
+                : (route?.instructions && route.instructions[navSession.currentSegmentIndex]
                     ? {
-                        text: route.instructions[0].text,
-                        distanceMeters: Math.round(route.instructions[0].distance),
-                        icon: route.instructions[0].icon ?? "straight",
-                        targetNodeId: route.instructions[0].targetNodeId ?? route.nodes[0]?.id ?? "",
-                        targetNodeName: route.instructions[0].targetNodeName ?? route.nodes[0]?.name,
-                        photoUrl: route.instructions[0].photoUrl ?? route.nodes[0]?.photoUrl,
+                        text: route.instructions[navSession.currentSegmentIndex].text,
+                        distanceMeters: Math.round(route.instructions[navSession.currentSegmentIndex].distance),
+                        icon: route.instructions[navSession.currentSegmentIndex].icon ?? "straight",
+                        targetNodeId: route.instructions[navSession.currentSegmentIndex].targetNodeId ?? "",
+                        targetNodeName: route.instructions[navSession.currentSegmentIndex].targetNodeName,
+                        photoUrl: route.instructions[navSession.currentSegmentIndex].photoUrl,
                       }
                     : null)
             }
@@ -1185,14 +1185,14 @@ export function NavigateShell() {
                     targetNodeName: navSession.nextInstruction.targetNodeName,
                     photoUrl: navSession.nextInstruction.photoUrl,
                   }
-                : (route?.instructions[1]
+                : (route?.instructions && route.instructions[navSession.currentSegmentIndex + 1]
                     ? {
-                        text: route.instructions[1].text,
-                        distanceMeters: Math.round(route.instructions[1].distance),
-                        icon: route.instructions[1].icon ?? "straight",
-                        targetNodeId: route.instructions[1].targetNodeId ?? route.nodes[1]?.id ?? "",
-                        targetNodeName: route.instructions[1].targetNodeName ?? route.nodes[1]?.name,
-                        photoUrl: route.instructions[1].photoUrl ?? route.nodes[1]?.photoUrl,
+                        text: route.instructions[navSession.currentSegmentIndex + 1].text,
+                        distanceMeters: Math.round(route.instructions[navSession.currentSegmentIndex + 1].distance),
+                        icon: route.instructions[navSession.currentSegmentIndex + 1].icon ?? "straight",
+                        targetNodeId: route.instructions[navSession.currentSegmentIndex + 1].targetNodeId ?? "",
+                        targetNodeName: route.instructions[navSession.currentSegmentIndex + 1].targetNodeName,
+                        photoUrl: route.instructions[navSession.currentSegmentIndex + 1].photoUrl,
                       }
                     : null)
             }

@@ -326,22 +326,34 @@ export function TurnByTurnBar({
 
             {/* Stepper buttons & End Navigation Button */}
             <div className="flex items-center gap-1.5 shrink-0">
-              {onPrevStep && currentStepIndex > 0 && (
+              {onPrevStep && (
                 <button
                   type="button"
                   onClick={onPrevStep}
-                  className="flex h-9 w-9 items-center justify-center rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-600 hover:text-slate-900 border border-slate-200 transition-all active:scale-95 cursor-pointer"
+                  disabled={currentStepIndex <= 0}
+                  className={cn(
+                    "flex h-9 w-9 items-center justify-center rounded-xl bg-slate-100 border border-slate-200 transition-all",
+                    currentStepIndex <= 0
+                      ? "opacity-35 cursor-not-allowed text-slate-400"
+                      : "hover:bg-slate-200 text-slate-700 hover:text-slate-900 active:scale-95 cursor-pointer"
+                  )}
                   title="Previous Step"
                   aria-label="Previous Step"
                 >
                   <ChevronLeft className="h-4 w-4" />
                 </button>
               )}
-              {onNextStep && currentStepIndex < totalStepsCount - 1 && (
+              {onNextStep && (
                 <button
                   type="button"
                   onClick={onNextStep}
-                  className="flex h-9 w-9 items-center justify-center rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-600 hover:text-slate-900 border border-slate-200 transition-all active:scale-95 cursor-pointer"
+                  disabled={currentStepIndex >= totalStepsCount - 1}
+                  className={cn(
+                    "flex h-9 w-9 items-center justify-center rounded-xl bg-slate-100 border border-slate-200 transition-all",
+                    currentStepIndex >= totalStepsCount - 1
+                      ? "opacity-35 cursor-not-allowed text-slate-400"
+                      : "hover:bg-slate-200 text-slate-700 hover:text-slate-900 active:scale-95 cursor-pointer"
+                  )}
                   title="Next Step"
                   aria-label="Next Step"
                 >
