@@ -1264,39 +1264,41 @@ export function NavigateShell() {
         )}
       </div>
 
-      {/* Fixed Bottom Mobile Navigation Bar (Mobile Screens Only) */}
-      <div className="fixed bottom-0 left-0 right-0 z-50 flex items-center justify-around border-t bg-[rgb(var(--card))]/95 p-1.5 backdrop-blur-md md:hidden shadow-lg">
-        <button
-          onClick={() => setMobileView("panel")}
-          className={cn(
-            "flex flex-1 items-center justify-center gap-1.5 rounded-xl py-2.5 text-xs font-semibold transition-all cursor-pointer min-h-[44px]",
-            mobileView === "panel"
-              ? "bg-[rgb(var(--primary))] text-white shadow-xs"
-              : "text-[rgb(var(--muted-fg))] hover:bg-[rgb(var(--muted))]"
-          )}
-        >
-          <Navigation2 className="h-4 w-4" />
-          <span>Route Planner</span>
-        </button>
-        <button
-          onClick={() => {
-            setMobileView("map");
-            if (gps && !gps.isTracking) {
-              gps.startTracking();
-            }
-          }}
-          className={cn(
-            "flex flex-1 items-center justify-center gap-1.5 rounded-xl py-2.5 text-xs font-semibold transition-all cursor-pointer min-h-[44px]",
-            mobileView === "map"
-              ? "bg-[rgb(var(--primary))] text-white shadow-xs"
-              : "text-[rgb(var(--muted-fg))] hover:bg-[rgb(var(--muted))]"
-          )}
-        >
-          <MapPin className="h-4 w-4" />
-          <span>Map Focus</span>
-          {route && <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse" />}
-        </button>
-      </div>
+      {/* Fixed Bottom Mobile Navigation Bar (Mobile Screens Only, Hidden when Live Navigating) */}
+      {!live && (
+        <div className="fixed bottom-0 left-0 right-0 z-50 flex items-center justify-around border-t bg-[rgb(var(--card))]/95 p-1.5 backdrop-blur-md md:hidden shadow-lg">
+          <button
+            onClick={() => setMobileView("panel")}
+            className={cn(
+              "flex flex-1 items-center justify-center gap-1.5 rounded-xl py-2.5 text-xs font-semibold transition-all cursor-pointer min-h-[44px]",
+              mobileView === "panel"
+                ? "bg-[rgb(var(--primary))] text-white shadow-xs"
+                : "text-[rgb(var(--muted-fg))] hover:bg-[rgb(var(--muted))]"
+            )}
+          >
+            <Navigation2 className="h-4 w-4" />
+            <span>Route Planner</span>
+          </button>
+          <button
+            onClick={() => {
+              setMobileView("map");
+              if (gps && !gps.isTracking) {
+                gps.startTracking();
+              }
+            }}
+            className={cn(
+              "flex flex-1 items-center justify-center gap-1.5 rounded-xl py-2.5 text-xs font-semibold transition-all cursor-pointer min-h-[44px]",
+              mobileView === "map"
+                ? "bg-[rgb(var(--primary))] text-white shadow-xs"
+                : "text-[rgb(var(--muted-fg))] hover:bg-[rgb(var(--muted))]"
+            )}
+          >
+            <MapPin className="h-4 w-4" />
+            <span>Map Focus</span>
+            {route && <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse" />}
+          </button>
+        </div>
+      )}
 
       {/* ── Transport Mode Selection Modal ("How are you travelling?") ── */}
       <AnimatePresence>

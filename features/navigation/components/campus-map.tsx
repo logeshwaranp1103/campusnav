@@ -61,11 +61,12 @@ export function CampusMap({ route, livePosition, progress, gps: passedGps, onNav
   const [publishedData, setPublishedData] = useState(() => campusStore.getPublishedData());
   const [view, setView] = useState<string>("f-out");
   const [selectedDestForDetails, setSelectedDestForDetails] = useState<Destination | null>(null);
-  const [showFloorMenuMobile, setShowFloorMenuMobile] = useState(false);
-
   // Active navigation session state
   const navStatus = useNavigationStore((s) => s.status);
   const isNavigating = navStatus === "NAVIGATING" || navStatus === "OFF_ROUTE" || navStatus === "REROUTING";
+
+  // Floor selector hide/unhide state
+  const [isFloorMenuOpen, setIsFloorMenuOpen] = useState(false);
 
   // Map Zoom, Bearing & Pan state passed down to MapCanvas
   const [zoomLevel, setZoomLevel] = useState(1);
@@ -168,52 +169,38 @@ export function CampusMap({ route, livePosition, progress, gps: passedGps, onNav
       if (toBldId) targetBuildingIds.add(toBldId);
 
       if (route && route.nodes.length > 0) {
-        const startNode = route.nodes[0];
-        const endNode = route.nodes[route.nodes.length - 1];
-        [startNode, endNode].forEach((n) => {
+        route.nodes.forEach((n) => {
           const bId = getBuildingIdForNode(n);
           if (bId) targetBuildingIds.add(bId);
         });
       }
-
-      if (targetBuildingIds.size > 0) {
-        return allFloors
-          .filter((f) => targetBuildingIds.has(f.buildingId))
-          .sort((a, b) => a.ordinal - b.ordinal)
-          .map((f) => f.id);
-      }
-      return [];
     }
 
     if (gps.isGpsActive && gps.lat && gps.lng) {
       const containment = detectBuildingAtGps(gps.lat, gps.lng, gps.accuracy || 10, allBuildings);
       if (containment.isInside && containment.building) {
-        return allFloors
-          .filter((f) => f.buildingId === containment.building!.id)
-          .sort((a, b) => a.ordinal - b.ordinal)
-          .map((f) => f.id);
-      }
-      const canvasPos = gps.canvasPos || gpsToCanvas(gps.lat, gps.lng);
-      const bld = allBuildings.find((b) => isPointInsideBuilding(canvasPos.x, canvasPos.y, b));
-      if (bld) {
-        return allFloors
-          .filter((f) => f.buildingId === bld.id)
-          .sort((a, b) => a.ordinal - b.ordinal)
-          .map((f) => f.id);
+        targetBuildingIds.add(containment.building.id);
       }
     }
 
     if (livePosition) {
       const bldId = getBuildingIdForNode(livePosition);
-      if (bldId) {
-        return allFloors
-          .filter((f) => f.buildingId === bldId)
-          .sort((a, b) => a.ordinal - b.ordinal)
-          .map((f) => f.id);
-      }
+      if (bldId) targetBuildingIds.add(bldId);
     }
 
-    return [];
+    // If specific target buildings are identified in the route or location, show those floors
+    if (targetBuildingIds.size > 0) {
+      const targetFloors = allFloors
+        .filter((f) => targetBuildingIds.has(f.buildingId))
+        .sort((a, b) => a.ordinal - b.ordinal)
+        .map((f) => f.id);
+      if (targetFloors.length > 0) return targetFloors;
+    }
+
+    // Default fallback: Always return all available campus floors
+    return allFloors
+      .sort((a, b) => a.ordinal - b.ordinal)
+      .map((f) => f.id);
   }, [publishedData, fromSelected, toSelected, route, livePosition, gps.isGpsActive, gps.lat, gps.lng]);
 
   const validFloorIds = useMemo(() => {
@@ -245,12 +232,40 @@ export function CampusMap({ route, livePosition, progress, gps: passedGps, onNav
     return undefined;
   }, [publishedData.buildings, publishedData.nodes]);
 
+  const resolveCleanBuildingCode = useCallback((b: Building | undefined, nameFallback = ""): string => {
+    if (!b && !nameFallback) return "";
+    const name = ((b?.name || nameFallback) || "").trim();
+    const rawCode = (b?.shortCode || "").trim().toUpperCase();
+
+    // If shortCode is already a valid custom code other than "BLD", use it
+    if (rawCode && rawCode !== "BLD") {
+      return rawCode;
+    }
+
+    // Derive intelligent acronym from building name
+    const nameUpper = name.toUpperCase();
+    if (nameUpper.includes("SCIENCE") || nameUpper.includes("FACULTY") || nameUpper === "SF") return "SF";
+    if (nameUpper.includes("RADHAKRISHNAN") || nameUpper.includes("RP") || nameUpper === "RP BLOCK") return "RP";
+    if (nameUpper.includes("MECHANICAL") || nameUpper.includes("MECH")) return "MECH";
+    if (nameUpper.includes("PEARL")) return "PEARL";
+
+    // General acronym extractor (e.g. "Civil Block" -> "CIVIL", "Main Building" -> "MB")
+    const words = name.split(/\s+/).filter(Boolean);
+    if (words.length >= 2) {
+      const acronym = words.map((w) => w[0]).join("").toUpperCase();
+      if (acronym !== "BLD") return acronym;
+    }
+    if (name.length <= 5 && name.toUpperCase() !== "BLD") return name.toUpperCase();
+    const cleanFirst = name.split(/\s+/)[0].replace(/[^a-zA-Z0-9]/g, "").toUpperCase();
+    return cleanFirst !== "BLD" && cleanFirst.length > 0 ? cleanFirst.slice(0, 5) : (name || "Campus");
+  }, []);
+
   const getFloorButtonLabel = useCallback((f: Floor | undefined): string => {
     if (!f) return "Floor";
     const b = getBuildingForFloor(f);
-    const bName = b?.name || b?.shortCode;
-    return bName ? `${bName} · ${f.name || "Floor"}` : (f.name || "Floor");
-  }, [getBuildingForFloor]);
+    const bCode = resolveCleanBuildingCode(b, f.buildingId);
+    return bCode ? `${bCode} - ${f.name || "Floor"}` : (f.name || "Floor");
+  }, [getBuildingForFloor, resolveCleanBuildingCode]);
 
   const activeFloorLabel = useMemo(() => {
     if (activeView === "f-out") return "Outdoor";
@@ -382,52 +397,68 @@ export function CampusMap({ route, livePosition, progress, gps: passedGps, onNav
         toSelected={toSelected}
       />
 
-      {/* ── Top-Right Floor Selection Controls ── */}
-      <div className="absolute right-3 top-3 z-20 pointer-events-auto flex flex-col items-end gap-1.5">
-        {/* Mobile Floor Toggle Button */}
+      {/* ── Top-Right Floor Selection Controls (Non-Colliding, Sleek Hide/Unhide) ── */}
+      <div className={cn(
+        "absolute right-3 z-30 pointer-events-auto flex flex-col items-end gap-1.5 transition-all duration-300",
+        isNavigating ? "top-24 md:top-28" : "top-3"
+      )}>
+        {/* Sleek Hide/Unhide Floating Trigger Pill */}
         <button
-          onClick={() => setShowFloorMenuMobile((prev) => !prev)}
-          className="flex h-11 min-w-11 items-center justify-center gap-1.5 px-3 rounded-2xl border bg-[rgb(var(--card))]/95 text-xs font-semibold shadow-lg backdrop-blur-md text-[rgb(var(--fg))] hover:bg-[rgb(var(--muted))] active:scale-95 transition-all cursor-pointer border-[rgb(var(--border))] md:hidden"
-          title={`Select Floor Level (${activeFloorLabel})`}
-          aria-label={`Select Floor (${activeFloorLabel})`}
+          onClick={() => setIsFloorMenuOpen((v) => !v)}
+          className={cn(
+            "flex items-center gap-2 rounded-2xl border border-[rgb(var(--border))] bg-[rgb(var(--card))]/95 px-3.5 py-2.5 text-xs font-bold shadow-xl backdrop-blur-md transition-all active:scale-95 cursor-pointer text-[rgb(var(--fg))] hover:bg-[rgb(var(--muted))]",
+            isFloorMenuOpen && "ring-2 ring-[rgb(var(--primary))] bg-[rgb(var(--card))]"
+          )}
+          aria-label={isFloorMenuOpen ? "Hide Floor Stack" : "Show Floor Stack"}
+          title={isFloorMenuOpen ? "Hide Floor Stack" : "Show Floor Stack"}
         >
-          <Layers className="h-4.5 w-4.5 text-[rgb(var(--primary))] shrink-0" />
-          <span className="max-w-[110px] truncate text-xs font-bold">{activeFloorLabel}</span>
-          <ChevronDown className={cn("h-3.5 w-3.5 text-[rgb(var(--muted-fg))] transition-transform duration-200", showFloorMenuMobile && "rotate-180")} />
+          <Layers className="h-4 w-4 text-[rgb(var(--primary))] shrink-0" />
+          <span className="max-w-[150px] truncate">{activeFloorLabel}</span>
+          <ChevronDown className={cn("h-3.5 w-3.5 text-[rgb(var(--muted-fg))] transition-transform duration-200", isFloorMenuOpen && "rotate-180")} />
         </button>
 
-        {/* Floor List (Always visible on desktop md:flex, expandable on mobile) */}
-        <div
-          className={cn(
-            "flex-col gap-1 rounded-2xl border bg-[rgb(var(--card))]/95 p-1.5 shadow-lg backdrop-blur-md w-fit max-h-60 overflow-y-auto transition-all",
-            showFloorMenuMobile ? "flex" : "hidden md:flex"
-          )}
-        >
-          <FloorButton
-            active={activeView === "f-out"}
-            onClick={() => {
-              setView("f-out");
-              setShowFloorMenuMobile(false);
-            }}
-            icon={<Building2 className="h-3.5 w-3.5" />}
-            label="Outdoor"
-          />
-          {indoorFloors.map((fid) => {
-            const f = allFloors.find((x) => x.id === fid);
-            return (
-              <FloorButton
-                key={fid}
-                active={activeView === fid}
-                onClick={() => {
-                  setView(fid);
-                  setShowFloorMenuMobile(false);
-                }}
-                icon={<Layers className="h-3.5 w-3.5" />}
-                label={getFloorButtonLabel(f)}
-              />
-            );
-          })}
-        </div>
+        {/* Expandable / Collapsible Floor Stack Card */}
+        {isFloorMenuOpen && (
+          <div
+            className="flex flex-col gap-1 rounded-2xl border border-[rgb(var(--border))] bg-[rgb(var(--card))]/98 p-2 shadow-2xl backdrop-blur-md w-fit min-w-[180px] max-h-64 overflow-y-auto animate-in fade-in slide-in-from-top-2 duration-200"
+          >
+            <div className="flex items-center justify-between border-b border-[rgb(var(--border)/0.6)] px-2 py-1 mb-1">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-[rgb(var(--muted-fg))]">Select Level</span>
+              <button
+                onClick={() => setIsFloorMenuOpen(false)}
+                className="text-[10px] font-bold text-[rgb(var(--primary))] hover:underline flex items-center gap-0.5 cursor-pointer px-1 py-0.5 rounded-md hover:bg-[rgb(var(--primary)/0.08)]"
+              >
+                <span>Hide</span>
+                <ChevronDown className="h-3 w-3 rotate-180" />
+              </button>
+            </div>
+
+            <FloorButton
+              active={activeView === "f-out"}
+              onClick={() => {
+                setView("f-out");
+                setIsFloorMenuOpen(false);
+              }}
+              icon={<Building2 className="h-4 w-4 shrink-0" />}
+              label="Outdoor"
+            />
+            {indoorFloors.map((fid) => {
+              const f = allFloors.find((x) => x.id === fid);
+              return (
+                <FloorButton
+                  key={fid}
+                  active={activeView === fid}
+                  onClick={() => {
+                    setView(fid);
+                    setIsFloorMenuOpen(false);
+                  }}
+                  icon={<Layers className="h-4 w-4 shrink-0" />}
+                  label={getFloorButtonLabel(f)}
+                />
+              );
+            })}
+          </div>
+        )}
       </div>
 
       {/* ── Right-Center Tools Stack (4-Direction Compass Rose, Zoom, Obstacles) ── */}
@@ -534,7 +565,10 @@ export function CampusMap({ route, livePosition, progress, gps: passedGps, onNav
       </div>
 
       {/* ── Bottom-Right Recenter / Follow Location Floating Action Button (FAB) ── */}
-      <div className="absolute right-3.5 bottom-28 md:bottom-28 z-25 pointer-events-auto flex items-center gap-2">
+      <div className={cn(
+        "absolute right-3.5 z-25 pointer-events-auto flex items-center gap-2 transition-all duration-300",
+        isNavigating || route ? "bottom-36 md:bottom-32" : "bottom-24 md:bottom-28"
+      )}>
         {!isFollowingUser && (gps?.isGpsActive || fromSelected?.id === "dest-live-user-location" || livePosition) && (
           <button
             onClick={handleRecenter}
