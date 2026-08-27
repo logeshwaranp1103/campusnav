@@ -74,9 +74,21 @@ export function TurnByTurnBar({
     ? (cleanLandmarkName(currentStep.targetNodeName) || currentStep.text || "Reference Location")
     : (cleanLandmarkName(nextStep?.targetNodeName) || nextStep?.text || "Upcoming Landmark");
 
+  const stepProgressPct = totalStepsCount > 1
+    ? ((currentStepIndex + 1) / totalStepsCount) * 100
+    : 100;
+
+  const distanceProgressPct = totalDistanceMeters > 0
+    ? ((totalDistanceMeters - remainingDistanceMeters) / totalDistanceMeters) * 100
+    : 0;
+
+  // Accurately show progress starting from step 1 (1/N) up to the final step (N/N)
   const progressPct = Math.min(
     100,
-    Math.max(0, Math.round(((totalDistanceMeters - remainingDistanceMeters) / (totalDistanceMeters || 1)) * 100))
+    Math.max(
+      Math.min(100, Math.round(stepProgressPct)),
+      Math.min(100, Math.max(0, Math.round(distanceProgressPct)))
+    )
   );
 
   const etaMinutes = Math.max(1, Math.round(remainingDistanceMeters / 70));

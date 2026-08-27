@@ -317,35 +317,13 @@ export function CampusMap({ route, livePosition, progress, gps: passedGps, onNav
     prevNavigatingRef.current = isNavigating;
   }, [isNavigating, resetBearingToNorth]);
 
-  // ── Auto-Resume Follow Mode Timer after Manual Interaction ──
-  const autoResumeTimerRef = useRef<NodeJS.Timeout | null>(null);
-
+  // ── Manual-Only Follow Mode State (No Auto-Recenter Timer) ──
   const handleUserPan = useCallback(() => {
     setIsFollowingUser(false);
-    if (autoResumeTimerRef.current) {
-      clearTimeout(autoResumeTimerRef.current);
-    }
-    // Auto-resume camera follow after 5s of inactivity if live GPS is active or navigating
-    if (isNavigating || gps?.isGpsActive) {
-      autoResumeTimerRef.current = setTimeout(() => {
-        setIsFollowingUser(true);
-      }, 5000);
-    }
-  }, [isNavigating, gps?.isGpsActive]);
-
-  useEffect(() => {
-    return () => {
-      if (autoResumeTimerRef.current) {
-        clearTimeout(autoResumeTimerRef.current);
-      }
-    };
   }, []);
 
-  // ── Re-center Location Action (Google-Maps Style) ──
+  // ── Re-center Location Action (Only on explicit click) ──
   const handleRecenter = useCallback(() => {
-    if (autoResumeTimerRef.current) {
-      clearTimeout(autoResumeTimerRef.current);
-    }
     if (gps && !gps.isTracking) {
       gps.startTracking();
     }
@@ -1009,7 +987,7 @@ function MapCanvas({
       setInternalZoom(1);
       setPan({ x: 0, y: 0 });
     }
-  }, [floorId, resetTrigger, route, fromSelected?.id, toSelected?.id]);
+  }, [resetTrigger, route, fromSelected?.id, toSelected?.id]);
 
   const nodeLookupMap = useMemo(() => {
     const map = new Map<string, Node>();
