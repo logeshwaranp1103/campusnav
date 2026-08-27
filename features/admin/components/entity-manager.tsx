@@ -90,6 +90,20 @@ const ENTITY_TYPES: { type: EntityCategory; label: string; icon: any; descriptio
   { type: "FLOOR", label: "Floor", icon: Layers, description: "Vertical building floor level & ordinal", badgeColor: "from-cyan-500 to-blue-600" },
 ];
 
+export function deriveBuildingShortCode(name: string, category?: string): string {
+  if (category && category.trim()) {
+    return category.trim().toUpperCase().slice(0, 6);
+  }
+  const clean = name.trim();
+  if (!clean) return "BLD";
+  const words = clean.split(/\s+/).filter(Boolean);
+  if (words.length > 1) {
+    const acronym = words.map((w) => w[0]).join("").toUpperCase();
+    if (acronym.length >= 2 && acronym.length <= 6) return acronym;
+  }
+  return clean.replace(/[^a-zA-Z0-9]/g, "").slice(0, 6).toUpperCase() || "BLD";
+}
+
 export function compressImageForUpload(file: File, maxDimension = 1280, quality = 0.82): Promise<string> {
   return new Promise((resolve) => {
     if (!file.type.startsWith("image/") || file.type === "image/svg+xml") {
@@ -924,7 +938,7 @@ export function EntityManager() {
           id: bldId,
           campusId: storeData.campus.id,
           name: buildingForm.name.trim(),
-          shortCode: buildingForm.category ? buildingForm.category.toUpperCase().slice(0, 4) : "BLD",
+          shortCode: deriveBuildingShortCode(buildingForm.name, buildingForm.category),
           description: buildingForm.description,
           floorsCount: typeof buildingForm.floorsCount === "number" && !isNaN(buildingForm.floorsCount) ? Math.max(0, buildingForm.floorsCount) : 0,
           lat: centerLat,
@@ -1734,7 +1748,7 @@ export function EntityManager() {
 
         campusStore.updateBuilding(editingItem.id, {
           name: newName,
-          shortCode: editForm.category ? editForm.category.toUpperCase().slice(0, 4) : editingItem.raw.shortCode,
+          shortCode: editForm.shortCode ? editForm.shortCode.trim().toUpperCase() : deriveBuildingShortCode(newName, editForm.category || editingItem.raw.shortCode),
           description: editForm.description,
           floorsCount: editForm.floorsCount,
           lat: centerLat,

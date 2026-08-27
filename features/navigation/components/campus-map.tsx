@@ -223,12 +223,40 @@ export function CampusMap({ route, livePosition, progress, gps: passedGps, onNav
 
   const activeView = validFloorIds.has(view) ? view : "f-out";
 
+  // Helper to resolve building for a floor with geometry / node containment & alias fallback
+  const getBuildingForFloor = useCallback((f: Floor | undefined): Building | undefined => {
+    if (!f) return undefined;
+    if (f.buildingId) {
+      const b = publishedData.buildings.find((x) => x.id === f.buildingId);
+      if (b) return b;
+    }
+    // Try geometry / nodes detection: find nodes on this floor and check containment
+    const floorNodes = (publishedData.nodes || []).filter((n) => n.floorId === f.id);
+    for (const n of floorNodes) {
+      const b = publishedData.buildings.find((bld) => isPointInsideBuilding(n.x, n.y, bld));
+      if (b) return b;
+    }
+    // Try matching building shortCode or name in floor name / floor ID (e.g. "sf-floor-1", "RP Ground")
+    const fLower = `${f.name || ""} ${f.id || ""}`.toLowerCase();
+    for (const b of publishedData.buildings) {
+      if (b.shortCode && fLower.includes(b.shortCode.toLowerCase())) return b;
+      if (b.name && fLower.includes(b.name.toLowerCase())) return b;
+    }
+    return undefined;
+  }, [publishedData.buildings, publishedData.nodes]);
+
+  const getFloorButtonLabel = useCallback((f: Floor | undefined): string => {
+    if (!f) return "Floor";
+    const b = getBuildingForFloor(f);
+    const bName = b?.name || b?.shortCode;
+    return bName ? `${bName} · ${f.name || "Floor"}` : (f.name || "Floor");
+  }, [getBuildingForFloor]);
+
   const activeFloorLabel = useMemo(() => {
     if (activeView === "f-out") return "Outdoor";
     const f = publishedData.floors.find((x) => x.id === activeView);
-    const b = f ? publishedData.buildings.find((x) => x.id === f.buildingId) : undefined;
-    return `${b?.name ? `${b.name} · ` : ""}${f?.name ?? "Floor"}`;
-  }, [activeView, publishedData.floors, publishedData.buildings]);
+    return getFloorButtonLabel(f);
+  }, [activeView, publishedData.floors, getFloorButtonLabel]);
 
   const allBuildings = publishedData.buildings;
   const allFloors = publishedData.floors;
@@ -386,7 +414,6 @@ export function CampusMap({ route, livePosition, progress, gps: passedGps, onNav
           />
           {indoorFloors.map((fid) => {
             const f = allFloors.find((x) => x.id === fid);
-            const b = f ? allBuildings.find((x) => x.id === f.buildingId) : undefined;
             return (
               <FloorButton
                 key={fid}
@@ -396,7 +423,7 @@ export function CampusMap({ route, livePosition, progress, gps: passedGps, onNav
                   setShowFloorMenuMobile(false);
                 }}
                 icon={<Layers className="h-3.5 w-3.5" />}
-                label={`${b?.shortCode || b?.name || "BLD"} · ${f?.name ?? "Floor"}`}
+                label={getFloorButtonLabel(f)}
               />
             );
           })}
@@ -534,7 +561,7 @@ export function CampusMap({ route, livePosition, progress, gps: passedGps, onNav
       {/* Destination Details Drawer */}
       <DestinationDetailsDrawer
         destination={selectedDestForDetails}
-        building={allBuildings.find((b) => b.id === allFloors.find((f) => f.id === selectedDestForDetails?.floorId)?.buildingId)}
+        building={getBuildingForFloor(allFloors.find((f) => f.id === selectedDestForDetails?.floorId))}
         floorName={allFloors.find((f) => f.id === selectedDestForDetails?.floorId)?.name}
         onClose={() => setSelectedDestForDetails(null)}
         onNavigate={(dest) => {
@@ -1524,6 +1551,10 @@ function MapCanvas({
         <filter id="bldShadow" x="-20%" y="-20%" width="150%" height="150%">
           <feDropShadow dx="-4" dy="8" stdDeviation="6" floodColor="#0f172a" floodOpacity="0.18" />
         </filter>
+        <linearGradient id="bldFillGrad" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor="#818cf8" stopOpacity="0.14" />
+          <stop offset="100%" stopColor="#3b82f6" stopOpacity="0.08" />
+        </linearGradient>
         <linearGradient id="bldRoofGrad" x1="0" y1="0" x2="1" y2="1">
           <stop offset="0%" stopColor="#ffffff" />
           <stop offset="60%" stopColor="#f8fafc" />
@@ -1718,72 +1749,54 @@ function MapCanvas({
             );
           })}
 
-        {/* ── 5. Realistic 3D Extruded Buildings Geometry ── */}
+        {/* ── 5. N-Corner Polygon Buildings Geometry (Styled 1-to-1 with Admin Digital Twin Editor) ── */}
         <g>
           {buildings.map((b) => {
             const canvasPts = getBuildingCanvasPoints(b);
+            const svgPath = getPolygonSvgPath(canvasPts);
             const centerPos = getBuildingCenter(b);
-            const bHeight = Math.min(20, Math.max(10, (b.floorsCount || 3) * 3.5));
 
-            const roofPts = getExtrudedRoofPoints(canvasPts, bHeight);
-            const baseSvgPath = getPolygonSvgPath(canvasPts);
-            const roofSvgPath = getPolygonSvgPath(roofPts);
-            const wallFacets = getWallFacets(canvasPts, roofPts);
-
-            const strokeColor = b.color || "#6366f1";
+            const buildingEvent = publishedData.events.find((ev) => ev.buildingId === b.id);
+            const strokeColor = buildingEvent?.color || b.color || "#4f46e5";
             const bName = b.name;
             const badgeWidth = Math.max(140, bName.length * 8.5 + 32);
 
             return (
-              <g key={`bld-3d-${b.id}`} pointerEvents="none" className="select-none">
-                {/* 1. Soft Ground Drop Shadow Under Base Footprint */}
+              <g key={`bld-poly-${b.id}`} pointerEvents="none" className="select-none">
+                {/* 1. Outer Glow Polygon Outline */}
                 <path
-                  d={baseSvgPath}
-                  fill="#0f172a"
-                  fillOpacity="0.12"
-                  filter="url(#bldShadow)"
-                  stroke="none"
-                />
-
-                {/* 2. 3D Architectural Wall Quad Facets with Directional Shading */}
-                {wallFacets.map((facet, idx) => (
-                  <path
-                    key={`facet-${b.id}-${idx}`}
-                    d={facet.path}
-                    fill={facet.isShaded ? "#94a3b8" : "#cbd5e1"}
-                    fillOpacity={facet.isShaded ? 0.95 : 0.85}
-                    stroke={strokeColor}
-                    strokeWidth="0.75"
-                    strokeOpacity="0.4"
-                    strokeLinejoin="round"
-                  />
-                ))}
-
-                {/* 3. Elevated 3D Rooftop Slab */}
-                <path
-                  d={roofSvgPath}
-                  fill="url(#bldRoofGrad)"
-                  stroke={strokeColor}
-                  strokeWidth="1.75"
-                  strokeDasharray={floorId !== "f-out" && !isGroundFloor ? "6 4" : undefined}
-                  strokeLinejoin="round"
-                  className="transition-all"
-                />
-
-                {/* 4. Rooftop Inner Parapet Border Accent */}
-                <path
-                  d={roofSvgPath}
+                  d={svgPath}
                   fill="none"
                   stroke={strokeColor}
-                  strokeWidth="0.8"
-                  strokeOpacity="0.3"
-                  strokeDasharray="3 3"
+                  strokeWidth="5"
+                  strokeOpacity="0.2"
                   strokeLinejoin="round"
-                  transform={`translate(${centerPos.x - bHeight * 0.32}, ${centerPos.y - bHeight * 0.82}) scale(0.92) translate(${-(centerPos.x - bHeight * 0.32)}, ${-(centerPos.y - bHeight * 0.82)})`}
                 />
 
-                {/* 5. Clean Floating Google-Maps-Style Building Header Badge */}
-                <g transform={`translate(${centerPos.x - bHeight * 0.32}, ${centerPos.y - bHeight * 0.82})`}>
+                {/* 2. Solid Light-Theme Building Polygon Footprint */}
+                <path
+                  d={svgPath}
+                  fill="url(#bldFillGrad)"
+                  stroke={strokeColor}
+                  strokeWidth={buildingEvent ? "3" : "2.5"}
+                  strokeDasharray={floorId !== "f-out" && !isGroundFloor ? "6 4" : undefined}
+                  strokeLinejoin="round"
+                />
+
+                {/* 3. Inner Architectural Accent Polygon Line */}
+                <path
+                  d={svgPath}
+                  fill="none"
+                  stroke={strokeColor}
+                  strokeWidth="1"
+                  strokeOpacity="0.3"
+                  strokeDasharray="4 4"
+                  strokeLinejoin="round"
+                  transform={`translate(${centerPos.x}, ${centerPos.y}) scale(0.92) translate(${-centerPos.x}, ${-centerPos.y})`}
+                />
+
+                {/* 4. Clean Floating Google-Maps-Style Building Header Badge Centered on Polygon Centroid */}
+                <g transform={`translate(${centerPos.x}, ${centerPos.y})`}>
                   <rect
                     x={-badgeWidth / 2}
                     y="-15"
@@ -1803,6 +1816,7 @@ function MapCanvas({
                     fontSize="13"
                     fontWeight="800"
                     letterSpacing="0.01em"
+                    className="select-none pointer-events-none"
                   >
                     <tspan fontSize="14">🏢 </tspan>
                     <tspan>{bName}</tspan>

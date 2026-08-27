@@ -503,6 +503,7 @@ export async function getRelationalGraphFromDatabase(): Promise<DraftSnapshot | 
       corner3Lng: b.corner3Lng,
       corner4Lat: b.corner4Lat,
       corner4Lng: b.corner4Lng,
+      footprint: b.footprint || undefined,
       floorsCount: b.floorsCount ?? 0,
       basementsCount: b.basementsCount ?? 0,
     }));

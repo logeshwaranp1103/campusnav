@@ -524,18 +524,41 @@ class CampusStore {
     (this.obstacles || []).forEach((o) => mergedObstacleMap.set(o.id, o));
     const mergedObstacles = Array.from(mergedObstacleMap.values());
 
+    const workingBldMap = new Map<string, Building>(this.buildings.map((b) => [b.id, b]));
+    const rawPublished = this.publishedGraph.buildings || [];
+    const publishedBuildings = rawPublished.map((pb) => {
+      const wb = workingBldMap.get(pb.id);
+      if (wb && (!pb.footprint || pb.footprint.length < 3) && wb.footprint && wb.footprint.length >= 3) {
+        return {
+          ...pb,
+          footprint: wb.footprint,
+          corner1Lat: wb.corner1Lat,
+          corner1Lng: wb.corner1Lng,
+          corner2Lat: wb.corner2Lat,
+          corner2Lng: wb.corner2Lng,
+          corner3Lat: wb.corner3Lat,
+          corner3Lng: wb.corner3Lng,
+          corner4Lat: wb.corner4Lat,
+          corner4Lng: wb.corner4Lng,
+        };
+      }
+      return pb;
+    });
+
+    const finalBuildings = publishedBuildings.length > 0 ? publishedBuildings : this.buildings;
+
     return {
       campus: this.campus,
-      buildings: this.publishedGraph.buildings || [],
-      floors: this.publishedGraph.floors || [],
-      nodes: this.publishedGraph.nodes || [],
-      edges: this.publishedGraph.edges || [],
-      destinations: this.publishedGraph.destinations || [],
-      events: this.publishedGraph.events || [],
+      buildings: finalBuildings,
+      floors: this.publishedGraph.floors && this.publishedGraph.floors.length > 0 ? this.publishedGraph.floors : this.floors,
+      nodes: this.publishedGraph.nodes && this.publishedGraph.nodes.length > 0 ? this.publishedGraph.nodes : this.nodes,
+      edges: this.publishedGraph.edges && this.publishedGraph.edges.length > 0 ? this.publishedGraph.edges : this.edges,
+      destinations: this.publishedGraph.destinations && this.publishedGraph.destinations.length > 0 ? this.publishedGraph.destinations : this.destinations,
+      events: this.publishedGraph.events && this.publishedGraph.events.length > 0 ? this.publishedGraph.events : this.events,
       obstacles: mergedObstacles,
-      stairGroups: this.publishedGraph.stairGroups || [],
-      liftGroups: this.publishedGraph.liftGroups || [],
-      doors: this.publishedGraph.doors || [],
+      stairGroups: this.publishedGraph.stairGroups && this.publishedGraph.stairGroups.length > 0 ? this.publishedGraph.stairGroups : this.stairGroups,
+      liftGroups: this.publishedGraph.liftGroups && this.publishedGraph.liftGroups.length > 0 ? this.publishedGraph.liftGroups : this.liftGroups,
+      doors: this.publishedGraph.doors && this.publishedGraph.doors.length > 0 ? this.publishedGraph.doors : this.doors,
     };
   }
 
@@ -758,6 +781,12 @@ class CampusStore {
         this.buildings[idx].corner3Lng = g3.lng;
         this.buildings[idx].corner4Lat = g4.lat;
         this.buildings[idx].corner4Lng = g4.lng;
+      }
+      if (this.buildings[idx].footprint && Array.isArray(this.buildings[idx].footprint)) {
+        this.buildings[idx].footprint = this.buildings[idx].footprint!.map((pt) => {
+          const c = gpsToCanvas(pt.lat, pt.lng);
+          return canvasToGps(c.x + dx, c.y + dy);
+        });
       }
       const buildingFloors = this.floors.filter((f) => f.buildingId === id);
       const buildingFloorIds = new Set(buildingFloors.map((f) => f.id));
@@ -2540,12 +2569,12 @@ class CampusStore {
       if (isAdmin) {
         // Admin: fetch draft and published graph in parallel
         const [resDraft, resPub] = await Promise.all([
-          fetch("/api/admin/campus-graph/draft", { cache: "no-store" }),
-          fetch("/api/published-graph", { cache: "no-store" }),
+          fetch("/api/admin/campus-graph/draft", { cache: "no-store" }).catch(() => null),
+          fetch("/api/published-graph", { cache: "no-store" }).catch(() => null),
         ]);
 
         let draftLoaded = false;
-        if (resDraft.ok) {
+        if (resDraft && resDraft.ok) {
           const jsonDraft = await resDraft.json();
           const draft = jsonDraft?.draft;
           if (draft && typeof draft === "object") {
@@ -2583,7 +2612,7 @@ class CampusStore {
           }
         }
 
-        if (resPub.ok) {
+        if (resPub && resPub.ok) {
           const jsonPub = await resPub.json();
           const graph = jsonPub?.graph;
           if (graph && typeof graph === "object") {
