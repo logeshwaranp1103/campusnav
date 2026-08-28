@@ -1,4 +1,4 @@
-import type { Node, Edge, EdgeType } from "@/shared/data/campus";
+import type { Node, EdgeType } from "@/shared/data/campus";
 import { calculateHaversineDistance } from "./haversine";
 import { canvasToGps } from "./projection";
 

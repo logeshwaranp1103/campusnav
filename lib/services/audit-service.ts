@@ -49,7 +49,7 @@ export async function getAuditLogs(limit = 50) {
       const logs = (await prisma.auditLog.findMany({
         take: limit,
         orderBy: { createdAt: "desc" },
-      })) as any[];
+      })) as unknown[];
       if (logs && logs.length > 0) return logs;
     } catch {
       // Memory fallback

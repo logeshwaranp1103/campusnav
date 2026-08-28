@@ -115,7 +115,7 @@ export default function VisitorPage() {
       });
     }, 2500);
     return () => clearInterval(interval);
-  }, [isSimulating, directionSteps, handleStepSelect, selectedDest]);
+  }, [isSimulating, directionSteps, handleStepSelect, selectedDest, toast]);
 
   // Load Published Graph Snapshot
   const fetchPublishedGraph = async () => {

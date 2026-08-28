@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { publishDraftGraph } from "@/lib/services/publish-service";
+import { publishDraftGraph, type DraftSnapshot } from "@/lib/services/publish-service";
 import { prisma } from "@/lib/db";
 
 export async function POST(
@@ -14,7 +14,7 @@ export async function POST(
     const draftRecord = await prisma.draftGraph.findUnique({
       where: { id: "active-draft" },
     }).catch(() => null);
-    snapshot = (draftRecord?.snapshot as any) || undefined;
+    snapshot = (draftRecord?.snapshot as unknown as DraftSnapshot) || undefined;
   }
 
   const result = await publishDraftGraph(snapshot || {}, "admin", body.notes || `Published for ${slug}`);

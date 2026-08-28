@@ -180,7 +180,7 @@ export function buildAdjacencyGraph(
     if (node.stairGroupId) return `sg_${node.stairGroupId}`;
 
     // 2. Stable internal connector ID
-    const ext = node as any;
+    const ext = node as Node & { connectorId?: string };
     if (ext.connectorId) return `conn_${ext.connectorId}`;
 
     // 3. Canonical name (legacy compatibility fallback only)
@@ -239,7 +239,7 @@ export function buildAdjacencyGraph(
     const tn = nodeMap.get(toId)!;
 
     // Exclude explicitly closed edges (runtime-only extended fields)
-    const extEdge = e as any;
+    const extEdge = e as Edge & { closed?: boolean; closedUntil?: string | Date; speedModifier?: number };
     if (extEdge.closed) return;
     if (extEdge.closedUntil && new Date(extEdge.closedUntil).getTime() > Date.now()) return;
 

@@ -1524,6 +1524,18 @@ export function EntityManager() {
           lng: item.raw.lng || "77.",
         };
         break;
+      case "PHOTO":
+        copyPayload = {
+          category: "PHOTO",
+          name: item.raw.name || "",
+          nodeType: item.raw.type || "CORRIDOR",
+          buildingId: item.raw.buildingId || "",
+          floorId: item.raw.floorId || "",
+          lat: item.raw.lat || "11.",
+          lng: item.raw.lng || "77.",
+          photoUrl: item.raw.photoUrl || "",
+        };
+        break;
     }
 
     setCopiedEntityPayload(copyPayload);
@@ -1602,7 +1614,7 @@ export function EntityManager() {
           roomNumber: payload.roomNumber || "",
           buildingId: payload.buildingId || roomForm.buildingId,
           floorId: payload.floorId || roomForm.floorId,
-          category: payload.roomCategory || (payload.category !== "ROOM" ? payload.category : "") || "Classroom",
+          category: payload.roomCategory || "Classroom",
           lat: payload.lat !== undefined ? String(payload.lat) : "11.",
           lng: payload.lng !== undefined ? String(payload.lng) : "77.",
           description: payload.description || "",
@@ -1613,8 +1625,8 @@ export function EntityManager() {
           name: payload.name ? `${payload.name} (Copy)` : "",
           lat: payload.lat !== undefined ? String(payload.lat) : "11.",
           lng: payload.lng !== undefined ? String(payload.lng) : "77.",
-          buildingId: payload.buildingId || nodeForm.buildingId,
-          floorId: payload.floorId || nodeForm.floorId,
+          buildingId: payload.buildingId || "",
+          floorId: payload.floorId || "",
           type: payload.nodeType || "CORRIDOR",
           accessible: payload.accessible !== undefined ? payload.accessible : true,
           visibleToUser: payload.visibleToUser !== undefined ? payload.visibleToUser : false,
@@ -1627,13 +1639,13 @@ export function EntityManager() {
           secondNodeId: payload.secondNodeId || "",
           edgeType: payload.edgeType || "WALK",
           pathType: payload.pathType || "WALK",
-          toleranceMeters: 5,
+          toleranceMeters: 2.0,
         });
         break;
       case "STAIR":
         setStairForm({
           name: payload.name ? `${payload.name} (Copy)` : "",
-          buildingId: payload.buildingId || stairForm.buildingId,
+          buildingId: payload.buildingId || "",
           selectedFloorIds: payload.selectedFloorIds || [],
           lat: payload.lat !== undefined ? String(payload.lat) : "11.",
           lng: payload.lng !== undefined ? String(payload.lng) : "77.",
@@ -1642,7 +1654,7 @@ export function EntityManager() {
       case "LIFT":
         setLiftForm({
           name: payload.name ? `${payload.name} (Copy)` : "",
-          buildingId: payload.buildingId || liftForm.buildingId,
+          buildingId: payload.buildingId || "",
           selectedFloorIds: payload.selectedFloorIds || [],
           lat: payload.lat !== undefined ? String(payload.lat) : "11.",
           lng: payload.lng !== undefined ? String(payload.lng) : "77.",
@@ -1804,7 +1816,8 @@ export function EntityManager() {
         break;
       }
 
-      case "NODE": {
+      case "NODE":
+      case "PHOTO": {
         const latNum = parseFloat(editForm.lat);
         const lngNum = parseFloat(editForm.lng);
         const { x, y } = (!isNaN(latNum) && !isNaN(lngNum))
@@ -1992,24 +2005,57 @@ export function EntityManager() {
       });
     }
 
-    if (activeTab === "ALL" || activeTab === "NODE" || activeTab === "PHOTO") {
+    if (activeTab === "ALL" || activeTab === "NODE") {
       storeData.nodes.forEach((n) => {
         const fl = storeData.floors.find((f) => f.id === n.floorId);
         const matches = !q || (n.name && n.name.toLowerCase().includes(q)) || n.id.toLowerCase().includes(q) || n.type.toLowerCase().includes(q);
         const matchesPhotoFilter =
-          activeTab === "PHOTO"
-            ? (nodePhotoFilter === "WITHOUT_PHOTO" ? !n.photoUrl : Boolean(n.photoUrl))
-            : nodePhotoFilter === "ALL" ||
-              (nodePhotoFilter === "WITH_PHOTO" && Boolean(n.photoUrl)) ||
-              (nodePhotoFilter === "WITHOUT_PHOTO" && !n.photoUrl);
+          nodePhotoFilter === "ALL" ||
+          (nodePhotoFilter === "WITH_PHOTO" && Boolean(n.photoUrl)) ||
+          (nodePhotoFilter === "WITHOUT_PHOTO" && !n.photoUrl);
 
         if (matches && matchesPhotoFilter) {
           items.push({
             id: n.id,
             name: n.name || `Node ${n.id.slice(0, 8)}`,
-            category: activeTab === "PHOTO" ? "PHOTO" : "NODE",
+            category: "NODE",
             floorName: fl?.name || (n.floorId === "f-out" ? "Outdoor" : n.floorId),
             details: `Type: ${n.type} · GPS: ${n.lat?.toFixed(9) || "Canvas"}, ${n.lng?.toFixed(9) || ""}`,
+            raw: n,
+            photoUrl: n.photoUrl,
+            physicalVerified: n.physicalVerified,
+          });
+        }
+      });
+    }
+
+    if (activeTab === "ALL" || activeTab === "PHOTO") {
+      storeData.nodes.forEach((n) => {
+        if (!n.photoUrl && activeTab === "PHOTO" && nodePhotoFilter !== "WITHOUT_PHOTO") return;
+        if (activeTab === "ALL" && !n.photoUrl) return;
+
+        const matchesPhotoFilter =
+          activeTab === "PHOTO"
+            ? (nodePhotoFilter === "WITHOUT_PHOTO" ? !n.photoUrl : Boolean(n.photoUrl))
+            : Boolean(n.photoUrl);
+
+        if (!matchesPhotoFilter) return;
+
+        const fl = storeData.floors.find((f) => f.id === n.floorId);
+        const matches =
+          !q ||
+          (n.name && n.name.toLowerCase().includes(q)) ||
+          n.id.toLowerCase().includes(q) ||
+          (n.type && n.type.toLowerCase().includes(q)) ||
+          q.includes("photo");
+
+        if (matches) {
+          items.push({
+            id: n.id,
+            name: n.name ? `${n.name} (Photo)` : `Node ${n.id.slice(0, 8)} (Photo)`,
+            category: "PHOTO",
+            floorName: fl?.name || (n.floorId === "f-out" ? "Outdoor" : n.floorId),
+            details: `Reference Photo Attached · Verified: ${n.physicalVerified ? "Yes" : "No"} · GPS: ${n.lat?.toFixed(9) || "Canvas"}, ${n.lng?.toFixed(9) || ""}`,
             raw: n,
             photoUrl: n.photoUrl,
             physicalVerified: n.physicalVerified,
@@ -2088,7 +2134,7 @@ export function EntityManager() {
     }
 
     return items.reverse();
-  }, [storeData, activeTab, searchQuery]);
+  }, [storeData, activeTab, searchQuery, nodePhotoFilter]);
 
   // High-Performance Table Pagination & Control
   const [pageSize, setPageSize] = useState<number>(15);
@@ -2149,6 +2195,9 @@ export function EntityManager() {
         break;
       case "NODE":
         campusStore.deleteNode(item.id);
+        break;
+      case "PHOTO":
+        campusStore.updateNode(item.id, { photoUrl: undefined, photoUploadedAt: undefined, physicalVerified: false });
         break;
       case "ROOM":
         campusStore.deleteDestination(item.id);
@@ -3791,9 +3840,12 @@ export function EntityManager() {
             size="sm"
             variant={activeTab === "ALL" ? "primary" : "outline"}
             onClick={() => setActiveTab("ALL")}
-            className="text-xs h-7 px-3 rounded-full shrink-0"
+            className="text-xs h-7 px-3 rounded-full shrink-0 gap-1"
           >
-            All Objects ({filteredEntities.length})
+            <span>All Objects</span>
+            <span className="text-[10px] font-bold opacity-80">
+              ({activeTab === "ALL" && searchQuery ? filteredEntities.length : Object.values(entityCounts).reduce((a, b) => a + b, 0)})
+            </span>
           </Button>
           {ENTITY_TYPES.map((t) => (
             <Button
@@ -3807,6 +3859,9 @@ export function EntityManager() {
               className="text-xs h-7 px-3 rounded-full shrink-0 gap-1"
             >
               <span>{t.label}</span>
+              <span className="text-[10px] font-bold opacity-80">
+                ({activeTab === t.type && searchQuery ? filteredEntities.length : (entityCounts[t.type] || 0)})
+              </span>
             </Button>
           ))}
         </div>

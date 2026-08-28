@@ -32,7 +32,7 @@ export async function GET() {
     });
 
     if (draftRecord && draftRecord.snapshot && typeof draftRecord.snapshot === "object") {
-      const snap = draftRecord.snapshot as any;
+      const snap = draftRecord.snapshot as unknown as import("@/lib/services/publish-service").DraftSnapshot;
       const hasSnapEntities =
         (Array.isArray(snap.buildings) && snap.buildings.length > 0) ||
         (Array.isArray(snap.nodes) && snap.nodes.length > 0);
@@ -109,8 +109,8 @@ export async function PUT(req: Request) {
       // Save the full working draft snapshot JSON to DraftGraph table (used strictly by CAD Editor / Admin)
       await prisma.draftGraph.upsert({
         where: { id: "active-draft" },
-        update: { snapshot: snapshot as any },
-        create: { id: "active-draft", snapshot: snapshot as any },
+        update: { snapshot: snapshot as unknown as import("@prisma/client").Prisma.InputJsonValue },
+        create: { id: "active-draft", snapshot: snapshot as unknown as import("@prisma/client").Prisma.InputJsonValue },
       });
 
       console.log(`[DraftRoute:PUT] Successfully saved active-draft to database: ${snapshot.buildings?.length ?? 0} buildings, ${snapshot.nodes?.length ?? 0} nodes, ${snapshot.edges?.length ?? 0} edges`);

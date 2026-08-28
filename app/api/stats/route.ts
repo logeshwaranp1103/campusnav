@@ -18,9 +18,10 @@ export async function GET() {
         where: { id: "active-draft" },
       }).catch(() => null);
       if (draftRecord?.snapshot && typeof draftRecord.snapshot === "object") {
-        draftData = draftRecord.snapshot as any;
-        pendingCount = Array.isArray((draftRecord.snapshot as any).pendingChanges)
-          ? (draftRecord.snapshot as any).pendingChanges.length
+        const snap = draftRecord.snapshot as Record<string, unknown>;
+        draftData = snap as typeof draftData;
+        pendingCount = Array.isArray(snap.pendingChanges)
+          ? snap.pendingChanges.length
           : 0;
       }
     } catch (e) {

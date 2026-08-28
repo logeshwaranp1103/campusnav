@@ -72,22 +72,22 @@ export async function POST(req: Request) {
 
       await prisma.draftGraph.upsert({
         where: { id: "active-draft" },
-        update: { snapshot: emptySnapshot as any },
-        create: { id: "active-draft", snapshot: emptySnapshot as any },
+        update: { snapshot: emptySnapshot as unknown as import("@prisma/client").Prisma.InputJsonValue },
+        create: { id: "active-draft", snapshot: emptySnapshot as unknown as import("@prisma/client").Prisma.InputJsonValue },
       });
 
       await prisma.publishedGraph.upsert({
         where: { id: "active-published" },
         update: {
           version: 1,
-          snapshot: emptySnapshot as any,
+          snapshot: emptySnapshot as unknown as import("@prisma/client").Prisma.InputJsonValue,
           publishedAt: new Date(),
           publishedBy: "admin",
         },
         create: {
           id: "active-published",
           version: 1,
-          snapshot: emptySnapshot as any,
+          snapshot: emptySnapshot as unknown as import("@prisma/client").Prisma.InputJsonValue,
           publishedAt: new Date(),
           publishedBy: "admin",
         },

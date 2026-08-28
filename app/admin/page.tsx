@@ -13,7 +13,6 @@ import {
   Compass,
   PencilRuler,
   Footprints,
-  Boxes,
 } from "lucide-react";
 import { PageHeader } from "@/features/admin/components/page-header";
 import { Card, CardTitle, CardDescription } from "@/shared/components/ui/card";

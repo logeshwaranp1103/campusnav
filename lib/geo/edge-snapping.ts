@@ -1,6 +1,6 @@
 import { canvasToGps } from "./projection";
-import { calculateGeographicDistance, getNodeGeographicCoordinates } from "./haversine";
-import { buildAdjacencyGraph } from "../routing/graph";
+import { calculateGeographicDistance } from "./haversine";
+import { buildAdjacencyGraph, type AdjacencyEdge } from "../routing/graph";
 import { findShortestPath, type PathResult } from "../routing/dijkstra";
 import type { Node, Edge, Obstacle } from "../../shared/data/campus";
 import type { TravelMode } from "../routing/edge-accessibility";
@@ -235,7 +235,7 @@ export function computeEdgeSnappedShortestPath(
 
       // Construct continuous route starting at exact edge projection point
       const combinedNodes = [virtualStartNode, ...chosenPath.nodes];
-      const virtualEdge: any = {
+      const virtualEdge: AdjacencyEdge = {
         from: virtualStartNode.id,
         to: nextNode.id,
         edgeId: `v-edge-${edgeProj.edge.id}`,

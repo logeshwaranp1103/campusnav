@@ -2,18 +2,14 @@
 
 import React, { useState, useEffect, Suspense } from "react";
 import Link from "next/link";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 import { motion } from "framer-motion";
 import { Compass, ShieldCheck, Mail, Key, ArrowRight, AlertCircle } from "lucide-react";
 import { Button } from "@/shared/components/ui/button";
 import { Input } from "@/shared/components/ui/input";
 import { useToast } from "@/shared/components/ui/toast";
 
-const DEFAULT_ADMIN_EMAIL = "1";
-const DEFAULT_ADMIN_PASSWORD = "1";
-
 function AdminLoginForm() {
-  const router = useRouter();
   const searchParams = useSearchParams();
   const redirectUrl = searchParams.get("redirect") || "/admin";
   const { toast } = useToast();

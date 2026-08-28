@@ -40,8 +40,8 @@ export async function POST(req: Request) {
       try {
         await prisma.draftGraph.upsert({
           where: { id: "active-draft" },
-          update: { snapshot: campusStore.getWorkingData() as any },
-          create: { id: "active-draft", snapshot: campusStore.getWorkingData() as any },
+          update: { snapshot: campusStore.getWorkingData() as unknown as import("@prisma/client").Prisma.InputJsonValue },
+          create: { id: "active-draft", snapshot: campusStore.getWorkingData() as unknown as import("@prisma/client").Prisma.InputJsonValue },
         });
       } catch (e) {
         console.warn("Failed to update draft graph in DB on building creation:", e);

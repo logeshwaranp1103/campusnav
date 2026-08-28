@@ -1,4 +1,4 @@
-import type { Node, Edge, Floor, Building } from "../../shared/data/campus";
+import type { Node, Edge } from "../../shared/data/campus";
 import type { Route, RouteInstruction } from "../../features/navigation/services/graph";
 import {
   getNodeVector,
@@ -10,8 +10,6 @@ import {
 } from "../routing/directions";
 import {
   calculateGeographicDistance,
-  getNodeGeographicCoordinates,
-  getUserGeographicCoordinates,
 } from "../geo/haversine";
 import { PIXELS_PER_METER, canvasToGps, gpsToCanvas } from "../geo/projection";
 
@@ -293,7 +291,6 @@ export function computeLiveTurnGuidance(
 ): LiveGuidanceResult {
   const arrivalThreshold = options?.arrivalThresholdMeters ?? 12.0;
   const nodes = activeRoute.nodes;
-  const edges = activeRoute.edges;
   const segIndex = projection.currentSegmentIndex;
 
   // 1. ARRIVAL CHECK
@@ -376,7 +373,7 @@ export function computeLiveTurnGuidance(
   const nextBaseInstruction = activeRoute.instructions?.[segIndex + 1];
 
   let instructionIcon = icon;
-  let transitionType = baseInstruction?.transition;
+  const transitionType = baseInstruction?.transition;
 
   if (baseInstruction?.icon && ["lift", "stairs-up", "stairs-down", "parking", "ev-drive"].includes(baseInstruction.icon)) {
     instructionIcon = baseInstruction.icon;

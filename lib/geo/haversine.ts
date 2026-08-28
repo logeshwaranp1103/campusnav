@@ -73,8 +73,9 @@ export function calculateShortestAngleDelta(currentAngle: number, targetAngle: n
  * Automatically falls back to canvas-to-GPS projection if lat/lng is 0, missing, or invalid.
  */
 export function getNodeGeographicCoordinates(n: Node): { lat: number; lng: number } {
-  let nLat = typeof n.lat === "number" ? n.lat : (typeof (n as any).latitude === "number" ? (n as any).latitude : undefined);
-  let nLng = typeof n.lng === "number" ? n.lng : (typeof (n as any).longitude === "number" ? (n as any).longitude : undefined);
+  const extNode = n as Node & { latitude?: number; longitude?: number };
+  let nLat = typeof n.lat === "number" ? n.lat : (typeof extNode.latitude === "number" ? extNode.latitude : undefined);
+  let nLng = typeof n.lng === "number" ? n.lng : (typeof extNode.longitude === "number" ? extNode.longitude : undefined);
 
   const isLatValid = typeof nLat === "number" && !isNaN(nLat) && nLat !== 0 && Math.abs(nLat) >= 1 && Math.abs(nLat) <= 90;
   const isLngValid = typeof nLng === "number" && !isNaN(nLng) && nLng !== 0 && Math.abs(nLng) <= 180;
@@ -249,19 +250,15 @@ export function findContextAwareNearestNodes(
       }
     }
 
-    // Priority 2: Building Entrance nodes of this specific building (routes cleanly out of building without wall-crossing)
+    // Priority 2: Direct building entrance nodes
     const buildingEntranceNodes = validNodes.filter((n) => {
-      const isEnt = Boolean(
-        n.isEntranceNode ||
-        n.type === "BUILDING_ENTRANCE" ||
-        n.type === "ENTRANCE" ||
-        (n.name && n.name.toLowerCase().includes("entrance"))
-      );
+      const isEnt = n.type === "ENTRANCE" || n.type === "BUILDING_ENTRANCE" || n.isEntranceNode;
       if (!isEnt) return false;
       const nodeFloor = context.floors?.find((f) => f.id === n.floorId);
       const isFloorMatch = nodeFloor?.buildingId === bldId || (n.floorId && bldFloorIds.has(n.floorId));
       const isNameMatch = bldName.length > 0 && n.name && n.name.toLowerCase().includes(bldName);
-      const isIdMatch = (n as any).buildingId === bldId;
+      const extNode = n as Node & { buildingId?: string };
+      const isIdMatch = extNode.buildingId === bldId;
       return isFloorMatch || isNameMatch || isIdMatch;
     });
     if (buildingEntranceNodes.length > 0) {
@@ -271,7 +268,8 @@ export function findContextAwareNearestNodes(
     // Priority 3: All indoor nodes of this building (ground floor first)
     const buildingNodes = validNodes.filter((n) => {
       const nodeFloor = context.floors?.find((f) => f.id === n.floorId);
-      return nodeFloor?.buildingId === bldId || (n.floorId && bldFloorIds.has(n.floorId)) || (n as any).buildingId === bldId;
+      const extNode = n as Node & { buildingId?: string };
+      return nodeFloor?.buildingId === bldId || (n.floorId && bldFloorIds.has(n.floorId)) || extNode.buildingId === bldId;
     });
     if (buildingNodes.length > 0) {
       candidatePool.push(...buildingNodes.slice().sort((a, b) => getDistance(a) - getDistance(b)));

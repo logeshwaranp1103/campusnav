@@ -1,4 +1,4 @@
-import type { Edge, PathType } from "@/shared/data/campus";
+import type { PathType } from "@/shared/data/campus";
 
 export type TravelMode = "WALK" | "EV";
 
@@ -29,7 +29,8 @@ export function isEVAllowed(edge: { pathType?: PathType | null; type?: string })
  * Returns true if pedestrians are permitted to traverse the edge.
  * Canonical rule: Both "EV" and "WALK" paths are always walkable.
  */
-export function isWalkable(edge: { pathType?: PathType | null; type?: string }): boolean {
+export function isWalkable(_edge?: { pathType?: PathType | null; type?: string }): boolean {
+  void _edge;
   return true;
 }
 

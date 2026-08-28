@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
+import { type Prisma } from "@prisma/client";
 import {
   uploadNodePhotoToSupabase,
   deleteNodePhotoFromSupabase,
@@ -13,8 +14,8 @@ export async function GET(
 
   try {
     // 1. Primary: Stream binary image from persistent PostgreSQL (Supabase)
-    if (prisma && (prisma as any).nodePhoto) {
-      const dbPhoto = await (prisma as any).nodePhoto.findUnique({ where: { nodeId: id } }).catch(() => null);
+    if (prisma && prisma.nodePhoto) {
+      const dbPhoto = await prisma.nodePhoto.findUnique({ where: { nodeId: id } }).catch(() => null);
       if (dbPhoto?.data) {
         const buffer = Buffer.from(dbPhoto.data);
         return new NextResponse(buffer, {
@@ -39,7 +40,7 @@ export async function GET(
         .catch(() => null);
 
       if (node?.metadata && typeof node.metadata === "object") {
-        const meta = node.metadata as Record<string, any>;
+        const meta = node.metadata as Record<string, unknown>;
         if (typeof meta.photoUrl === "string" && meta.photoUrl.startsWith("http") && !meta.photoUrl.includes(`/api/nodes/${id}/photo`)) {
           return NextResponse.redirect(meta.photoUrl, {
             headers: {
@@ -144,14 +145,14 @@ export async function POST(
         storagePath = supabaseResult.storagePath;
         console.log(`[SUPABASE-STORAGE] Uploaded directly to Supabase Storage: ${persistentUrl}`);
       }
-    } catch (sbErr: any) {
-      console.warn(`[SUPABASE-STORAGE] Notice: Supabase storage upload skipped:`, sbErr?.message);
+    } catch (sbErr: unknown) {
+      console.warn(`[SUPABASE-STORAGE] Notice: Supabase storage upload skipped:`, (sbErr as Error)?.message);
     }
 
     // 2. Persistent PostgreSQL Binary Storage (100% Reliable Cloud Storage)
-    if (prisma && (prisma as any).nodePhoto) {
+    if (prisma && prisma.nodePhoto) {
       const uint8Data = new Uint8Array(rawBuffer);
-      await (prisma as any).nodePhoto.upsert({
+      await prisma.nodePhoto.upsert({
         where: { nodeId: id },
         update: {
           data: uint8Data,
@@ -171,7 +172,7 @@ export async function POST(
     // 3. Persist lightweight URL & metadata in Node table (Zero Base64 bloat)
     if (prisma) {
       try {
-        const updatedMeta: Record<string, any> = {
+        const updatedMeta: Record<string, unknown> = {
           photoUrl: persistentUrl,
           storagePath,
           photoUploadedAt: uploadedAt,
@@ -184,16 +185,16 @@ export async function POST(
         }).catch(() => null);
 
         const existingMeta = (existingNode?.metadata && typeof existingNode?.metadata === "object")
-          ? (existingNode.metadata as Record<string, any>)
+          ? (existingNode.metadata as Record<string, unknown>)
           : {};
 
         const mergedMeta = { ...existingMeta, ...updatedMeta };
-        delete (mergedMeta as any).photoData;
+        delete (mergedMeta as Record<string, unknown>).photoData;
 
         if (existingNode) {
           await prisma.node.update({
             where: { id },
-            data: { metadata: mergedMeta },
+            data: { metadata: mergedMeta as unknown as Prisma.InputJsonValue },
           }).catch(() => {});
         } else {
           const defaultCampus = await prisma.campus.findFirst({ select: { id: true } }).catch(() => null);
@@ -201,12 +202,12 @@ export async function POST(
 
           await prisma.node.upsert({
             where: { id },
-            update: { metadata: mergedMeta },
+            update: { metadata: mergedMeta as unknown as Prisma.InputJsonValue },
             create: {
               id,
               campusId,
               type: "CORRIDOR",
-              metadata: mergedMeta,
+              metadata: mergedMeta as unknown as Prisma.InputJsonValue,
             },
           }).catch(() => {});
         }
@@ -217,9 +218,9 @@ export async function POST(
           try {
             const draftRec = await prisma.draftGraph.findUnique({ where: { id: "active-draft" } }).catch(() => null);
             if (draftRec?.snapshot && typeof draftRec.snapshot === "object") {
-              const snap = draftRec.snapshot as any;
+              const snap = draftRec.snapshot as { nodes?: Array<{ id: string; photoUrl?: string; photoUploadedAt?: string; physicalVerified?: boolean; photoData?: unknown }> };
               if (Array.isArray(snap.nodes)) {
-                const nd = snap.nodes.find((n: any) => n.id === id);
+                const nd = snap.nodes.find((n) => n.id === id);
                 if (nd) {
                   nd.photoUrl = persistentUrl;
                   nd.photoUploadedAt = uploadedAt;
@@ -227,7 +228,7 @@ export async function POST(
                   delete nd.photoData;
                   await prisma.draftGraph.update({
                     where: { id: "active-draft" },
-                    data: { snapshot: snap },
+                    data: { snapshot: snap as unknown as Prisma.InputJsonValue },
                   }).catch(() => {});
                 }
               }
@@ -235,9 +236,9 @@ export async function POST(
 
             const pubRec = await prisma.publishedGraph.findUnique({ where: { id: "active-published" } }).catch(() => null);
             if (pubRec?.snapshot && typeof pubRec.snapshot === "object") {
-              const snap = pubRec.snapshot as any;
+              const snap = pubRec.snapshot as { nodes?: Array<{ id: string; photoUrl?: string; photoUploadedAt?: string; physicalVerified?: boolean; photoData?: unknown }> };
               if (Array.isArray(snap.nodes)) {
-                const nd = snap.nodes.find((n: any) => n.id === id);
+                const nd = snap.nodes.find((n) => n.id === id);
                 if (nd) {
                   nd.photoUrl = persistentUrl;
                   nd.photoUploadedAt = uploadedAt;
@@ -245,15 +246,15 @@ export async function POST(
                   delete nd.photoData;
                   await prisma.publishedGraph.update({
                     where: { id: "active-published" },
-                    data: { snapshot: snap },
+                    data: { snapshot: snap as unknown as Prisma.InputJsonValue },
                   }).catch(() => {});
                 }
               }
             }
           } catch {}
         }, 0);
-      } catch (dbErr: any) {
-        console.warn(`[PHOTO-STORAGE] Database metadata update warning for ${id}:`, dbErr?.message);
+      } catch (dbErr: unknown) {
+        console.warn(`[PHOTO-STORAGE] Database metadata update warning for ${id}:`, (dbErr as Error)?.message);
       }
     }
 
@@ -280,8 +281,8 @@ export async function DELETE(
 
   try {
     // 1. Delete from PostgreSQL NodePhoto table
-    if (prisma && (prisma as any).nodePhoto) {
-      await (prisma as any).nodePhoto.deleteMany({ where: { nodeId: id } }).catch(() => {});
+    if (prisma && prisma.nodePhoto) {
+      await prisma.nodePhoto.deleteMany({ where: { nodeId: id } }).catch(() => {});
     }
 
     // 2. Delete from Supabase Object Storage if metadata has storagePath
@@ -292,8 +293,8 @@ export async function DELETE(
       }).catch(() => null);
 
       if (existingNode?.metadata && typeof existingNode.metadata === "object") {
-        const meta = existingNode.metadata as Record<string, any>;
-        if (meta.storagePath) {
+        const meta = existingNode.metadata as Record<string, unknown>;
+        if (typeof meta.storagePath === "string") {
           await deleteNodePhotoFromSupabase(meta.storagePath).catch(() => {});
         }
       }
@@ -307,7 +308,7 @@ export async function DELETE(
       }).catch(() => null);
 
       if (existingNode?.metadata && typeof existingNode.metadata === "object") {
-        const meta = { ...(existingNode.metadata as Record<string, any>) };
+        const meta = { ...(existingNode.metadata as Record<string, unknown>) };
         delete meta.photoData;
         delete meta.photoUrl;
         delete meta.storagePath;
@@ -316,7 +317,7 @@ export async function DELETE(
 
         await prisma.node.update({
           where: { id },
-          data: { metadata: meta },
+          data: { metadata: meta as unknown as Prisma.InputJsonValue },
         }).catch(() => {});
       }
 
@@ -324,9 +325,9 @@ export async function DELETE(
       const pubRec = await prisma.publishedGraph.findUnique({ where: { id: "active-published" } }).catch(() => null);
 
       if (draftRec?.snapshot && typeof draftRec.snapshot === "object") {
-        const snap = draftRec.snapshot as any;
+        const snap = draftRec.snapshot as { nodes?: Array<{ id: string; photoUrl?: string; photoData?: unknown; photoUploadedAt?: string; physicalVerified?: boolean }> };
         if (Array.isArray(snap.nodes)) {
-          const nd = snap.nodes.find((n: any) => n.id === id);
+          const nd = snap.nodes.find((n) => n.id === id);
           if (nd) {
             delete nd.photoUrl;
             delete nd.photoData;
@@ -334,16 +335,16 @@ export async function DELETE(
             delete nd.physicalVerified;
             await prisma.draftGraph.update({
               where: { id: "active-draft" },
-              data: { snapshot: snap },
+              data: { snapshot: snap as unknown as Prisma.InputJsonValue },
             }).catch(() => {});
           }
         }
       }
 
       if (pubRec?.snapshot && typeof pubRec.snapshot === "object") {
-        const snap = pubRec.snapshot as any;
+        const snap = pubRec.snapshot as { nodes?: Array<{ id: string; photoUrl?: string; photoData?: unknown; photoUploadedAt?: string; physicalVerified?: boolean }> };
         if (Array.isArray(snap.nodes)) {
-          const nd = snap.nodes.find((n: any) => n.id === id);
+          const nd = snap.nodes.find((n) => n.id === id);
           if (nd) {
             delete nd.photoUrl;
             delete nd.photoData;
@@ -351,7 +352,7 @@ export async function DELETE(
             delete nd.physicalVerified;
             await prisma.publishedGraph.update({
               where: { id: "active-published" },
-              data: { snapshot: snap },
+              data: { snapshot: snap as unknown as Prisma.InputJsonValue },
             }).catch(() => {});
           }
         }
