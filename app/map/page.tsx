@@ -120,16 +120,33 @@ export default function VisitorPage() {
   // Load Published Graph Snapshot
   const fetchPublishedGraph = async () => {
     try {
-      const res = await fetch("/api/campus/main/graph");
-      const json = await res.json();
-      if (json.data && json.data.buildings?.length > 0) {
-        setPublishedData(json.data);
-        setVersion(json.version ?? "v1.0");
-      } else {
-        const storePub = campusStore.getPublishedData();
-        setPublishedData(storePub);
-        setVersion(campusStore.getPublishedVersion());
+      const res = await fetch(`/api/published-graph?_t=${Date.now()}`, {
+        cache: "no-store",
+        headers: { "Cache-Control": "no-cache, no-store, must-revalidate" },
+      });
+      if (res.ok) {
+        const json = await res.json();
+        const graph = json.graph;
+        if (graph && (graph.buildings?.length > 0 || graph.nodes?.length > 0)) {
+          setPublishedData(graph);
+          setVersion(json.version ? `v${json.version}` : "v1.0");
+          return;
+        }
       }
+
+      const resSlug = await fetch(`/api/campus/main/graph?_t=${Date.now()}`, {
+        cache: "no-store",
+      });
+      const jsonSlug = await resSlug.json();
+      if (jsonSlug.data && (jsonSlug.data.buildings?.length > 0 || jsonSlug.data.nodes?.length > 0)) {
+        setPublishedData(jsonSlug.data);
+        setVersion(jsonSlug.version ? `v${jsonSlug.version}` : "v1.0");
+        return;
+      }
+
+      const storePub = campusStore.getPublishedData();
+      setPublishedData(storePub);
+      setVersion(campusStore.getPublishedVersion());
     } catch {
       const storePub = campusStore.getPublishedData();
       setPublishedData(storePub);
@@ -757,7 +774,7 @@ export default function VisitorPage() {
           )}
 
           {/* Nodes */}
-          {currentFloorNodes.filter((n) => n.visibleToUser === true || Boolean(n.photoUrl)).map((n) => {
+          {currentFloorNodes.filter((n) => n.visibleToUser !== false || Boolean(n.photoUrl)).map((n) => {
             const isRouteNode = routeNodes.some((rn) => rn.id === n.id);
             return (
               <g key={n.id} transform={`translate(${n.x}, ${n.y})`}>

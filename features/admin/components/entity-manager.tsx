@@ -419,7 +419,7 @@ export function EntityManager() {
     pathType: "WALK" as PathType,
     distance: 0,
     accessible: true,
-    visibleToUser: false,
+    visibleToUser: true,
     expiresAt: "",
     photoUrl: "",
     photoUploadedAt: "",
@@ -625,7 +625,7 @@ export function EntityManager() {
     floorId: "",
     type: "CORRIDOR" as NodeType,
     accessible: true,
-    visibleToUser: false,
+    visibleToUser: true,
     description: "",
   });
 
@@ -1309,7 +1309,7 @@ export function EntityManager() {
       floorId: defaultFloors[0]?.id || "f-out",
       type: "CORRIDOR",
       accessible: true,
-      visibleToUser: false,
+      visibleToUser: true,
       description: "",
     });
 
@@ -1629,7 +1629,7 @@ export function EntityManager() {
           floorId: payload.floorId || "",
           type: payload.nodeType || "CORRIDOR",
           accessible: payload.accessible !== undefined ? payload.accessible : true,
-          visibleToUser: payload.visibleToUser !== undefined ? payload.visibleToUser : false,
+          visibleToUser: payload.visibleToUser !== undefined ? payload.visibleToUser : true,
           description: payload.description || "",
         });
         break;
@@ -1714,7 +1714,7 @@ export function EntityManager() {
       pathType: getEdgePathType(item.raw),
       distance: item.raw.distance !== undefined ? item.raw.distance : 0,
       accessible: item.raw.accessible !== undefined ? item.raw.accessible : true,
-      visibleToUser: item.raw.visibleToUser !== undefined ? item.raw.visibleToUser : false,
+      visibleToUser: item.raw.visibleToUser !== undefined ? item.raw.visibleToUser : true,
       expiresAt: item.raw.expiresAt || "",
       photoUrl: item.raw.photoUrl || "",
       photoUploadedAt: item.raw.photoUploadedAt || "",
@@ -1855,7 +1855,7 @@ export function EntityManager() {
           type: editForm.nodeType,
           floorId: editForm.floorId || editingItem.raw.floorId,
           accessible: editForm.accessible,
-          visibleToUser: editForm.visibleToUser !== undefined ? editForm.visibleToUser : false,
+          visibleToUser: editForm.visibleToUser !== undefined ? editForm.visibleToUser : true,
           photoUrl: finalPhotoUrl,
           photoUploadedAt: uploadedAt,
           physicalVerified: editForm.physicalVerified,
@@ -3115,8 +3115,8 @@ export function EntityManager() {
                       value={nodeForm.visibleToUser ? "YES" : "NO"}
                       onChange={(e) => setNodeForm({ ...nodeForm, visibleToUser: e.target.value === "YES" })}
                     >
-                      <option value="NO">NO</option>
                       <option value="YES">YES</option>
+                      <option value="NO">NO</option>
                     </select>
                   </div>
                 </div>
@@ -3970,7 +3970,7 @@ export function EntityManager() {
                               <button
                                 type="button"
                                 onClick={() => {
-                                  const currentVis = item.raw?.visibleToUser !== undefined ? item.raw.visibleToUser : false;
+                                  const currentVis = item.raw?.visibleToUser !== false;
                                   campusStore.updateNode(item.id, { visibleToUser: !currentVis });
                                   toast({
                                     type: "success",
@@ -3981,13 +3981,13 @@ export function EntityManager() {
                                 }}
                                 className={cn(
                                   "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-bold transition-all cursor-pointer",
-                                  (item.raw?.visibleToUser !== undefined ? item.raw.visibleToUser : false)
+                                  (item.raw?.visibleToUser !== false)
                                     ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-500/25"
                                     : "bg-rose-500/15 text-rose-700 dark:text-rose-300 hover:bg-rose-500/25"
                                 )}
                                 title="Click to toggle Visible to user (YES / NO)"
                               >
-                                {(item.raw?.visibleToUser !== undefined ? item.raw.visibleToUser : false) ? "👁 Visible: YES" : "✕ Visible: NO"}
+                                {(item.raw?.visibleToUser !== false) ? "👁 Visible: YES" : "✕ Visible: NO"}
                               </button>
                             )}
                           </div>

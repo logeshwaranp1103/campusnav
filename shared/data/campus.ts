@@ -186,6 +186,7 @@ export type Destination = {
   name: string;
   category: DestinationCategory | string;
   aliases: string[];
+  description?: string;
   roomNumber?: string;
   width?: number;
   height?: number;

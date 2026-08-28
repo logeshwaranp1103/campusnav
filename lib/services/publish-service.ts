@@ -267,7 +267,7 @@ export async function publishDraftGraph(
       if (nodes && Array.isArray(nodes) && nodes.length > 0) {
         const validFloorIds = new Set((floors || []).map((f) => f.id));
         await runInPoolChunks(nodes, async (n) => {
-          const floorId = n.floorId && validFloorIds.has(n.floorId) ? n.floorId : null;
+          const dbFloorId = n.floorId && validFloorIds.has(n.floorId) ? n.floorId : null;
           
           // 1. Fetch existing node metadata to preserve existing database photo metadata
           const existingDbNode = await prisma.node.findUnique({
@@ -283,6 +283,7 @@ export async function publishDraftGraph(
 
           const nodeMeta: Record<string, unknown> = {
             ...existingMeta,
+            floorId: n.floorId || "f-out",
             ...(cleanPhotoUrl ? {
               photoUrl: cleanPhotoUrl,
               storagePath: (n as Node & { storagePath?: string }).storagePath || (existingMeta.storagePath as string | undefined),
@@ -295,7 +296,7 @@ export async function publishDraftGraph(
 
           const nodeData = {
             campusId: n.campusId || defaultCampusId,
-            floorId,
+            floorId: dbFloorId,
             type: n.type as unknown as NodeType,
             name: n.name || null,
             latitude: n.lat ?? null,
@@ -386,6 +387,12 @@ export async function publishDraftGraph(
               nodeId: d.nodeId!,
               name: d.name,
               category: d.category || "Custom",
+              description: d.description || null,
+              floorId: d.floorId || null,
+              x: typeof d.x === "number" && !isNaN(d.x) ? d.x : null,
+              y: typeof d.y === "number" && !isNaN(d.y) ? d.y : null,
+              width: typeof d.width === "number" && !isNaN(d.width) ? d.width : null,
+              height: typeof d.height === "number" && !isNaN(d.height) ? d.height : null,
             };
             return prisma.destination.upsert({
               where: { id: d.id },
@@ -499,7 +506,7 @@ export async function getRelationalGraphFromDatabase(): Promise<DraftSnapshot | 
         id: n.id,
         type: n.type as Node["type"],
         name: n.name ?? undefined,
-        floorId: n.floorId ?? "",
+        floorId: (meta.floorId as string | undefined) || n.floorId || "f-out",
         x: n.x ?? 0,
         y: n.y ?? 0,
         lat: n.latitude !== null && n.latitude !== undefined ? n.latitude : undefined,
