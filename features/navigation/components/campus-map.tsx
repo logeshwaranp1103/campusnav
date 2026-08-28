@@ -6,7 +6,7 @@ import { campusStore } from "@/shared/lib/campus-store";
 import type { Node, Building, Floor, Edge, Destination } from "@/shared/data/campus";
 import type { Route } from "@/features/navigation/services/graph";
 import { getObstructedEdgeIds } from "@/lib/routing/graph";
-import { Building2, Layers, Compass, Locate, AlertTriangle, ZoomIn, ZoomOut, Maximize2, Minimize2, ChevronDown, Navigation, Tag } from "lucide-react";
+import { Building2, Layers, Compass, Locate, AlertTriangle, ZoomIn, ZoomOut, Maximize2, Minimize2, ChevronDown, Navigation, Tag, RotateCcw, RotateCw } from "lucide-react";
 import { useVisitorGps } from "@/shared/hooks/use-visitor-gps";
 import { PIXELS_PER_METER, gpsToCanvas } from "@/lib/geo/projection";
 import { getBuildingCanvasPoints, getBuildingCenter, getPolygonSvgPath, isPointInsideBuilding, isPointOutsideAllBuildings } from "@/lib/geo/building-geometry";
@@ -331,6 +331,17 @@ export function CampusMap({ route, livePosition, progress, gps: passedGps, onNav
     };
     bearingAnimFrameRef.current = requestAnimationFrame(animate);
   }, [bearing]);
+
+  const rotateMapBy = useCallback((deltaDegrees: number) => {
+    setIsFollowingUser(false);
+    setBearing((prev) => {
+      let next = (prev + deltaDegrees + 360) % 360;
+      if (Math.abs(next) < 2.5 || Math.abs(next - 360) < 2.5) {
+        next = 0;
+      }
+      return next;
+    });
+  }, []);
 
   useEffect(() => {
     return () => {

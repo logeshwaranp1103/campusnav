@@ -4,7 +4,7 @@ export const dynamic = "force-dynamic";
 
 import { useEffect, useState, useRef, useCallback, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Navigation2, ZoomIn, ZoomOut, RotateCcw, Locate } from "lucide-react";
+import { Navigation2, ZoomIn, ZoomOut, RotateCcw, RotateCw, Compass, Locate } from "lucide-react";
 import { useToast } from "@/shared/components/ui/toast";
 import { campusStore } from "@/shared/lib/campus-store";
 import type { Building, Floor, Node, Edge, Destination, Obstacle } from "@/shared/data/campus";
@@ -18,8 +18,8 @@ import { useVisitorGps } from "@/shared/hooks/use-visitor-gps";
 import { GpsStatusIndicator } from "@/features/location/components/gps-status-indicator";
 import { getBuildingCanvasPoints, getBuildingCenter, getPolygonPointsString } from "@/lib/geo/building-geometry";
 
-// ─── Pan/Zoom types ────────────────────────────────────────────────────────────
-type Transform = { x: number; y: number; scale: number };
+// ─── Pan/Zoom/Rotation types ────────────────────────────────────────────────────────────
+type Transform = { x: number; y: number; scale: number; rotation: number };
 const MIN_SCALE = 0.2;
 const MAX_SCALE = 8;
 const ZOOM_STEP = 0.15;
@@ -52,10 +52,12 @@ export default function VisitorPage() {
     return getValidNavigationDestinations(publishedData);
   }, [publishedData]);
 
-  // ── Pan / Zoom State ─────────────────────────────────────────────────────────
-  const [transform, setTransform] = useState<Transform>({ x: 0, y: 0, scale: 1 });
+  // ── Pan / Zoom / Rotation State ─────────────────────────────────────────────
+  const [transform, setTransform] = useState<Transform>({ x: 0, y: 0, scale: 1, rotation: 0 });
   const isPanning = useRef(false);
+  const isRotating = useRef(false);
   const panStart = useRef({ x: 0, y: 0, tx: 0, ty: 0 });
+  const rotateStart = useRef({ x: 0, initialRotation: 0 });
   const svgContainerRef = useRef<HTMLDivElement>(null);
 
   const { toast } = useToast();
@@ -83,11 +85,12 @@ export default function VisitorPage() {
         if (container) {
           const rect = container.getBoundingClientRect();
           const targetScale = 1.2;
-          setTransform({
+          setTransform((prev) => ({
             x: rect.width / 2 - targetNode.x * targetScale,
             y: rect.height / 2 - targetNode.y * targetScale,
             scale: targetScale,
-          });
+            rotation: prev.rotation,
+          }));
         }
       }
     },
@@ -236,7 +239,7 @@ export default function VisitorPage() {
     const newX = mouseX - scaleDiff * (mouseX - prev.x);
     const newY = mouseY - scaleDiff * (mouseY - prev.y);
 
-    targetTransformRef.current = { x: newX, y: newY, scale: newScale };
+    targetTransformRef.current = { x: newX, y: newY, scale: newScale, rotation: prev.rotation };
 
     if (wheelRafRef.current === null) {
       wheelRafRef.current = requestAnimationFrame(() => {
@@ -310,6 +313,7 @@ export default function VisitorPage() {
               x: mouseX - scaleDiff * (mouseX - prev.x),
               y: mouseY - scaleDiff * (mouseY - prev.y),
               scale: newScale,
+              rotation: prev.rotation,
             };
           });
           tState.lastTapTime = 0;
@@ -356,6 +360,16 @@ export default function VisitorPage() {
 
         const ratio = currentDist / tState.initialDist;
         const newScale = Math.min(MAX_SCALE, Math.max(MIN_SCALE, tState.initialScale * ratio));
+        const currentAngle = Math.atan2(t2.clientY - t1.clientY, t2.clientX - t1.clientX) * (180 / Math.PI);
+
+        if (!(tState as any).initialAngle) {
+          (tState as any).initialAngle = currentAngle;
+          (tState as any).initialRotation = transformRef.current.rotation;
+        }
+
+        const angleDiff = currentAngle - ((tState as any).initialAngle || currentAngle);
+        const newRot = (((tState as any).initialRotation || 0) + angleDiff) % 360;
+
         const dx = currentCenter.x - tState.lastCenter.x;
         const dy = currentCenter.y - tState.lastCenter.y;
 
@@ -366,7 +380,7 @@ export default function VisitorPage() {
           const scaleDiff = newScale / (prev.scale || 1);
           const newX = mouseX - scaleDiff * (mouseX - prev.x) + dx;
           const newY = mouseY - scaleDiff * (mouseY - prev.y) + dy;
-          return { x: newX, y: newY, scale: newScale };
+          return { x: newX, y: newY, scale: newScale, rotation: newRot };
         });
 
         tState.lastCenter = currentCenter;
@@ -421,9 +435,15 @@ export default function VisitorPage() {
     };
   }, []);
 
-  // ── Pointer pan ────────────────────────────────────────────────────────────
+  // ── Pointer pan & rotate ──────────────────────────────────────────────────
   const onPointerDown = useCallback((e: React.PointerEvent) => {
-    // Only start pan on primary button (left click / single touch)
+    if (e.button === 2 || e.altKey || e.shiftKey) {
+      e.preventDefault();
+      isRotating.current = true;
+      rotateStart.current = { x: e.clientX, initialRotation: transform.rotation };
+      (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+      return;
+    }
     if (e.button !== 0 && e.pointerType !== "touch") return;
     isPanning.current = true;
     panStart.current = {
@@ -433,9 +453,15 @@ export default function VisitorPage() {
       ty: transform.y,
     };
     (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
-  }, [transform.x, transform.y]);
+  }, [transform.x, transform.y, transform.rotation]);
 
   const onPointerMove = useCallback((e: React.PointerEvent) => {
+    if (isRotating.current) {
+      const dx = e.clientX - rotateStart.current.x;
+      const newRot = (rotateStart.current.initialRotation + dx * 0.45) % 360;
+      setTransform((prev) => ({ ...prev, rotation: newRot }));
+      return;
+    }
     if (!isPanning.current) return;
     const dx = e.clientX - panStart.current.x;
     const dy = e.clientY - panStart.current.y;
@@ -448,9 +474,10 @@ export default function VisitorPage() {
 
   const onPointerUp = useCallback(() => {
     isPanning.current = false;
+    isRotating.current = false;
   }, []);
 
-  // ── Zoom control buttons ────────────────────────────────────────────────────
+  // ── Zoom & Rotation control buttons ────────────────────────────────────────
   const zoomIn = () =>
     setTransform((prev) => {
       const newScale = Math.min(MAX_SCALE, prev.scale * (1 + ZOOM_STEP));
@@ -463,7 +490,16 @@ export default function VisitorPage() {
       return { ...prev, scale: newScale };
     });
 
-  const resetView = () => setTransform({ x: 0, y: 0, scale: 1 });
+  const rotateCcw = () =>
+    setTransform((prev) => ({ ...prev, rotation: (prev.rotation - 15 + 360) % 360 }));
+
+  const rotateCw = () =>
+    setTransform((prev) => ({ ...prev, rotation: (prev.rotation + 15) % 360 }));
+
+  const resetRotation = () =>
+    setTransform((prev) => ({ ...prev, rotation: 0 }));
+
+  const resetView = () => setTransform({ x: 0, y: 0, scale: 1, rotation: 0 });
 
   // Compute Shortest Route when destination changes
   const handleCalculateRoute = (dest: Destination) => {
@@ -628,17 +664,19 @@ export default function VisitorPage() {
       <div
         ref={svgContainerRef}
         className="relative flex-1 bg-[rgb(var(--card))]/30 overflow-hidden touch-none select-none"
-        style={{ cursor: isPanning.current ? "grabbing" : "grab" }}
+        style={{ cursor: isPanning.current ? "grabbing" : isRotating.current ? "ew-resize" : "grab" }}
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
         onPointerLeave={onPointerUp}
+        onContextMenu={(e) => e.preventDefault()}
       >
         <svg
           className="h-full w-full select-none"
           style={{
-            transformOrigin: "0 0",
-            transform: `translate(${transform.x}px, ${transform.y}px) scale(${transform.scale})`,
+            transformOrigin: "center center",
+            transform: `translate(${transform.x}px, ${transform.y}px) scale(${transform.scale}) rotate(${transform.rotation}deg)`,
+            transition: isPanning.current || isRotating.current ? "none" : "transform 0.2s cubic-bezier(0.16, 1, 0.3, 1)",
             willChange: "transform",
           }}
         >
@@ -844,8 +882,34 @@ export default function VisitorPage() {
           )}
         </svg>
 
-        {/* ── Zoom Control Buttons ─────────────────────────────────────── */}
+        {/* ── Zoom & Rotation Control Buttons ─────────────────────────────────────── */}
         <div className="absolute right-4 bottom-32 z-10 flex flex-col gap-1.5">
+          {/* Compass / Reset Rotation Dial */}
+          <button
+            onClick={resetRotation}
+            title={transform.rotation !== 0 ? `Reset Rotation (${Math.round((transform.rotation + 360) % 360)}°)` : "North Up"}
+            className="flex h-9 w-9 items-center justify-center rounded-xl border bg-[rgb(var(--card))]/90 shadow-md backdrop-blur-sm text-[rgb(var(--fg))] hover:bg-[rgb(var(--muted))] transition-colors relative"
+            aria-label="Reset map rotation to North"
+          >
+            <Compass
+              className="h-5 w-5 text-indigo-500 transition-transform duration-200"
+              style={{ transform: `rotate(${-transform.rotation}deg)` }}
+            />
+          </button>
+          <button
+            onClick={rotateCcw}
+            title="Rotate 15° Left"
+            className="flex h-9 w-9 items-center justify-center rounded-xl border bg-[rgb(var(--card))]/90 shadow-md backdrop-blur-sm text-[rgb(var(--fg))] hover:bg-[rgb(var(--muted))] transition-colors"
+          >
+            <RotateCcw className="h-4 w-4" />
+          </button>
+          <button
+            onClick={rotateCw}
+            title="Rotate 15° Right"
+            className="flex h-9 w-9 items-center justify-center rounded-xl border bg-[rgb(var(--card))]/90 shadow-md backdrop-blur-sm text-[rgb(var(--fg))] hover:bg-[rgb(var(--muted))] transition-colors"
+          >
+            <RotateCw className="h-4 w-4" />
+          </button>
           <button
             onClick={zoomIn}
             title="Zoom In"
@@ -862,14 +926,14 @@ export default function VisitorPage() {
           </button>
           <button
             onClick={resetView}
-            title="Reset View"
+            title="Reset Map Position & Rotation"
             className="flex h-9 w-9 items-center justify-center rounded-xl border bg-[rgb(var(--card))]/90 shadow-md backdrop-blur-sm text-[rgb(var(--fg))] hover:bg-[rgb(var(--muted))] transition-colors"
           >
-            <RotateCcw className="h-4 w-4" />
+            <RotateCcw className="h-4 w-4 text-amber-500" />
           </button>
-          {/* Scale indicator */}
+          {/* Scale & Rotation indicator */}
           <div className="mt-0.5 flex h-7 items-center justify-center rounded-lg border bg-[rgb(var(--card))]/90 px-2 text-[10px] font-mono text-[rgb(var(--muted-fg))] backdrop-blur-sm shadow">
-            {Math.round(transform.scale * 100)}%
+            {Math.round(transform.scale * 100)}% · {Math.round((transform.rotation + 360) % 360)}°
           </div>
           {/* Locate Me Button */}
           <button
@@ -879,11 +943,12 @@ export default function VisitorPage() {
                 const container = svgContainerRef.current;
                 if (container) {
                   const rect = container.getBoundingClientRect();
-                  setTransform({
-                    x: rect.width / 2 - gps.canvasPos.x * transform.scale,
-                    y: rect.height / 2 - gps.canvasPos.y * transform.scale,
-                    scale: transform.scale,
-                  });
+                  setTransform((prev) => ({
+                    x: rect.width / 2 - gps.canvasPos.x * prev.scale,
+                    y: rect.height / 2 - gps.canvasPos.y * prev.scale,
+                    scale: prev.scale,
+                    rotation: prev.rotation,
+                  }));
                 }
               }
             }}
