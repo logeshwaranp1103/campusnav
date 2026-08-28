@@ -329,10 +329,13 @@ export default function VisitorPage() {
         const t2 = e.touches[1];
         const dist = getDistance(t1, t2);
         const center = getCenter(t1, t2);
+        const angle = Math.atan2(t2.clientY - t1.clientY, t2.clientX - t1.clientX) * (180 / Math.PI);
 
         tState.mode = "PINCH";
         tState.initialDist = dist || 1;
         tState.initialScale = transformRef.current.scale;
+        (tState as any).initialAngle = angle;
+        (tState as any).initialRotation = transformRef.current.rotation;
         tState.lastCenter = center;
         tState.lastPos = center;
       }
@@ -348,11 +351,14 @@ export default function VisitorPage() {
         const t2 = e.touches[1];
         const currentDist = getDistance(t1, t2);
         const currentCenter = getCenter(t1, t2);
+        const currentAngle = Math.atan2(t2.clientY - t1.clientY, t2.clientX - t1.clientX) * (180 / Math.PI);
 
         if (tState.mode !== "PINCH" || !tState.initialDist) {
           tState.mode = "PINCH";
           tState.initialDist = currentDist || 1;
           tState.initialScale = transformRef.current.scale;
+          (tState as any).initialAngle = currentAngle;
+          (tState as any).initialRotation = transformRef.current.rotation;
           tState.lastCenter = currentCenter;
           tState.lastPos = currentCenter;
           return;
@@ -360,15 +366,12 @@ export default function VisitorPage() {
 
         const ratio = currentDist / tState.initialDist;
         const newScale = Math.min(MAX_SCALE, Math.max(MIN_SCALE, tState.initialScale * ratio));
-        const currentAngle = Math.atan2(t2.clientY - t1.clientY, t2.clientX - t1.clientX) * (180 / Math.PI);
 
-        if (!(tState as any).initialAngle) {
-          (tState as any).initialAngle = currentAngle;
-          (tState as any).initialRotation = transformRef.current.rotation;
+        const angleDiff = currentAngle - ((tState as any).initialAngle ?? currentAngle);
+        let newRot = (((tState as any).initialRotation ?? 0) + angleDiff + 360) % 360;
+        if (Math.abs(newRot) < 2.5 || Math.abs(newRot - 360) < 2.5) {
+          newRot = 0;
         }
-
-        const angleDiff = currentAngle - ((tState as any).initialAngle || currentAngle);
-        const newRot = (((tState as any).initialRotation || 0) + angleDiff) % 360;
 
         const dx = currentCenter.x - tState.lastCenter.x;
         const dy = currentCenter.y - tState.lastCenter.y;
@@ -411,15 +414,21 @@ export default function VisitorPage() {
       const tState = touchStateRef.current;
       if (e.touches.length === 0) {
         tState.mode = "NONE";
+        delete (tState as any).initialAngle;
+        delete (tState as any).initialRotation;
       } else if (e.touches.length === 1) {
         const touch = e.touches[0];
         tState.mode = "PAN";
         tState.lastPos = { x: touch.clientX, y: touch.clientY };
+        delete (tState as any).initialAngle;
+        delete (tState as any).initialRotation;
       }
     };
 
     const handleTouchCancel = () => {
       touchStateRef.current.mode = "NONE";
+      delete (touchStateRef.current as any).initialAngle;
+      delete (touchStateRef.current as any).initialRotation;
     };
 
     container.addEventListener("touchstart", handleTouchStart, { passive: false });

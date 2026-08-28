@@ -1133,25 +1133,50 @@ function MapCanvas({
     );
   }, []);
 
+  const isGroundFloorNode = useCallback(
+    (n?: Node | null) => {
+      if (!n) return false;
+      if (!n.floorId || n.floorId === "f-out" || n.floorId === "outdoor") return true;
+      const fl = publishedData.floors.find((f) => f.id === n.floorId);
+      if (!fl) return true;
+      if (fl.ordinal === 0) return true;
+      const fName = (fl.name || "").toLowerCase();
+      const fId = (fl.id || "").toLowerCase();
+      return (
+        fName.includes("ground") ||
+        fName.includes("gnd") ||
+        fName.includes("floor 0") ||
+        fName.includes("level 0") ||
+        fId.endsWith("-0") ||
+        fId.endsWith("-g") ||
+        fId.includes("ground")
+      );
+    },
+    [publishedData.floors]
+  );
+
   const isNodeOnActiveFloor = useCallback(
     (n: Node) => {
       if (isOutdoorFloor) {
-        return isNodeOutdoor(n) || (isEntranceNode(n) && (n.floorId === "f-out" || n.floorId === "outdoor" || !n.floorId));
+        return isNodeOutdoor(n) || isEntranceNode(n) || isGroundFloorNode(n);
       }
       if (n.floorId === floorId) {
         return true;
       }
-      if (isGroundFloor && isEntranceNode(n)) {
-        // Ground floor can show ground-floor entrances or entrances for this building
+      if (isGroundFloor && (isEntranceNode(n) || isGroundFloorNode(n))) {
         const bldId = currentFloorObj?.buildingId;
         const nodeBldId = publishedData.floors.find((f) => f.id === n.floorId)?.buildingId;
         const isAssignedToThisFloor = n.floorId === floorId;
         const isOutdoorEntrance = n.floorId === "f-out" || n.floorId === "outdoor" || !n.floorId;
-        return isAssignedToThisFloor || (isOutdoorEntrance && (!nodeBldId || !bldId || nodeBldId === bldId));
+        return (
+          isAssignedToThisFloor ||
+          (isOutdoorEntrance && (!nodeBldId || !bldId || nodeBldId === bldId)) ||
+          isGroundFloorNode(n)
+        );
       }
       return false;
     },
-    [isOutdoorFloor, isNodeOutdoor, isEntranceNode, isGroundFloor, floorId, currentFloorObj?.buildingId, publishedData.floors]
+    [isOutdoorFloor, isNodeOutdoor, isEntranceNode, isGroundFloorNode, isGroundFloor, floorId, currentFloorObj?.buildingId, publishedData.floors]
   );
 
   const scopeNodes = useMemo(() => {
@@ -1165,11 +1190,9 @@ function MapCanvas({
       if (!from || !to) return false;
 
       if (isOutdoorFloor) {
-        const fromOut = isNodeOutdoor(from);
-        const toOut = isNodeOutdoor(to);
-        const fromEnt = isEntranceNode(from) && (from.floorId === "f-out" || from.floorId === "outdoor" || !from.floorId);
-        const toEnt = isEntranceNode(to) && (to.floorId === "f-out" || to.floorId === "outdoor" || !to.floorId);
-        return (fromOut && toOut) || (fromOut && toEnt) || (toOut && fromEnt);
+        const fromActive = isNodeOnActiveFloor(from);
+        const toActive = isNodeOnActiveFloor(to);
+        return fromActive && toActive;
       }
 
       const fromThisFloor = from.floorId === floorId;
@@ -1502,6 +1525,17 @@ function MapCanvas({
         const rawDy = (currentCenter.y - gState.lastCenter.y) * uniformScale;
         panRef.current = { x: panRef.current.x + rawDx, y: panRef.current.y + rawDy };
         gState.lastCenter = currentCenter;
+
+        // 3. Two-Finger Touch Rotation (Bearing Twist)
+        const angleDelta = currentAngle - gState.initialAngle;
+        let newBearing = (gState.initialBearing + angleDelta + 360) % 360;
+        if (Math.abs(newBearing) < 2.5 || Math.abs(newBearing - 360) < 2.5) {
+          newBearing = 0;
+        }
+        targetBearingRef.current = newBearing;
+        bearingRef.current = newBearing;
+        onBearingChange?.(newBearing);
+        onUserPan?.();
       } else if (e.touches.length === 1) {
         e.preventDefault();
         const touch = e.touches[0];
