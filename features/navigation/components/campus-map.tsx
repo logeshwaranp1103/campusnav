@@ -454,19 +454,23 @@ export function CampusMap({
         <button
           onClick={() => setIsFloorMenuOpen((v) => !v)}
           className={cn(
-            "flex items-center gap-1.5 rounded-2xl border border-white/60 dark:border-slate-800/60 bg-white/90 dark:bg-slate-900/90 px-3.5 py-2 text-xs font-semibold text-[rgb(var(--fg))] shadow-lg backdrop-blur-md transition-all active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500",
-            isFloorMenuOpen && "bg-indigo-600 text-white border-indigo-600 dark:bg-indigo-600 dark:border-indigo-600 shadow-indigo-500/20"
+            "flex items-center gap-1.5 rounded-2xl border px-3.5 py-2 text-xs font-bold shadow-lg backdrop-blur-md transition-all active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 cursor-pointer",
+            isFloorMenuOpen
+              ? "bg-indigo-600 text-white border-indigo-500 shadow-indigo-500/30 ring-2 ring-indigo-400"
+              : activeView !== "f-out"
+              ? "bg-indigo-600 text-white border-indigo-500 shadow-indigo-500/20"
+              : "bg-white text-slate-800 hover:text-indigo-600 border-slate-200 shadow-md hover:bg-indigo-50/50"
           )}
           aria-label={isFloorMenuOpen ? "Hide Floor Stack" : "Show Floor Stack"}
         >
-          <Layers className="h-4 w-4 shrink-0" />
+          <Layers className={cn("h-4 w-4 shrink-0", (isFloorMenuOpen || activeView !== "f-out") ? "text-white" : "text-indigo-600")} />
           <span className="max-w-[150px] truncate">{activeFloorLabel}</span>
           <ChevronDown className={cn("h-3.5 w-3.5 shrink-0 transition-transform duration-200", isFloorMenuOpen && "rotate-180")} />
         </button>
 
         {/* Expandable Floor Selector Dropdown Stack */}
         {isFloorMenuOpen && (
-          <div className="flex flex-col gap-1 rounded-2xl border bg-[rgb(var(--card))]/95 p-1.5 shadow-2xl backdrop-blur-md max-h-[55vh] overflow-y-auto w-48 animate-in fade-in slide-in-from-top-2 duration-200">
+          <div className="flex flex-col gap-1 rounded-2xl border border-slate-200 bg-white p-2 shadow-2xl backdrop-blur-md max-h-[55vh] overflow-y-auto w-56 animate-in fade-in slide-in-from-top-2 duration-200">
             {/* Outdoor Button */}
             <FloorButton
               active={activeView === "f-out"}
@@ -474,12 +478,12 @@ export function CampusMap({
                 setView("f-out");
                 setIsFloorMenuOpen(false);
               }}
-              icon={<Compass className="h-3.5 w-3.5 shrink-0 text-emerald-500" />}
+              icon={<Compass className={cn("h-4 w-4 shrink-0", activeView === "f-out" ? "text-emerald-300" : "text-emerald-600")} />}
               label="Campus Outdoor"
             />
 
             {indoorFloors.length > 0 && (
-              <div className="my-1 border-t border-[rgb(var(--border))]/60 px-2 pt-1 text-[10px] font-bold uppercase tracking-wider text-[rgb(var(--muted-fg))]">
+              <div className="my-1 border-t border-slate-100 px-2 pt-1.5 text-[10px] font-bold uppercase tracking-wider text-slate-400">
                 Indoor Floors
               </div>
             )}
@@ -500,7 +504,7 @@ export function CampusMap({
                     setView(fid);
                     setIsFloorMenuOpen(false);
                   }}
-                  icon={<Building2 className="h-3.5 w-3.5 shrink-0 text-indigo-500" />}
+                  icon={<Building2 className={cn("h-4 w-4 shrink-0", activeView === fid ? "text-indigo-200" : "text-indigo-600")} />}
                   label={cleanLabel}
                 />
               );
@@ -655,11 +659,14 @@ function FloorButton({
     <button
       suppressHydrationWarning
       onClick={onClick}
-      className={`flex items-center gap-2 rounded-xl px-3 py-2 text-xs transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 min-h-[38px] ${active ? "bg-indigo-600 text-white font-bold shadow-md shadow-indigo-500/25 ring-1 ring-indigo-400/80" : "hover:bg-[rgb(var(--muted))] text-[rgb(var(--fg))]"
-        }`}
+      className={`flex items-center gap-2.5 rounded-xl px-3 py-2 text-xs transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 min-h-[38px] cursor-pointer ${
+        active
+          ? "bg-indigo-600 text-white font-bold shadow-md shadow-indigo-500/25 ring-1 ring-indigo-400/80"
+          : "bg-transparent hover:bg-indigo-50 text-slate-700 hover:text-indigo-700 font-semibold"
+      }`}
     >
       {icon}
-      <span>{label}</span>
+      <span className="truncate">{label}</span>
     </button>
   );
 }
