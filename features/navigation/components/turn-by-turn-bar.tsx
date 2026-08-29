@@ -302,7 +302,7 @@ export function TurnByTurnBar({
             <div className="h-1 w-10 rounded-full bg-slate-300 group-hover:bg-slate-400 transition-colors" />
             <div className="flex items-center gap-1 text-[11px] font-semibold text-slate-500 pt-1 group-hover:text-slate-700 transition-colors">
               <ChevronUp className="h-3.5 w-3.5 text-slate-400" />
-              <span>Swipe up for all steps</span>
+              <span>Tap to show all steps</span>
             </div>
           </button>
 
@@ -420,7 +420,7 @@ export function TurnByTurnBar({
                   <div className="h-1.5 w-12 rounded-full bg-slate-300 group-hover:bg-slate-400 transition-colors" />
                   <div className="flex items-center gap-1 text-[11px] font-semibold text-slate-400 pt-1.5 group-hover:text-slate-600 transition-colors">
                     <ChevronDown className="h-3.5 w-3.5" />
-                    <span>Swipe down to close</span>
+                    <span>Tap to close</span>
                   </div>
                 </button>
 

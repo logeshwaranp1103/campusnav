@@ -562,11 +562,23 @@ export default function VisitorPage() {
     setActivePanel("NAVIGATE");
   };
 
+  const isGroundActive = useMemo(() => {
+    if (activeFloorId === "f-all-g") return true;
+    const fl = publishedData.floors.find((f) => f.id === activeFloorId);
+    if (fl && fl.ordinal === 0) return true;
+    const fName = (fl?.name || activeFloorId).toLowerCase();
+    return fName.includes("ground") || fName.includes("gnd") || activeFloorId.endsWith("-0") || activeFloorId.endsWith("-g");
+  }, [activeFloorId, publishedData.floors]);
+
   const currentFloorNodes = publishedData.nodes.filter((n) => {
     if (activeFloorId === "f-out") return n.floorId === "f-out" || n.type === "BUILDING_ENTRANCE" || n.isEntranceNode;
-    if (activeFloorId === "f-all-g") {
-      const fl = publishedData.floors.find((f) => f.id === n.floorId);
-      return fl?.ordinal === 0;
+    if (isGroundActive) {
+      if (!n.floorId || n.floorId === "f-out" || n.type === "BUILDING_ENTRANCE" || n.isEntranceNode) return true;
+      if (activeFloorId === "f-all-g") {
+        const fl = publishedData.floors.find((f) => f.id === n.floorId);
+        return fl?.ordinal === 0;
+      }
+      return n.floorId === activeFloorId;
     }
     if (activeFloorId === "f-all-1") {
       const fl = publishedData.floors.find((f) => f.id === n.floorId);
@@ -581,10 +593,12 @@ export default function VisitorPage() {
     const toN = publishedData.nodes.find((n) => n.id === (e.toNodeId ?? e.to));
     if (!fromN || !toN) return false;
     if (activeFloorId === "f-out") return fromN.floorId === "f-out" || toN.floorId === "f-out";
-    if (activeFloorId === "f-all-g") {
-      const fl1 = publishedData.floors.find((f) => f.id === fromN.floorId);
-      const fl2 = publishedData.floors.find((f) => f.id === toN.floorId);
-      return fl1?.ordinal === 0 || fl2?.ordinal === 0;
+    if (isGroundActive) {
+      const isFromOut = !fromN.floorId || fromN.floorId === "f-out" || fromN.type === "BUILDING_ENTRANCE" || fromN.isEntranceNode;
+      const isToOut = !toN.floorId || toN.floorId === "f-out" || toN.type === "BUILDING_ENTRANCE" || toN.isEntranceNode;
+      const isFromThis = fromN.floorId === activeFloorId || (activeFloorId === "f-all-g" && publishedData.floors.find((f) => f.id === fromN.floorId)?.ordinal === 0);
+      const isToThis = toN.floorId === activeFloorId || (activeFloorId === "f-all-g" && publishedData.floors.find((f) => f.id === toN.floorId)?.ordinal === 0);
+      return (isFromThis && isToThis) || (isFromOut && isToOut) || (isFromThis && isToOut) || (isToThis && isFromOut);
     }
     if (activeFloorId === "f-all-1") {
       const fl1 = publishedData.floors.find((f) => f.id === fromN.floorId);
@@ -944,30 +958,40 @@ export default function VisitorPage() {
           <div className="mt-0.5 flex h-7 items-center justify-center rounded-lg border bg-[rgb(var(--card))]/90 px-2 text-[10px] font-mono text-[rgb(var(--muted-fg))] backdrop-blur-sm shadow">
             {Math.round(transform.scale * 100)}% · {Math.round((transform.rotation + 360) % 360)}°
           </div>
-          {/* Locate Me Button */}
+          {/* Locate Me / Recenter Button */}
           <button
             onClick={() => {
               if (!gps.isTracking) gps.startTracking();
-              if (gps.isGpsActive && gps.canvasPos) {
-                const container = svgContainerRef.current;
-                if (container) {
-                  const rect = container.getBoundingClientRect();
-                  setTransform((prev) => ({
-                    x: rect.width / 2 - gps.canvasPos.x * prev.scale,
-                    y: rect.height / 2 - gps.canvasPos.y * prev.scale,
-                    scale: prev.scale,
-                    rotation: prev.rotation,
-                  }));
+              const container = svgContainerRef.current;
+              const defaultScale = 1.5;
+              if (container) {
+                const rect = container.getBoundingClientRect();
+                if (gps.isGpsActive && gps.canvasPos) {
+                  setTransform({
+                    x: rect.width / 2 - gps.canvasPos.x * defaultScale,
+                    y: rect.height / 2 - gps.canvasPos.y * defaultScale,
+                    scale: defaultScale,
+                    rotation: 0,
+                  });
+                } else {
+                  setTransform({
+                    x: 0,
+                    y: 0,
+                    scale: defaultScale,
+                    rotation: 0,
+                  });
                 }
+              } else {
+                setTransform((prev) => ({ ...prev, scale: defaultScale, rotation: 0 }));
               }
             }}
-            title="Locate Me"
+            title="Recenter Map & Locate Me (0° North, 100% Zoom)"
             className={`flex h-9 w-9 items-center justify-center rounded-xl border shadow-md backdrop-blur-sm transition-colors ${
               gps.isGpsActive
                 ? "bg-blue-500/15 text-blue-600 dark:text-blue-400 border-blue-500/30"
                 : "bg-[rgb(var(--card))]/90 text-[rgb(var(--fg))] hover:bg-[rgb(var(--muted))]"
             }`}
-            aria-label="Locate my position on the map"
+            aria-label="Recenter map to default zoom and 0° North"
           >
             <Locate className="h-4 w-4" />
           </button>

@@ -707,7 +707,9 @@ function MapCanvas({
   const [internalZoom, setInternalZoom] = useState(1);
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const [isDragging, setIsDragging] = useState(false);
-  const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
+  const dragStartRef = useRef({ x: 0, y: 0 });
+  const mouseRafRef = useRef<number | null>(null);
+  const touchRafRef = useRef<number | null>(null);
 
   // Camera Smooth Animation Refs
   const panRef = useRef(pan);
@@ -1073,18 +1075,46 @@ function MapCanvas({
     return map;
   }, [allNodes, route]);
 
-  const findNode = (id: string) => nodeLookupMap.get(id);
+  const findNode = useCallback((id: string) => nodeLookupMap.get(id), [nodeLookupMap]);
+
+  const floorById = useMemo(() => {
+    const map = new Map<string, Floor>();
+    publishedData.floors.forEach((f) => map.set(f.id, f));
+    return map;
+  }, [publishedData.floors]);
+
   const currentFloorObj = useMemo(
-    () => publishedData.floors.find((f) => f.id === floorId),
-    [publishedData.floors, floorId]
+    () => floorById.get(floorId),
+    [floorById, floorId]
   );
   const isOutdoorFloor = floorId === "f-out" || floorId === "outdoor";
 
+  const groundFloorIdSet = useMemo(() => {
+    const set = new Set<string>();
+    publishedData.floors.forEach((f) => {
+      if (f.ordinal === 0) set.add(f.id);
+      const fName = (f.name || "").toLowerCase();
+      const fId = (f.id || "").toLowerCase();
+      if (
+        fName.includes("ground") ||
+        fName.includes("gnd") ||
+        fName.includes("floor 0") ||
+        fName.includes("level 0") ||
+        fId.endsWith("-0") ||
+        fId.endsWith("-g") ||
+        fId.includes("ground")
+      ) {
+        set.add(f.id);
+      }
+    });
+    return set;
+  }, [publishedData.floors]);
+
   const isGroundFloor = useMemo(() => {
     if (isOutdoorFloor) return false;
-    const fl = publishedData.floors.find((f) => f.id === floorId);
-    return fl ? fl.ordinal === 0 : floorId.toLowerCase().includes("ground") || floorId.toLowerCase().includes("gnd") || floorId.endsWith("-0") || floorId.endsWith("-g");
-  }, [floorId, isOutdoorFloor, publishedData.floors]);
+    const fl = floorById.get(floorId);
+    return fl ? fl.ordinal === 0 : groundFloorIdSet.has(floorId);
+  }, [floorId, isOutdoorFloor, floorById, groundFloorIdSet]);
 
   const isEntranceNode = useCallback((n?: Node | null) => {
     if (!n) return false;
@@ -1113,22 +1143,9 @@ function MapCanvas({
     (n?: Node | null) => {
       if (!n) return false;
       if (!n.floorId || n.floorId === "f-out" || n.floorId === "outdoor") return true;
-      const fl = publishedData.floors.find((f) => f.id === n.floorId);
-      if (!fl) return true;
-      if (fl.ordinal === 0) return true;
-      const fName = (fl.name || "").toLowerCase();
-      const fId = (fl.id || "").toLowerCase();
-      return (
-        fName.includes("ground") ||
-        fName.includes("gnd") ||
-        fName.includes("floor 0") ||
-        fName.includes("level 0") ||
-        fId.endsWith("-0") ||
-        fId.endsWith("-g") ||
-        fId.includes("ground")
-      );
+      return groundFloorIdSet.has(n.floorId);
     },
-    [publishedData.floors]
+    [groundFloorIdSet]
   );
 
   const isNodeOnActiveFloor = useCallback(
@@ -1139,25 +1156,67 @@ function MapCanvas({
       if (n.floorId === floorId) {
         return true;
       }
-      if (isGroundFloor && (isEntranceNode(n) || isGroundFloorNode(n))) {
-        const bldId = currentFloorObj?.buildingId;
-        const nodeBldId = publishedData.floors.find((f) => f.id === n.floorId)?.buildingId;
-        const isAssignedToThisFloor = n.floorId === floorId;
-        const isOutdoorEntrance = n.floorId === "f-out" || n.floorId === "outdoor" || !n.floorId;
-        return (
-          isAssignedToThisFloor ||
-          (isOutdoorEntrance && (!nodeBldId || !bldId || nodeBldId === bldId)) ||
-          isGroundFloorNode(n)
-        );
+      if (isGroundFloor) {
+        return isNodeOutdoor(n) || isEntranceNode(n) || isGroundFloorNode(n);
       }
       return false;
     },
-    [isOutdoorFloor, isNodeOutdoor, isEntranceNode, isGroundFloorNode, isGroundFloor, floorId, currentFloorObj?.buildingId, publishedData.floors]
+    [isOutdoorFloor, isNodeOutdoor, isEntranceNode, isGroundFloorNode, isGroundFloor, floorId]
   );
 
   const scopeNodes = useMemo(() => {
     return allNodes.filter(isNodeOnActiveFloor);
   }, [allNodes, isNodeOnActiveFloor]);
+
+  // Single-pass categorization for 60/120 FPS render performance
+  const categorizedScopeNodes = useMemo(() => {
+    const parking: Node[] = [];
+    const gates: Node[] = [];
+    const entrances: Node[] = [];
+    const stairsAndLifts: Node[] = [];
+    const amenities: Node[] = [];
+    const others: Node[] = [];
+
+    for (const n of scopeNodes) {
+      if (n.type === "PARKING" || (n.name && n.name.toLowerCase().includes("parking"))) {
+        parking.push(n);
+      } else if (n.type === "GATE" || (n.name && n.name.toLowerCase().includes("gate"))) {
+        gates.push(n);
+      } else if (n.type === "BUILDING_ENTRANCE" || n.isEntranceNode || (n.type === "ENTRANCE" && floorId === "f-out")) {
+        entrances.push(n);
+      } else if (n.type === "STAIR" || n.type === "LIFT" || (n.name && (n.name.toLowerCase().includes("stair") || n.name.toLowerCase().includes("lift")))) {
+        stairsAndLifts.push(n);
+      } else if (n.type === "WASHROOM" || n.type === "FACILITY") {
+        amenities.push(n);
+      } else {
+        others.push(n);
+      }
+    }
+
+    return { parking, gates, entrances, stairsAndLifts, amenities, others };
+  }, [scopeNodes, floorId]);
+
+  // Precompute building geometries to eliminate repeated trigonometric math during drag & twist
+  const memoizedBuildingGeometries = useMemo(() => {
+    return buildings.map((b) => {
+      const canvasPts = getBuildingCanvasPoints(b);
+      const svgPath = getPolygonSvgPath(canvasPts);
+      const centerPos = getBuildingCenter(b);
+      const bName = b.name;
+      const badgeWidth = Math.max(140, bName.length * 8.5 + 32);
+      const buildingEvent = publishedData.events.find((ev) => ev.buildingId === b.id);
+      const strokeColor = buildingEvent?.color || b.color || "#4f46e5";
+      return {
+        b,
+        svgPath,
+        centerPos,
+        badgeWidth,
+        buildingEvent,
+        strokeColor,
+        bName,
+      };
+    });
+  }, [buildings, publishedData.events]);
 
   const scopeEdges = useMemo(() => {
     return allEdges.filter((e) => {
@@ -1171,6 +1230,26 @@ function MapCanvas({
         return fromActive && toActive;
       }
 
+      if (isGroundFloor) {
+        const fromThisFloor = from.floorId === floorId;
+        const toThisFloor = to.floorId === floorId;
+        const isFromOut = isNodeOutdoor(from);
+        const isToOut = isNodeOutdoor(to);
+        const fromEnt = isEntranceNode(from);
+        const toEnt = isEntranceNode(to);
+
+        // 1. Both nodes on this specific ground floor
+        if (fromThisFloor && toThisFloor) return true;
+        // 2. Both nodes are outdoor (seamless campus pathways)
+        if (isFromOut && isToOut) return true;
+        // 3. Ground floor connecting to entrance or outdoor path
+        if ((fromThisFloor && (toEnt || isToOut)) || (toThisFloor && (fromEnt || isFromOut))) return true;
+        // 4. Entrance connecting to outdoor
+        if ((fromEnt && isToOut) || (toEnt && isFromOut)) return true;
+        // 5. General ground floor nodes
+        if (isGroundFloorNode(from) && isGroundFloorNode(to)) return true;
+      }
+
       const fromThisFloor = from.floorId === floorId;
       const toThisFloor = to.floorId === floorId;
       const fromEnt = isGroundFloor && isEntranceNode(from);
@@ -1178,7 +1257,7 @@ function MapCanvas({
 
       return (fromThisFloor && toThisFloor) || (fromThisFloor && toEnt) || (toThisFloor && fromEnt);
     });
-  }, [allEdges, findNode, isOutdoorFloor, isNodeOutdoor, isEntranceNode, isGroundFloor, floorId]);
+  }, [allEdges, findNode, isOutdoorFloor, isNodeOutdoor, isEntranceNode, isGroundFloor, isGroundFloorNode, floorId, isNodeOnActiveFloor]);
 
   const routeNodes = useMemo(() => {
     if (!route?.nodes) return [];
@@ -1200,6 +1279,21 @@ function MapCanvas({
         return (fromOut && toOut) || (fromOut && toEnt) || (toOut && fromEnt);
       }
 
+      if (isGroundFloor) {
+        const fromThisFloor = from.floorId === floorId;
+        const toThisFloor = to.floorId === floorId;
+        const isFromOut = isNodeOutdoor(from);
+        const isToOut = isNodeOutdoor(to);
+        const fromEnt = isEntranceNode(from);
+        const toEnt = isEntranceNode(to);
+
+        if (fromThisFloor && toThisFloor) return true;
+        if (isFromOut && isToOut) return true;
+        if ((fromThisFloor && (toEnt || isToOut)) || (toThisFloor && (fromEnt || isFromOut))) return true;
+        if ((fromEnt && isToOut) || (toEnt && isFromOut)) return true;
+        if (isGroundFloorNode(from) && isGroundFloorNode(to)) return true;
+      }
+
       const fromThisFloor = from.floorId === floorId;
       const toThisFloor = to.floorId === floorId;
       const fromEnt = isGroundFloor && isEntranceNode(from);
@@ -1207,7 +1301,7 @@ function MapCanvas({
 
       return (fromThisFloor && toThisFloor) || (fromThisFloor && toEnt) || (toThisFloor && fromEnt);
     });
-  }, [route?.edges, findNode, isOutdoorFloor, isNodeOutdoor, isEntranceNode, isGroundFloor, floorId]);
+  }, [route?.edges, findNode, isOutdoorFloor, isNodeOutdoor, isEntranceNode, isGroundFloor, isGroundFloorNode, floorId]);
 
   const blockedEdgeIds = useMemo(() => {
     return getObstructedEdgeIds(allNodes, allEdges, publishedData.obstacles);
@@ -1216,7 +1310,6 @@ function MapCanvas({
   const destination = route?.nodes[route.nodes.length - 1];
   const showLiveHere = livePosition && isNodeOnActiveFloor(livePosition);
 
-  // Viewbox coordinates with smoothly interpolated visual zoom at 60/120 FPS
   const effectiveW = bounds.w / visualZoom;
   const effectiveH = bounds.h / visualZoom;
   const effectiveX = bounds.x + (bounds.w - effectiveW) / 2 - pan.x;
@@ -1227,13 +1320,12 @@ function MapCanvas({
     velocityRef.current = { vx: 0, vy: 0 };
   };
 
-  // Mouse Drag Handlers for Desktop with Rotation Matrix Compensation
   const handleMouseDown = (e: React.MouseEvent<SVGSVGElement>) => {
     if (e.button !== 0) return;
     stopInertia();
     isInteractingRef.current = true;
     setIsDragging(true);
-    setDragStart({ x: e.clientX, y: e.clientY });
+    dragStartRef.current = { x: e.clientX, y: e.clientY };
     lastTouchPosRef.current = { x: e.clientX, y: e.clientY };
     lastTouchTimeRef.current = Date.now();
     velocityRef.current = { vx: 0, vy: 0 };
@@ -1245,15 +1337,13 @@ function MapCanvas({
     const rect = svgRef.current.getBoundingClientRect();
     const curEffW = boundsRef.current.w / (visualZoomRef.current || 1);
     const curEffH = boundsRef.current.h / (visualZoomRef.current || 1);
-    // SVG viewBox with preserveAspectRatio="xMidYMid meet" maintains a single uniform scale across X and Y
     const uniformScale = Math.max(curEffW / (rect.width || 1), curEffH / (rect.height || 1));
     const now = Date.now();
     const dt = Math.max(1, now - (lastTouchTimeRef.current || now));
 
-    const rawDx = (e.clientX - dragStart.x) * uniformScale;
-    const rawDy = (e.clientY - dragStart.y) * uniformScale;
+    const rawDx = (e.clientX - dragStartRef.current.x) * uniformScale;
+    const rawDy = (e.clientY - dragStartRef.current.y) * uniformScale;
 
-    // Rotate screen gesture delta by -bearing so dragging on rotated canvas matches hand movement exactly
     const rad = (-bearingRef.current * Math.PI) / 180;
     const dx = rawDx * Math.cos(rad) - rawDy * Math.sin(rad);
     const dy = rawDx * Math.sin(rad) + rawDy * Math.cos(rad);
@@ -1264,18 +1354,30 @@ function MapCanvas({
     const vy = rawVx * Math.sin(rad) + rawVy * Math.cos(rad);
     velocityRef.current = { vx, vy };
 
-    setPan((prev) => ({ x: prev.x + dx, y: prev.y + dy }));
-    setDragStart({ x: e.clientX, y: e.clientY });
+    const nextPan = { x: panRef.current.x + dx, y: panRef.current.y + dy };
+    panRef.current = nextPan;
+    dragStartRef.current = { x: e.clientX, y: e.clientY };
     lastTouchPosRef.current = { x: e.clientX, y: e.clientY };
     lastTouchTimeRef.current = now;
+
+    if (mouseRafRef.current === null) {
+      mouseRafRef.current = requestAnimationFrame(() => {
+        mouseRafRef.current = null;
+        setPan(panRef.current);
+      });
+    }
   };
 
   const handleMouseUp = () => {
     isInteractingRef.current = false;
     setIsDragging(false);
+    if (mouseRafRef.current !== null) {
+      cancelAnimationFrame(mouseRafRef.current);
+      mouseRafRef.current = null;
+      setPan(panRef.current);
+    }
   };
 
-  // ── Cursor-Anchored Wheel Zoom with Continuous Smooth Interpolation ──
   useEffect(() => {
     const svg = svgRef.current;
     if (!svg) return;
@@ -1285,15 +1387,12 @@ function MapCanvas({
 
       let zoomMultiplier: number;
       if (e.ctrlKey) {
-        // Laptop touchpad pinch gesture: continuous proportional exponential scale
         const clampedDelta = Math.min(60, Math.max(-60, e.deltaY));
         zoomMultiplier = Math.exp(-clampedDelta * 0.008);
       } else if (e.deltaMode === WheelEvent.DOM_DELTA_PIXEL) {
-        // Laptop touchpad two-finger swipe up/down (continuous pixel stream)
         const clampedDelta = Math.min(80, Math.max(-80, e.deltaY));
         zoomMultiplier = Math.exp(-clampedDelta * 0.0012);
       } else {
-        // Physical discrete mouse wheel (DOM_DELTA_LINE or DOM_DELTA_PAGE)
         let delta = e.deltaY;
         if (e.deltaMode === WheelEvent.DOM_DELTA_LINE) {
           delta *= 20;
@@ -1304,12 +1403,15 @@ function MapCanvas({
         zoomMultiplier = Math.exp(-normalizedDelta * 0.0018);
       }
 
-      const curInternal = internalZoomRef.current;
+      const prevVisualZoom = visualZoomRef.current || 1;
+      const targetTotal = Math.min(MAX_MAP_ZOOM, Math.max(MIN_MAP_ZOOM, prevVisualZoom * zoomMultiplier));
+      if (Math.abs(targetTotal - prevVisualZoom) < 0.0001) return;
+
       const extZ = externalZoomRef.current || 1;
-      const curTargetTotal = extZ * curInternal;
-      const newTargetTotal = Math.min(MAX_MAP_ZOOM, Math.max(MIN_MAP_ZOOM, curTargetTotal * zoomMultiplier));
-      const newInternal = newTargetTotal / extZ;
-      if (Math.abs(newInternal - curInternal) < 0.0001) return;
+      const newInternal = targetTotal / extZ;
+      internalZoomRef.current = newInternal;
+      targetZoomRef.current = targetTotal;
+      visualZoomRef.current = targetTotal;
 
       const rect = svg.getBoundingClientRect();
       const mouseRatioX = (e.clientX - rect.left) / (rect.width || 1);
@@ -1317,32 +1419,30 @@ function MapCanvas({
 
       const bW = boundsRef.current.w;
       const bH = boundsRef.current.h;
+      const oldW = bW / prevVisualZoom;
+      const oldH = bH / prevVisualZoom;
+      const newW = bW / targetTotal;
+      const newH = bH / targetTotal;
 
-      // Focal anchor calculation: Keeps the cursor's world coordinate anchored during animated glide
-      const oldEffW = bW / curTargetTotal;
-      const oldEffH = bH / curTargetTotal;
-      const newEffW = bW / newTargetTotal;
-      const newEffH = bH / newTargetTotal;
+      const rawDPanX = (oldW - newW) * (0.5 - mouseRatioX);
+      const rawDPanY = (oldH - newH) * (0.5 - mouseRatioY);
 
-      const rawDPanX = (oldEffW - newEffW) * (0.5 - mouseRatioX);
-      const rawDPanY = (oldEffH - newEffH) * (0.5 - mouseRatioY);
-
-      // Rotate focal offset by -bearing
       const rad = (-bearingRef.current * Math.PI) / 180;
       const dPanX = rawDPanX * Math.cos(rad) - rawDPanY * Math.sin(rad);
       const dPanY = rawDPanX * Math.sin(rad) + rawDPanY * Math.cos(rad);
 
       const nextPan = { x: panRef.current.x + dPanX, y: panRef.current.y + dPanY };
       panRef.current = nextPan;
-      internalZoomRef.current = newInternal;
-      targetZoomRef.current = newTargetTotal;
+
+      setVisualZoom(targetTotal);
+      setInternalZoom(newInternal);
+      setPan(nextPan);
     };
 
     svg.addEventListener("wheel", handleWheel, { passive: false });
     return () => svg.removeEventListener("wheel", handleWheel);
   }, [onUserPan]);
 
-  // Touch gesture state ref for Mobile (2-Finger Simultaneous Pinch-Zoom + Bearing Rotation + Pan)
   const touchGestureRef = useRef<{
     mode: "NONE" | "PAN" | "PINCH_ROTATE";
     initialDist: number;
@@ -1361,7 +1461,6 @@ function MapCanvas({
     lastCenter: { x: 0, y: 0 },
   });
 
-  // ── Native Non-Passive Touch Listeners for Pinch-to-Zoom, Two-Finger Rotation & Pan ──
   useEffect(() => {
     const svg = svgRef.current;
     if (!svg) return;
@@ -1380,29 +1479,31 @@ function MapCanvas({
     const handleTouchStart = (e: TouchEvent) => {
       stopInertia();
       isInteractingRef.current = true;
-      onUserPan?.();
       const now = Date.now();
 
       if (e.touches.length === 1) {
         const touch = e.touches[0];
-        // Double-tap zoom detection (<300ms)
         if (now - lastTapTimeRef.current < 300) {
           e.preventDefault();
+          const prevVisualZoom = visualZoomRef.current || 1;
+          const targetTotal = Math.min(MAX_MAP_ZOOM, prevVisualZoom * 1.5);
+          const extZ = externalZoomRef.current || 1;
+          const newInternal = targetTotal / extZ;
+          internalZoomRef.current = newInternal;
+          targetZoomRef.current = targetTotal;
+          visualZoomRef.current = targetTotal;
+          setVisualZoom(targetTotal);
+
           const rect = svg.getBoundingClientRect();
           const mouseRatioX = (touch.clientX - rect.left) / (rect.width || 1);
           const mouseRatioY = (touch.clientY - rect.top) / (rect.height || 1);
-          const curInternal = internalZoomRef.current;
-          const extZ = externalZoomRef.current || 1;
-          const curTargetTotal = extZ * curInternal;
-          const newTargetTotal = Math.min(MAX_MAP_ZOOM, curTargetTotal * 1.5);
-          const newInternal = newTargetTotal / extZ;
 
           const bW = boundsRef.current.w;
           const bH = boundsRef.current.h;
-          const oldW = bW / curTargetTotal;
-          const oldH = bH / curTargetTotal;
-          const newW = bW / newTargetTotal;
-          const newH = bH / newTargetTotal;
+          const oldW = bW / prevVisualZoom;
+          const oldH = bH / prevVisualZoom;
+          const newW = bW / targetTotal;
+          const newH = bH / targetTotal;
 
           const rawDPanX = (oldW - newW) * (0.5 - mouseRatioX);
           const rawDPanY = (oldH - newH) * (0.5 - mouseRatioY);
@@ -1462,7 +1563,6 @@ function MapCanvas({
       const bH = boundsRef.current.h;
       const curEffW = bW / (visualZoomRef.current || 1);
       const curEffH = bH / (visualZoomRef.current || 1);
-      // SVG viewBox with preserveAspectRatio="xMidYMid meet" maintains a single uniform scale across X and Y
       const uniformScale = Math.max(curEffW / (rect.width || 1), curEffH / (rect.height || 1));
       const now = Date.now();
       const dt = Math.max(1, now - (lastTouchTimeRef.current || now));
@@ -1488,7 +1588,6 @@ function MapCanvas({
           return;
         }
 
-        // 1. Pinch Zoom Scaling (Pure Zoom & Pan)
         const ratio = currentDist / gState.initialDist;
         const extZ = externalZoomRef.current || 1;
         const targetTotal = Math.min(MAX_MAP_ZOOM, Math.max(MIN_MAP_ZOOM, gState.initialZoom * ratio));
@@ -1496,18 +1595,13 @@ function MapCanvas({
         internalZoomRef.current = newInternal;
         targetZoomRef.current = targetTotal;
         visualZoomRef.current = targetTotal;
-        setVisualZoom(targetTotal);
-        setInternalZoom(newInternal);
 
-        // 2. Two-Finger Pan Midpoint Tracking
         const rawDx = (currentCenter.x - gState.lastCenter.x) * uniformScale;
         const rawDy = (currentCenter.y - gState.lastCenter.y) * uniformScale;
         const nextPan = { x: panRef.current.x + rawDx, y: panRef.current.y + rawDy };
         panRef.current = nextPan;
         gState.lastCenter = currentCenter;
-        setPan(nextPan);
 
-        // 3. Two-Finger Touch Rotation (Bearing Twist) - Instantaneous 1:1 Direct Tracking
         const angleDelta = currentAngle - gState.initialAngle;
         let newBearing = (gState.initialBearing + angleDelta + 360) % 360;
         if (Math.abs(newBearing) < 2.0 || Math.abs(newBearing - 360) < 2.0) {
@@ -1516,13 +1610,22 @@ function MapCanvas({
         targetBearingRef.current = newBearing;
         bearingRef.current = newBearing;
         visualBearingRef.current = newBearing;
-        setVisualBearing(newBearing);
 
         if (now - lastBearingReportTimeRef.current > 40) {
           lastBearingReportTimeRef.current = now;
           onBearingChange?.(newBearing);
         }
         onUserPan?.();
+
+        if (touchRafRef.current === null) {
+          touchRafRef.current = requestAnimationFrame(() => {
+            touchRafRef.current = null;
+            setVisualZoom(visualZoomRef.current);
+            setInternalZoom(internalZoomRef.current);
+            setPan(panRef.current);
+            setVisualBearing(visualBearingRef.current);
+          });
+        }
       } else if (e.touches.length === 1) {
         e.preventDefault();
         const touch = e.touches[0];
@@ -1548,7 +1651,8 @@ function MapCanvas({
         const dx = rawDx * Math.cos(rad) - rawDy * Math.sin(rad);
         const dy = rawDx * Math.sin(rad) + rawDy * Math.cos(rad);
 
-        setPan((prev) => ({ x: prev.x + dx, y: prev.y + dy }));
+        const nextPan = { x: panRef.current.x + dx, y: panRef.current.y + dy };
+        panRef.current = nextPan;
 
         const rawVx = ((touch.clientX - lastTouchPosRef.current.x) * uniformScale) / (dt / 16);
         const rawVy = ((touch.clientY - lastTouchPosRef.current.y) * uniformScale) / (dt / 16);
@@ -1559,11 +1663,26 @@ function MapCanvas({
         gState.lastPos = { x: touch.clientX, y: touch.clientY };
         lastTouchPosRef.current = { x: touch.clientX, y: touch.clientY };
         lastTouchTimeRef.current = now;
+
+        if (touchRafRef.current === null) {
+          touchRafRef.current = requestAnimationFrame(() => {
+            touchRafRef.current = null;
+            setPan(panRef.current);
+          });
+        }
       }
     };
 
     const handleTouchEnd = (e: TouchEvent) => {
       isInteractingRef.current = false;
+      if (touchRafRef.current !== null) {
+        cancelAnimationFrame(touchRafRef.current);
+        touchRafRef.current = null;
+        setVisualZoom(visualZoomRef.current);
+        setInternalZoom(internalZoomRef.current);
+        setPan(panRef.current);
+        setVisualBearing(visualBearingRef.current);
+      }
       onBearingChange?.(bearingRef.current);
       const gState = touchGestureRef.current;
       if (e.touches.length === 0) {
@@ -1595,6 +1714,14 @@ function MapCanvas({
 
     const handleTouchCancel = () => {
       isInteractingRef.current = false;
+      if (touchRafRef.current !== null) {
+        cancelAnimationFrame(touchRafRef.current);
+        touchRafRef.current = null;
+        setVisualZoom(visualZoomRef.current);
+        setInternalZoom(internalZoomRef.current);
+        setPan(panRef.current);
+        setVisualBearing(visualBearingRef.current);
+      }
       touchGestureRef.current = {
         mode: "NONE",
         initialDist: 0,
@@ -1671,9 +1798,6 @@ function MapCanvas({
             strokeWidth="0.75"
           />
         </pattern>
-        <filter id="bldShadow" x="-20%" y="-20%" width="150%" height="150%">
-          <feDropShadow dx="-4" dy="8" stdDeviation="6" floodColor="#0f172a" floodOpacity="0.18" />
-        </filter>
         <linearGradient id="bldFillGrad" x1="0" y1="0" x2="0" y2="1">
           <stop offset="0%" stopColor="#818cf8" stopOpacity="0.14" />
           <stop offset="100%" stopColor="#3b82f6" stopOpacity="0.08" />
@@ -1720,61 +1844,59 @@ function MapCanvas({
         )}
 
         {/* ── 1. Parking Lots Layer ── */}
-        {scopeNodes
-          .filter((n) => n.type === "PARKING" || (n.name && n.name.toLowerCase().includes("parking")))
-          .map((pn) => (
-            <g key={`parking-bay-${pn.id}`} transform={`translate(${pn.x}, ${pn.y})`}>
-              {/* Parking Pad Area */}
+        {categorizedScopeNodes.parking.map((pn) => (
+          <g key={`parking-bay-${pn.id}`} transform={`translate(${pn.x}, ${pn.y})`}>
+            {/* Parking Pad Area */}
+            <rect
+              x="-36"
+              y="-24"
+              width="72"
+              height="48"
+              rx="6"
+              fill="#1e293b"
+              fillOpacity="0.08"
+              stroke="#64748b"
+              strokeWidth="1.5"
+              strokeDasharray="4 3"
+            />
+            {/* Parking Stall Divider Markings */}
+            <line x1="-18" y1="-22" x2="-18" y2="22" stroke="#94a3b8" strokeWidth="1" strokeDasharray="3 3" opacity="0.6" />
+            <line x1="0" y1="-22" x2="0" y2="22" stroke="#94a3b8" strokeWidth="1" strokeDasharray="3 3" opacity="0.6" />
+            <line x1="18" y1="-22" x2="18" y2="22" stroke="#94a3b8" strokeWidth="1" strokeDasharray="3 3" opacity="0.6" />
+            {/* Distinct Parking Badge */}
+            <g transform="translate(0, -28)">
               <rect
-                x="-36"
-                y="-24"
-                width="72"
-                height="48"
-                rx="6"
-                fill="#1e293b"
-                fillOpacity="0.08"
-                stroke="#64748b"
+                x="-32"
+                y="-9"
+                width="64"
+                height="18"
+                rx="9"
+                fill="#0284c7"
+                stroke="#ffffff"
                 strokeWidth="1.5"
-                strokeDasharray="4 3"
+                className="shadow-sm"
               />
-              {/* Parking Stall Divider Markings */}
-              <line x1="-18" y1="-22" x2="-18" y2="22" stroke="#94a3b8" strokeWidth="1" strokeDasharray="3 3" opacity="0.6" />
-              <line x1="0" y1="-22" x2="0" y2="22" stroke="#94a3b8" strokeWidth="1" strokeDasharray="3 3" opacity="0.6" />
-              <line x1="18" y1="-22" x2="18" y2="22" stroke="#94a3b8" strokeWidth="1" strokeDasharray="3 3" opacity="0.6" />
-              {/* Distinct Parking Badge */}
-              <g transform="translate(0, -28)">
-                <rect
-                  x="-32"
-                  y="-9"
-                  width="64"
-                  height="18"
-                  rx="9"
-                  fill="#0284c7"
-                  stroke="#ffffff"
-                  strokeWidth="1.5"
-                  className="shadow-sm"
-                />
-                <text
-                  x="0"
-                  y="3"
-                  textAnchor="middle"
-                  fill="#ffffff"
-                  fontSize="8.5"
-                  fontWeight="800"
-                  letterSpacing="0.02em"
-                >
-                  🅿️ Parking
-                </text>
-              </g>
+              <text
+                x="0"
+                y="3"
+                textAnchor="middle"
+                fill="#ffffff"
+                fontSize="8.5"
+                fontWeight="800"
+                letterSpacing="0.02em"
+              >
+                🅿️ Parking
+              </text>
             </g>
-          ))}
+          </g>
+        ))}
 
         {/* ── 3. Roadway Network (Asphalt Roads with Dual Curbing & Centerline Markings) ── */}
         {scopeEdges
           .filter((e) => e.type === "ROAD" || e.pathType === "EV")
           .map((e) => {
-            const from = allNodes.find((n) => n.id === e.from);
-            const to = allNodes.find((n) => n.id === e.to);
+            const from = findNode(e.fromNodeId ?? e.from);
+            const to = findNode(e.toNodeId ?? e.to);
             if (!from || !to) return null;
 
             const baseId = e.id.replace(/_rev$/, "");
@@ -1831,8 +1953,8 @@ function MapCanvas({
         {scopeEdges
           .filter((e) => e.type !== "ROAD" && e.pathType !== "EV")
           .map((e) => {
-            const from = allNodes.find((n) => n.id === e.from);
-            const to = allNodes.find((n) => n.id === e.to);
+            const from = findNode(e.fromNodeId ?? e.from);
+            const to = findNode(e.toNodeId ?? e.to);
             if (!from || !to) return null;
 
             const baseId = e.id.replace(/_rev$/, "");
@@ -1874,165 +1996,150 @@ function MapCanvas({
 
         {/* ── 5. N-Corner Polygon Buildings Geometry (Styled 1-to-1 with Admin Digital Twin Editor) ── */}
         <g>
-          {buildings.map((b) => {
-            const canvasPts = getBuildingCanvasPoints(b);
-            const svgPath = getPolygonSvgPath(canvasPts);
-            const centerPos = getBuildingCenter(b);
+          {memoizedBuildingGeometries.map(({ b, svgPath, centerPos, badgeWidth, buildingEvent, strokeColor, bName }) => (
+            <g key={`bld-poly-${b.id}`} pointerEvents="none" className="select-none">
+              {/* 1. Outer Glow Polygon Outline */}
+              <path
+                d={svgPath}
+                fill="none"
+                stroke={strokeColor}
+                strokeWidth="5"
+                strokeOpacity="0.2"
+                strokeLinejoin="round"
+              />
 
-            const buildingEvent = publishedData.events.find((ev) => ev.buildingId === b.id);
-            const strokeColor = buildingEvent?.color || b.color || "#4f46e5";
-            const bName = b.name;
-            const badgeWidth = Math.max(140, bName.length * 8.5 + 32);
+              {/* 2. Solid Light-Theme Building Polygon Footprint */}
+              <path
+                d={svgPath}
+                fill="url(#bldFillGrad)"
+                stroke={strokeColor}
+                strokeWidth={buildingEvent ? "3" : "2.5"}
+                strokeDasharray={floorId !== "f-out" && !isGroundFloor ? "6 4" : undefined}
+                strokeLinejoin="round"
+              />
 
-            return (
-              <g key={`bld-poly-${b.id}`} pointerEvents="none" className="select-none">
-                {/* 1. Outer Glow Polygon Outline */}
-                <path
-                  d={svgPath}
-                  fill="none"
-                  stroke={strokeColor}
-                  strokeWidth="5"
-                  strokeOpacity="0.2"
-                  strokeLinejoin="round"
-                />
+              {/* 3. Inner Architectural Accent Polygon Line */}
+              <path
+                d={svgPath}
+                fill="none"
+                stroke={strokeColor}
+                strokeWidth="1"
+                strokeOpacity="0.3"
+                strokeDasharray="4 4"
+                strokeLinejoin="round"
+                transform={`translate(${centerPos.x}, ${centerPos.y}) scale(0.92) translate(${-centerPos.x}, ${-centerPos.y})`}
+              />
 
-                {/* 2. Solid Light-Theme Building Polygon Footprint */}
-                <path
-                  d={svgPath}
-                  fill="url(#bldFillGrad)"
-                  stroke={strokeColor}
-                  strokeWidth={buildingEvent ? "3" : "2.5"}
-                  strokeDasharray={floorId !== "f-out" && !isGroundFloor ? "6 4" : undefined}
-                  strokeLinejoin="round"
-                />
-
-                {/* 3. Inner Architectural Accent Polygon Line */}
-                <path
-                  d={svgPath}
-                  fill="none"
-                  stroke={strokeColor}
-                  strokeWidth="1"
-                  strokeOpacity="0.3"
-                  strokeDasharray="4 4"
-                  strokeLinejoin="round"
-                  transform={`translate(${centerPos.x}, ${centerPos.y}) scale(0.92) translate(${-centerPos.x}, ${-centerPos.y})`}
-                />
-
-                {/* 4. Clean Floating Google-Maps-Style Building Header Badge Centered on Polygon Centroid */}
-                {showNodeNames && (
-                  <g transform={`translate(${centerPos.x}, ${centerPos.y})`}>
-                    <rect
-                      x={-badgeWidth / 2}
-                      y="-15"
-                      width={badgeWidth}
-                      height="30"
-                      rx="15"
-                      fill="#ffffff"
-                      stroke={strokeColor}
-                      strokeWidth="1.75"
-                      className="shadow-md"
-                    />
-                    <text
-                      x="0"
-                      y="4"
-                      textAnchor="middle"
-                      fill="#1e1b4b"
-                      fontSize="13"
-                      fontWeight="800"
-                      letterSpacing="0.01em"
-                      className="select-none pointer-events-none"
-                    >
-                      <tspan fontSize="14">🏢 </tspan>
-                      <tspan>{bName}</tspan>
-                    </text>
-                  </g>
-                )}
-              </g>
-            );
-          })}
+              {/* 4. Clean Floating Google-Maps-Style Building Header Badge Centered on Polygon Centroid */}
+              {showNodeNames && (
+                <g transform={`translate(${centerPos.x}, ${centerPos.y})`}>
+                  <rect
+                    x={-badgeWidth / 2}
+                    y="-15"
+                    width={badgeWidth}
+                    height="30"
+                    rx="15"
+                    fill="#ffffff"
+                    stroke={strokeColor}
+                    strokeWidth="1.75"
+                    className="shadow-md"
+                  />
+                  <text
+                    x="0"
+                    y="4"
+                    textAnchor="middle"
+                    fill="#1e1b4b"
+                    fontSize="13"
+                    fontWeight="800"
+                    letterSpacing="0.01em"
+                    className="select-none pointer-events-none"
+                  >
+                    <tspan fontSize="14">🏢 </tspan>
+                    <tspan>{bName}</tspan>
+                  </text>
+                </g>
+              )}
+            </g>
+          ))}
         </g>
 
         {/* ── 6. Campus Gates Layer ── */}
-        {scopeNodes
-          .filter((n) => n.type === "GATE" || (n.name && n.name.toLowerCase().includes("gate")))
-          .map((gn) => {
-            const gateName = gn.name || "Campus Gate";
-            const gateWidth = Math.max(90, gateName.length * 7 + 28);
-            return (
-              <g key={`gate-${gn.id}`} transform={`translate(${gn.x}, ${gn.y})`}>
-                {/* Gate Security Barrier Indicator */}
-                <line x1="-18" y1="0" x2="18" y2="0" stroke="#f59e0b" strokeWidth="3" strokeDasharray="4 2" strokeLinecap="round" />
-                {/* Left & Right Security Pillars */}
-                <rect x="-22" y="-5" width="6" height="10" rx="2" fill="#d97706" stroke="#ffffff" strokeWidth="1" />
-                <rect x="16" y="-5" width="6" height="10" rx="2" fill="#d97706" stroke="#ffffff" strokeWidth="1" />
-                {/* Gate Badge */}
-                {showNodeNames && (
-                  <g transform="translate(0, -18)">
-                    <rect
-                      x={-gateWidth / 2}
-                      y="-10"
-                      width={gateWidth}
-                      height="20"
-                      rx="10"
-                      fill="#d97706"
-                      stroke="#ffffff"
-                      strokeWidth="1.5"
-                      className="shadow-md"
-                    />
-                    <text
-                      x="0"
-                      y="3.5"
-                      textAnchor="middle"
-                      fill="#ffffff"
-                      fontSize="9.5"
-                      fontWeight="900"
-                      letterSpacing="0.02em"
-                    >
-                      ⛩️ {gateName}
-                    </text>
-                  </g>
-                )}
-              </g>
-            );
-          })}
+        {categorizedScopeNodes.gates.map((gn) => {
+          const gateName = gn.name || "Campus Gate";
+          const gateWidth = Math.max(90, gateName.length * 7 + 28);
+          return (
+            <g key={`gate-${gn.id}`} transform={`translate(${gn.x}, ${gn.y})`}>
+              {/* Gate Security Barrier Indicator */}
+              <line x1="-18" y1="0" x2="18" y2="0" stroke="#f59e0b" strokeWidth="3" strokeDasharray="4 2" strokeLinecap="round" />
+              {/* Left & Right Security Pillars */}
+              <rect x="-22" y="-5" width="6" height="10" rx="2" fill="#d97706" stroke="#ffffff" strokeWidth="1" />
+              <rect x="16" y="-5" width="6" height="10" rx="2" fill="#d97706" stroke="#ffffff" strokeWidth="1" />
+              {/* Gate Badge */}
+              {showNodeNames && (
+                <g transform="translate(0, -18)">
+                  <rect
+                    x={-gateWidth / 2}
+                    y="-10"
+                    width={gateWidth}
+                    height="20"
+                    rx="10"
+                    fill="#d97706"
+                    stroke="#ffffff"
+                    strokeWidth="1.5"
+                    className="shadow-md"
+                  />
+                  <text
+                    x="0"
+                    y="3.5"
+                    textAnchor="middle"
+                    fill="#ffffff"
+                    fontSize="9.5"
+                    fontWeight="900"
+                    letterSpacing="0.02em"
+                  >
+                    ⛩️ {gateName}
+                  </text>
+                </g>
+              )}
+            </g>
+          );
+        })}
 
         {/* ── 7. Building Entrances Layer ── */}
-        {scopeNodes
-          .filter((n) => n.type === "BUILDING_ENTRANCE" || n.isEntranceNode || (n.type === "ENTRANCE" && floorId === "f-out"))
-          .map((en) => {
-            const entranceName = en.name || "Entrance";
-            const badgeW = Math.max(75, entranceName.length * 6 + 22);
-            return (
-              <g key={`entrance-${en.id}`} transform={`translate(${en.x}, ${en.y})`}>
-                {/* Entrance Canopy Pill Badge */}
-                {showNodeNames && (
-                  <>
-                    <rect
-                      x={-badgeW / 2}
-                      y="-9"
-                      width={badgeW}
-                      height="18"
-                      rx="9"
-                      fill="#059669"
-                      stroke="#ffffff"
-                      strokeWidth="1.5"
-                      className="shadow-sm"
-                    />
-                    <text
-                      x="0"
-                      y="3"
-                      textAnchor="middle"
-                      fill="#ffffff"
-                      fontSize="8.5"
-                      fontWeight="800"
-                    >
-                      {entranceName}
-                    </text>
-                  </>
-                )}
-              </g>
-            );
-          })}
+        {categorizedScopeNodes.entrances.map((en) => {
+          const entranceName = en.name || "Entrance";
+          const badgeW = Math.max(75, entranceName.length * 6 + 22);
+          return (
+            <g key={`entrance-${en.id}`} transform={`translate(${en.x}, ${en.y})`}>
+              {/* Entrance Canopy Pill Badge */}
+              {showNodeNames && (
+                <>
+                  <rect
+                    x={-badgeW / 2}
+                    y="-9"
+                    width={badgeW}
+                    height="18"
+                    rx="9"
+                    fill="#059669"
+                    stroke="#ffffff"
+                    strokeWidth="1.5"
+                    className="shadow-sm"
+                  />
+                  <text
+                    x="0"
+                    y="3"
+                    textAnchor="middle"
+                    fill="#ffffff"
+                    fontSize="8.5"
+                    fontWeight="800"
+                  >
+                    {entranceName}
+                  </text>
+                </>
+              )}
+            </g>
+          );
+        })}
 
         {/* Published Obstacles / Hazards Layer */}
         {showObstacles && (
@@ -2054,7 +2161,7 @@ function MapCanvas({
                 );
               })
               .map((obs) => {
-                const targetNode = obs.nodeId ? allNodes.find((n) => n.id === obs.nodeId) : null;
+                const targetNode = obs.nodeId ? findNode(obs.nodeId) : null;
                 const obsX = obs.x ?? targetNode?.x ?? 400;
                 const obsY = obs.y ?? targetNode?.y ?? 300;
                 const isRouteOnly = Boolean(obs.edgeIds && obs.edgeIds.length > 0);
@@ -2163,7 +2270,7 @@ function MapCanvas({
 
         {/* Multimodal Transfer Node Badge: Only show when EV Mode is selected and transitions to a pedestrian-only walkway */}
         {route?.transferNodeId && (route.travelMode === "EV" || route.travelMode === "MULTIMODAL") && (route.evDistance ?? 0) > 0 && (() => {
-          const transNode = allNodes.find((n) => n.id === route.transferNodeId);
+          const transNode = findNode(route.transferNodeId);
           if (!transNode || (transNode.floorId !== floorId && floorId !== "f-out")) return null;
           return (
             <g transform={`translate(${transNode.x}, ${transNode.y - 18})`}>

@@ -417,7 +417,7 @@ export function NavigateShell() {
         title: "All Routes Have Obstacles",
         description: "No 100% obstacle-free path exists. Routing through the least obstructed path.",
       });
-    } else {
+    } else if (!live) {
       const stopCount = currentStops.filter((s) => s.dest).length;
       const modeSummary = mode === "EV"
         ? (isMultimodal ? `🚗 ${Math.round(evDist)}m Drive + 🚶 ${Math.round(walkDist)}m Walk` : "🚗 EV Mode")
