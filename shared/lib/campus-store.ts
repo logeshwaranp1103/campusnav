@@ -524,6 +524,23 @@ class CampusStore {
     (this.obstacles || []).forEach((o) => mergedObstacleMap.set(o.id, o));
     const mergedObstacles = Array.from(mergedObstacleMap.values());
 
+    // Instant Live Sync Mode: Serve live working draft directly without requiring Publish
+    if (this.getInstantLiveSync()) {
+      return {
+        campus: this.campus,
+        buildings: [...this.buildings],
+        floors: [...this.floors],
+        nodes: [...this.nodes],
+        edges: [...this.edges],
+        destinations: [...this.destinations],
+        events: [...(this.events || [])],
+        obstacles: mergedObstacles,
+        stairGroups: [...(this.stairGroups || [])],
+        liftGroups: [...(this.liftGroups || [])],
+        doors: [...(this.doors || [])],
+      };
+    }
+
     const workingBldMap = new Map<string, Building>(this.buildings.map((b) => [b.id, b]));
     const rawPublished = this.publishedGraph.buildings || [];
     const publishedBuildings = rawPublished.map((pb) => {
@@ -3668,6 +3685,51 @@ class CampusStore {
         doors: this.doors.length,
       },
     };
+  }
+
+  private showAlternativeRoute: boolean = false;
+
+  public getShowAlternativeRoute(): boolean {
+    if (typeof window !== "undefined") {
+      const stored = localStorage.getItem("campusnav_setting_show_alt_route");
+      if (stored !== null) return stored === "true";
+    }
+    return this.showAlternativeRoute;
+  }
+
+  public setShowAlternativeRoute(show: boolean): void {
+    this.showAlternativeRoute = show;
+    if (typeof window !== "undefined") {
+      localStorage.setItem("campusnav_setting_show_alt_route", String(show));
+    }
+    this.notify();
+  }
+
+  private instantLiveSync: boolean = false;
+
+  public getInstantLiveSync(): boolean {
+    if (typeof window !== "undefined") {
+      const stored = localStorage.getItem("campusnav_setting_instant_live_sync");
+      if (stored !== null) return stored === "true";
+    }
+    return this.instantLiveSync;
+  }
+
+  public setInstantLiveSync(enabled: boolean): void {
+    this.instantLiveSync = enabled;
+    if (typeof window !== "undefined") {
+      localStorage.setItem("campusnav_setting_instant_live_sync", String(enabled));
+    }
+    this.notify();
+    if (this.broadcastChannel) {
+      try {
+        this.broadcastChannel.postMessage({
+          type: "SETTING_CHANGE",
+          clientId: this.clientId,
+          instantLiveSync: enabled,
+        });
+      } catch {}
+    }
   }
 }
 

@@ -17,6 +17,7 @@ import { getValidNavigationDestinations } from "@/shared/lib/destination-utils";
 import { useVisitorGps } from "@/shared/hooks/use-visitor-gps";
 import { GpsStatusIndicator } from "@/features/location/components/gps-status-indicator";
 import { getBuildingCanvasPoints, getBuildingCenter, getPolygonPointsString } from "@/lib/geo/building-geometry";
+import { computeDesktopWheelMultiplier } from "@/shared/lib/map-config";
 
 // ─── Pan/Zoom/Rotation types ────────────────────────────────────────────────────────────
 type Transform = { x: number; y: number; scale: number; rotation: number };
@@ -206,26 +207,7 @@ export default function VisitorPage() {
     const container = svgContainerRef.current;
     if (!container) return;
 
-    let zoomMultiplier: number;
-    if (e.ctrlKey) {
-      // Laptop touchpad pinch gesture: continuous proportional exponential scale
-      const clampedDelta = Math.min(60, Math.max(-60, e.deltaY));
-      zoomMultiplier = Math.exp(-clampedDelta * 0.008);
-    } else if (e.deltaMode === WheelEvent.DOM_DELTA_PIXEL) {
-      // Laptop touchpad two-finger swipe up/down (continuous pixel stream)
-      const clampedDelta = Math.min(80, Math.max(-80, e.deltaY));
-      zoomMultiplier = Math.exp(-clampedDelta * 0.0012);
-    } else {
-      // Physical discrete mouse wheel (DOM_DELTA_LINE or DOM_DELTA_PAGE)
-      let delta = e.deltaY;
-      if (e.deltaMode === WheelEvent.DOM_DELTA_LINE) {
-        delta *= 20;
-      } else if (e.deltaMode === WheelEvent.DOM_DELTA_PAGE) {
-        delta *= 200;
-      }
-      const normalizedDelta = Math.min(120, Math.max(-120, delta));
-      zoomMultiplier = Math.exp(-normalizedDelta * 0.0018);
-    }
+    const zoomMultiplier = computeDesktopWheelMultiplier(e.deltaY, e.ctrlKey, e.deltaMode);
 
     const prev = targetTransformRef.current;
     const newScale = Math.min(MAX_SCALE, Math.max(MIN_SCALE, prev.scale * zoomMultiplier));

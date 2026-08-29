@@ -13,6 +13,8 @@ import {
   Compass,
   PencilRuler,
   Footprints,
+  Route,
+  Zap,
 } from "lucide-react";
 import { PageHeader } from "@/features/admin/components/page-header";
 import { Card, CardTitle, CardDescription } from "@/shared/components/ui/card";
@@ -32,11 +34,17 @@ const quickActions = [
 
 export default function AdminHome() {
   const [storeData, setStoreData] = useState(() => campusStore.getWorkingData());
+  const [showAltRoute, setShowAltRoute] = useState(() => campusStore.getShowAlternativeRoute());
+  const [instantSync, setInstantSync] = useState(() => campusStore.getInstantLiveSync());
 
   useEffect(() => {
     setStoreData(campusStore.getWorkingData());
+    setShowAltRoute(campusStore.getShowAlternativeRoute());
+    setInstantSync(campusStore.getInstantLiveSync());
     const unsubscribe = campusStore.subscribe(() => {
       setStoreData(campusStore.getWorkingData());
+      setShowAltRoute(campusStore.getShowAlternativeRoute());
+      setInstantSync(campusStore.getInstantLiveSync());
     });
     return unsubscribe;
   }, []);
@@ -57,15 +65,15 @@ export default function AdminHome() {
         title="Main Campus Dashboard"
         description="Live overview of the campus graph. Use the CAD Editor to visually build & edit the map."
         action={
-          <Badge variant="success">
-            <span className="mr-1.5 inline-flex h-1.5 w-1.5 rounded-full bg-[rgb(var(--success))] pulse-dot" />
-            Published · v1.0
+          <Badge variant={instantSync ? "warning" : "success"}>
+            <span className={`mr-1.5 inline-flex h-1.5 w-1.5 rounded-full pulse-dot ${instantSync ? "bg-amber-500" : "bg-[rgb(var(--success))]"}`} />
+            {instantSync ? "Live Draft Mode · Instant Sync" : "Published Mode · v1.0"}
           </Badge>
         }
       />
 
       {/* Featured CAD Editor Banner */}
-      <div className="mb-6 rounded-xl border border-[rgb(var(--primary)/0.3)] bg-gradient-to-r from-[rgb(var(--primary)/0.08)] via-[rgb(var(--card))] to-[rgb(var(--primary)/0.04)] p-5 shadow-sm">
+      <div className="mb-4 rounded-xl border border-[rgb(var(--primary)/0.3)] bg-gradient-to-r from-[rgb(var(--primary)/0.08)] via-[rgb(var(--card))] to-[rgb(var(--primary)/0.04)] p-5 shadow-sm">
         <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
           <div className="flex items-center gap-3">
             <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl gradient-primary text-white shadow-md">
@@ -86,6 +94,93 @@ export default function AdminHome() {
               <Compass className="h-4 w-4" /> Open CAD Editor <ArrowRight className="h-3.5 w-3.5" />
             </Button>
           </Link>
+        </div>
+      </div>
+
+      {/* Control & Publishing Mode Settings */}
+      <div className="mb-6 grid grid-cols-1 md:grid-cols-2 gap-4">
+        {/* Instant Live Sync Without Publish Toggle */}
+        <div className="rounded-xl border border-[rgb(var(--border))] bg-[rgb(var(--card))] p-4 shadow-xs">
+          <div className="flex items-start justify-between gap-4">
+            <div className="flex items-center gap-3">
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-amber-50 dark:bg-amber-950/50 text-amber-600 dark:text-amber-400 border border-amber-200/60 dark:border-amber-800/60">
+                <Zap className="h-5 w-5" />
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <h3 className="text-sm font-semibold text-[rgb(var(--fg))]">Live Sync Without Publish</h3>
+                  <Badge variant={instantSync ? "success" : "default"} className="text-[10px]">
+                    {instantSync ? "Instant Mode" : "Requires Publish"}
+                  </Badge>
+                </div>
+                <p className="text-xs text-[rgb(var(--muted-fg))] mt-0.5">
+                  Show all new and edited buildings, nodes, paths, and destinations on the public user map immediately without needing to click Publish.
+                </p>
+              </div>
+            </div>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={instantSync}
+              onClick={() => {
+                const next = !instantSync;
+                setInstantSync(next);
+                campusStore.setInstantLiveSync(next);
+              }}
+              className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-500 ${
+                instantSync ? "bg-amber-500" : "bg-slate-300 dark:bg-slate-700"
+              }`}
+              title={instantSync ? "Switch to staged publish mode" : "Enable instant sync without publishing"}
+            >
+              <span
+                className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-lg ring-0 transition duration-200 ease-in-out ${
+                  instantSync ? "translate-x-5" : "translate-x-0"
+                }`}
+              />
+            </button>
+          </div>
+        </div>
+
+        {/* Alternative Routes Navigation Toggle */}
+        <div className="rounded-xl border border-[rgb(var(--border))] bg-[rgb(var(--card))] p-4 shadow-xs">
+          <div className="flex items-start justify-between gap-4">
+            <div className="flex items-center gap-3">
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-indigo-50 dark:bg-indigo-950/50 text-indigo-600 dark:text-indigo-400 border border-indigo-200/60 dark:border-indigo-800/60">
+                <Route className="h-5 w-5" />
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <h3 className="text-sm font-semibold text-[rgb(var(--fg))]">Alternative Routes</h3>
+                  <Badge variant={showAltRoute ? "success" : "default"} className="text-[10px]">
+                    {showAltRoute ? "Enabled on Map" : "Hidden"}
+                  </Badge>
+                </div>
+                <p className="text-xs text-[rgb(var(--muted-fg))] mt-0.5">
+                  Calculate and display the second shortest alternative route with light opacity on the user navigation map.
+                </p>
+              </div>
+            </div>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={showAltRoute}
+              onClick={() => {
+                const next = !showAltRoute;
+                setShowAltRoute(next);
+                campusStore.setShowAlternativeRoute(next);
+              }}
+              className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 ${
+                showAltRoute ? "bg-indigo-600" : "bg-slate-300 dark:bg-slate-700"
+              }`}
+              title={showAltRoute ? "Disable alternative route on user map" : "Enable alternative route on user map"}
+            >
+              <span
+                className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-lg ring-0 transition duration-200 ease-in-out ${
+                  showAltRoute ? "translate-x-5" : "translate-x-0"
+                }`}
+              />
+            </button>
+          </div>
         </div>
       </div>
 

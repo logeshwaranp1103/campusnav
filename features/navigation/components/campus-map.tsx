@@ -6,7 +6,7 @@ import { campusStore } from "@/shared/lib/campus-store";
 import type { Node, Building, Floor, Edge, Destination } from "@/shared/data/campus";
 import type { Route } from "@/features/navigation/services/graph";
 import { getObstructedEdgeIds } from "@/lib/routing/graph";
-import { Building2, Layers, Compass, Locate, AlertTriangle, ZoomIn, ZoomOut, Maximize2, Minimize2, ChevronDown, Navigation, Tag, RotateCcw, RotateCw } from "lucide-react";
+import { Building2, Layers, Compass, Locate, AlertTriangle, ZoomIn, ZoomOut, Maximize2, Minimize2, ChevronDown, Navigation, Tag, CircleDot, EyeOff, RotateCcw, RotateCw } from "lucide-react";
 import { useVisitorGps } from "@/shared/hooks/use-visitor-gps";
 import { PIXELS_PER_METER, gpsToCanvas } from "@/lib/geo/projection";
 import { getBuildingCanvasPoints, getBuildingCenter, getPolygonSvgPath, isPointInsideBuilding, isPointOutsideAllBuildings } from "@/lib/geo/building-geometry";
@@ -14,7 +14,9 @@ import { detectBuildingAtGps } from "@/lib/geo/containment";
 import { calculateShortestAngleDelta } from "@/lib/geo/haversine";
 import { DestinationDetailsDrawer } from "./destination-details-drawer";
 import { useNavigationStore } from "@/features/navigation/navigation-store";
-import { MAX_MAP_ZOOM, MIN_MAP_ZOOM, cleanStairLiftDisplayName } from "@/shared/lib/map-config";
+import { MAX_MAP_ZOOM, MIN_MAP_ZOOM, DESKTOP_DEFAULT_ZOOM, computeDesktopWheelMultiplier, cleanStairLiftDisplayName } from "@/shared/lib/map-config";
+
+export type NodeDisplayMode = "ALL" | "CIRCLES_ONLY" | "HIDDEN";
 
 /**
  * Computes roof elevated points for lightweight 3D isometric building extrusion.
@@ -87,9 +89,17 @@ export function CampusMap({
   const [resetTrigger, setResetTrigger] = useState(0);
   const [isFollowingUser, setIsFollowingUser] = useState(true);
 
-  // User Layer Toggle for Obstacles & Object/Node Names (hidden by default during live navigation)
+  // User Layer Toggle for Obstacles & Object/Node Names / Circles
   const [showObstacles, setShowObstacles] = useState(true);
-  const [showNodeNames, setShowNodeNames] = useState(!isNavigating);
+  const [nodeDisplayMode, setNodeDisplayMode] = useState<NodeDisplayMode>(isNavigating ? "HIDDEN" : "ALL");
+
+  const cycleNodeDisplayMode = useCallback(() => {
+    setNodeDisplayMode((prev) => {
+      if (prev === "ALL") return "CIRCLES_ONLY";
+      if (prev === "CIRCLES_ONLY") return "HIDDEN";
+      return "ALL";
+    });
+  }, []);
 
   // Avoid duplicate geolocation watcher by instantiating hook only when passedGps is missing
   const internalGps = useVisitorGps(undefined, { autoStart: !passedGps });
@@ -125,8 +135,8 @@ export function CampusMap({
     const wasNavigating = prevNavStatusRef.current === "NAVIGATING" || prevNavStatusRef.current === "OFF_ROUTE" || prevNavStatusRef.current === "REROUTING";
 
     if (isNowNavigating && (!wasNavigating || !isNavigating)) {
-      // Auto-hide all object and node names instantly when navigation starts
-      setShowNodeNames(false);
+      // Auto-hide all object and node names & background circles instantly when navigation starts
+      setNodeDisplayMode("HIDDEN");
 
       // Find the starting floor from selected origin, route origin, or live location
       const storeFloorId = useNavigationStore.getState().currentFloorId;
@@ -413,7 +423,7 @@ export function CampusMap({
         bearing={bearing}
         onBearingChange={setBearing}
         showObstacles={showObstacles}
-        showNodeNames={showNodeNames}
+        nodeDisplayMode={nodeDisplayMode}
         externalZoom={zoomLevel}
         resetTrigger={resetTrigger}
         isFollowingUser={isFollowingUser}
@@ -433,68 +443,55 @@ export function CampusMap({
         <button
           onClick={() => setIsFloorMenuOpen((v) => !v)}
           className={cn(
-            "flex items-center gap-2 rounded-2xl border border-[rgb(var(--border))] bg-[rgb(var(--card))]/95 px-3.5 py-2.5 text-xs font-bold shadow-xl backdrop-blur-md transition-all active:scale-95 cursor-pointer text-[rgb(var(--fg))] hover:bg-[rgb(var(--muted))]",
-            isFloorMenuOpen && "ring-2 ring-[rgb(var(--primary))] bg-[rgb(var(--card))]"
+            "flex items-center gap-1.5 rounded-2xl border border-white/60 dark:border-slate-800/60 bg-white/90 dark:bg-slate-900/90 px-3.5 py-2 text-xs font-semibold text-[rgb(var(--fg))] shadow-lg backdrop-blur-md transition-all active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500",
+            isFloorMenuOpen && "bg-indigo-600 text-white border-indigo-600 dark:bg-indigo-600 dark:border-indigo-600 shadow-indigo-500/20"
           )}
           aria-label={isFloorMenuOpen ? "Hide Floor Stack" : "Show Floor Stack"}
-          title={isFloorMenuOpen ? "Hide Floor Stack" : "Show Floor Stack"}
         >
-          <Layers className="h-4 w-4 text-[rgb(var(--primary))] shrink-0" />
+          <Layers className="h-4 w-4 shrink-0" />
           <span className="max-w-[150px] truncate">{activeFloorLabel}</span>
-          <ChevronDown className={cn("h-3.5 w-3.5 text-[rgb(var(--muted-fg))] transition-transform duration-200", isFloorMenuOpen && "rotate-180")} />
+          <ChevronDown className={cn("h-3.5 w-3.5 shrink-0 transition-transform duration-200", isFloorMenuOpen && "rotate-180")} />
         </button>
 
-        {/* Expandable / Collapsible Floor Stack Card */}
+        {/* Expandable Floor Selector Dropdown Stack */}
         {isFloorMenuOpen && (
-          <div className="flex max-h-[60vh] w-48 flex-col gap-1 overflow-y-auto rounded-2xl border bg-[rgb(var(--card))]/95 p-1.5 shadow-2xl backdrop-blur-md animate-in fade-in zoom-in-95 duration-150">
-            <span className="px-2.5 py-1 text-[10px] font-black uppercase tracking-wider text-[rgb(var(--muted-fg))]">
-              Select Level
-            </span>
-
-            {/* Outdoor Master Option */}
-            <button
+          <div className="flex flex-col gap-1 rounded-2xl border bg-[rgb(var(--card))]/95 p-1.5 shadow-2xl backdrop-blur-md max-h-[55vh] overflow-y-auto w-48 animate-in fade-in slide-in-from-top-2 duration-200">
+            {/* Outdoor Button */}
+            <FloorButton
+              active={activeView === "f-out"}
               onClick={() => {
                 setView("f-out");
                 setIsFloorMenuOpen(false);
               }}
-              className={cn(
-                "flex items-center gap-2.5 rounded-xl px-2.5 py-2 text-left text-xs font-bold transition-all active:scale-98 cursor-pointer",
-                activeView === "f-out"
-                  ? "bg-indigo-600 text-white shadow-md shadow-indigo-500/20"
-                  : "text-[rgb(var(--fg))] hover:bg-[rgb(var(--muted))]"
-              )}
-            >
-              <Building2 className="h-4 w-4 shrink-0" />
-              <span className="truncate">Outdoor</span>
-            </button>
+              icon={<Compass className="h-3.5 w-3.5 shrink-0 text-emerald-500" />}
+              label="Campus Outdoor"
+            />
 
-            {/* Dynamic Indoor Floors Grouped Cleanly */}
+            {indoorFloors.length > 0 && (
+              <div className="my-1 border-t border-[rgb(var(--border))]/60 px-2 pt-1 text-[10px] font-bold uppercase tracking-wider text-[rgb(var(--muted-fg))]">
+                Indoor Floors
+              </div>
+            )}
+
             {indoorFloors.map((fid) => {
-              const f = allFloors.find((x) => x.id === fid);
+              const f = publishedData.floors.find((x) => x.id === fid);
               if (!f) return null;
-              
-              const bld = publishedData.buildings?.find((b) => b.id === f.buildingId);
-              const bldCode = resolveCleanBuildingCode(bld, f.buildingId);
-              const floorDisplay = f.name.replace(/^(Building\s+[A-Z0-9_-]+|BLD\s+[A-Z0-9_-]+)\s*[-:]?\s*/i, "").trim() || f.name;
-              const cleanLabel = `${bldCode} - ${floorDisplay}`;
+              const b = getBuildingForFloor(f);
+              const bCode = resolveCleanBuildingCode(b, f.buildingId);
+              const floorDisplay = f.name || "Floor";
+              const cleanLabel = `${bCode} - ${floorDisplay}`;
 
               return (
-                <button
+                <FloorButton
                   key={fid}
+                  active={activeView === fid}
                   onClick={() => {
                     setView(fid);
                     setIsFloorMenuOpen(false);
                   }}
-                  className={cn(
-                    "flex items-center gap-2.5 rounded-xl px-2.5 py-2 text-left text-xs font-bold transition-all active:scale-98 cursor-pointer",
-                    activeView === fid
-                      ? "bg-indigo-600 text-white shadow-md shadow-indigo-500/20"
-                      : "text-[rgb(var(--fg))] hover:bg-[rgb(var(--muted))]"
-                  )}
-                >
-                  <Layers className="h-4 w-4 shrink-0 opacity-80" />
-                  <span className="truncate">{cleanLabel}</span>
-                </button>
+                  icon={<Building2 className="h-3.5 w-3.5 shrink-0 text-indigo-500" />}
+                  label={cleanLabel}
+                />
               );
             })}
           </div>
@@ -503,81 +500,50 @@ export function CampusMap({
 
       {/* ── Mid-Right Floating Map Tool Controls (Zoom, Fullscreen, Hazards, Node Labels, Compass) ── */}
       <div className={cn(
-        "absolute right-3 z-20 pointer-events-auto flex flex-col gap-2 items-center transition-all duration-300",
-        isNavigating ? "top-40 md:top-44" : "top-20 md:top-22"
+        "absolute right-3 z-20 pointer-events-auto flex flex-col items-end gap-2 transition-all duration-300",
+        isNavigating ? "top-40 md:top-44" : "top-20"
       )}>
-        {/* Interactive Magnetic Compass Widget */}
-        <button
-          onClick={resetBearingToNorth}
-          className="relative flex h-11 w-11 items-center justify-center rounded-2xl border bg-[rgb(var(--card))]/90 shadow-lg backdrop-blur-md hover:bg-[rgb(var(--muted))] active:scale-95 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[rgb(var(--primary))] cursor-pointer group"
-          title="Reset map to North (0°)"
-          aria-label="Compass - Reset to North"
-        >
-          <div
-            className="transition-transform duration-200 ease-out"
-            style={{ transform: `rotate(${-bearing}deg)` }}
+        {/* Reset Bearing Compass FAB (Sleek Smooth Reset) */}
+        {Math.abs(bearing) > 0.5 && (
+          <button
+            onClick={resetBearingToNorth}
+            className="flex h-11 w-11 items-center justify-center rounded-2xl border border-indigo-200/60 dark:border-indigo-800/60 bg-white/95 dark:bg-slate-900/95 shadow-lg backdrop-blur-md active:scale-95 transition-all text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-950/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 cursor-pointer animate-in fade-in zoom-in duration-200"
+            title="Reset Map to True North (0°)"
+            aria-label="Compass - Reset to North"
           >
-            <svg width="40" height="40" viewBox="0 0 40 40" fill="none" className="select-none">
-              {/* Outer Dial Circle */}
-              <circle cx="20" cy="20" r="18.5" stroke="#cbd5e1" strokeWidth="1.5" fill="none" opacity="0.6" />
-              
-              {/* Cardinal Tick Marks */}
-              <line x1="20" y1="3" x2="20" y2="7" stroke="#ef4444" strokeWidth="2" strokeLinecap="round" />
-              <line x1="20" y1="33" x2="20" y2="37" stroke="#94a3b8" strokeWidth="1.5" strokeLinecap="round" />
-              <line x1="3" y1="20" x2="7" y2="20" stroke="#94a3b8" strokeWidth="1.5" strokeLinecap="round" />
-              <line x1="33" y1="20" x2="37" y2="20" stroke="#94a3b8" strokeWidth="1.5" strokeLinecap="round" />
+            <div
+              className="relative flex items-center justify-center h-6 w-6 transition-transform duration-75"
+              style={{ transform: `rotate(${-bearing}deg)` }}
+            >
+              <Compass className="h-6 w-6 text-indigo-600 dark:text-indigo-400 stroke-[2.25]" />
+              <div className="absolute top-0.5 h-1.5 w-1.5 rounded-full bg-red-500" />
+            </div>
+          </button>
+        )}
 
-              {/* 4 Cardinal Letters (N, E, S, W) */}
-              <text x="20" y="10" textAnchor="middle" fill="#ef4444" fontSize="6.5" fontWeight="900">N</text>
-              <text x="31" y="22" textAnchor="middle" fill="#94a3b8" fontSize="5.5" fontWeight="800">E</text>
-              <text x="20" y="32" textAnchor="middle" fill="#94a3b8" fontSize="5.5" fontWeight="800">S</text>
-              <text x="9" y="22" textAnchor="middle" fill="#94a3b8" fontSize="5.5" fontWeight="800">W</text>
-
-              {/* Red North Needle */}
-              <polygon points="20,10 23,20 17,20" fill="#ef4444" />
-              {/* Slate South Needle */}
-              <polygon points="20,30 23,20 17,20" fill="#94a3b8" opacity="0.75" />
-              {/* Center Pivot Dot */}
-              <circle cx="20" cy="20" r="2.5" fill="#ffffff" stroke="#475569" strokeWidth="1.2" />
-            </svg>
-          </div>
-
-          {/* Active Bearing Badge when rotated */}
-          {Math.abs(bearing) > 2 && (
-            <span className="absolute -bottom-2 px-1 py-0.2 rounded-md bg-red-600 text-[8px] font-black text-white shadow-xs leading-tight">
-              {Math.round(((bearing % 360) + 360) % 360)}°
-            </span>
-          )}
-        </button>
-
-        {/* Zoom & Fullscreen Controls Stack */}
+        {/* Zoom & Fullscreen Control Stack */}
         <div className="flex flex-col gap-1 rounded-2xl border bg-[rgb(var(--card))]/90 p-1 shadow-lg backdrop-blur-md w-fit">
           <button
-            onClick={() => {
-              setZoomLevel((z) => Math.min(4, z * 1.35));
-              setIsFollowingUser(false);
-            }}
-            className="flex h-11 w-11 items-center justify-center rounded-xl text-[rgb(var(--fg))] hover:bg-[rgb(var(--muted))] active:scale-95 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[rgb(var(--primary))]"
+            onClick={() => setZoomLevel((z) => Math.min(MAX_MAP_ZOOM, z * 1.25))}
+            className="flex h-11 w-11 items-center justify-center rounded-xl text-[rgb(var(--fg))] hover:bg-[rgb(var(--muted))] active:scale-95 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 cursor-pointer"
             title="Zoom In"
             aria-label="Zoom In"
           >
             <ZoomIn className="h-5 w-5 stroke-[2.25]" />
           </button>
           <button
-            onClick={() => {
-              setZoomLevel((z) => Math.max(0.4, z / 1.25));
-              setIsFollowingUser(false);
-            }}
-            className="flex h-11 w-11 items-center justify-center rounded-xl text-[rgb(var(--fg))] hover:bg-[rgb(var(--muted))] active:scale-95 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[rgb(var(--primary))]"
+            onClick={() => setZoomLevel((z) => Math.max(MIN_MAP_ZOOM, z * 0.8))}
+            className="flex h-11 w-11 items-center justify-center rounded-xl text-[rgb(var(--fg))] hover:bg-[rgb(var(--muted))] active:scale-95 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 cursor-pointer"
             title="Zoom Out"
             aria-label="Zoom Out"
           >
             <ZoomOut className="h-5 w-5 stroke-[2.25]" />
           </button>
+          <div className="mx-1.5 border-t border-[rgb(var(--border))]/60" />
           <button
             onClick={toggleFullscreen}
-            className="flex h-11 w-11 items-center justify-center rounded-xl text-[rgb(var(--fg))] hover:bg-[rgb(var(--muted))] active:scale-95 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[rgb(var(--primary))] cursor-pointer"
-            title={isFullscreen ? "Exit Fullscreen" : "Fullscreen Map"}
+            className="flex h-11 w-11 items-center justify-center rounded-xl text-[rgb(var(--fg))] hover:bg-[rgb(var(--muted))] active:scale-95 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 cursor-pointer"
+            title={isFullscreen ? "Exit Fullscreen Map" : "Fullscreen Map"}
             aria-label={isFullscreen ? "Exit Fullscreen" : "Fullscreen Map"}
           >
             {isFullscreen ? (
@@ -588,19 +554,33 @@ export function CampusMap({
           </button>
         </div>
 
-        {/* Layer Toggles Stack (Object/Node Names & Hazards) */}
+        {/* Layer Toggles Stack (3-State Node Display Mode: All -> Circles Only -> Hidden & Hazards) */}
         <div className="flex flex-col gap-1 rounded-2xl border bg-[rgb(var(--card))]/90 p-1 shadow-lg backdrop-blur-md w-fit">
           <button
-            onClick={() => setShowNodeNames(!showNodeNames)}
+            onClick={cycleNodeDisplayMode}
             className={`flex h-11 w-11 items-center justify-center rounded-xl text-[11px] font-semibold active:scale-95 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 cursor-pointer ${
-              showNodeNames
+              nodeDisplayMode === "ALL"
                 ? "bg-indigo-500/15 text-indigo-600 dark:text-indigo-400 border border-indigo-500/30 shadow-xs"
+                : nodeDisplayMode === "CIRCLES_ONLY"
+                ? "bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/30 shadow-xs"
                 : "text-[rgb(var(--muted-fg))] hover:bg-[rgb(var(--muted))]"
             }`}
-            title={showNodeNames ? "Hide Object & Node Names" : "Show Object & Node Names"}
-            aria-label="Toggle Names"
+            title={
+              nodeDisplayMode === "ALL"
+                ? "Showing: Circles & Names (Click for Circles Only)"
+                : nodeDisplayMode === "CIRCLES_ONLY"
+                ? "Showing: Circles Only (Click to Hide All)"
+                : "Showing: Clean Map (Click to Show All)"
+            }
+            aria-label={`Node Display Mode: ${nodeDisplayMode}`}
           >
-            <Tag className={`h-5 w-5 shrink-0 stroke-[2.25] ${showNodeNames ? "text-indigo-500" : "opacity-40"}`} />
+            {nodeDisplayMode === "ALL" ? (
+              <Tag className="h-5 w-5 shrink-0 stroke-[2.25] text-indigo-500" />
+            ) : nodeDisplayMode === "CIRCLES_ONLY" ? (
+              <CircleDot className="h-5 w-5 shrink-0 stroke-[2.25] text-amber-500" />
+            ) : (
+              <EyeOff className="h-5 w-5 shrink-0 stroke-[2.25] opacity-40" />
+            )}
           </button>
           <button
             onClick={() => setShowObstacles(!showObstacles)}
@@ -685,7 +665,7 @@ function MapCanvas({
   bearing = 0,
   onBearingChange,
   showObstacles = true,
-  showNodeNames = true,
+  nodeDisplayMode = "ALL",
   showEvents = true,
   externalZoom = 1,
   resetTrigger = 0,
@@ -707,7 +687,7 @@ function MapCanvas({
   bearing?: number;
   onBearingChange?: (bearing: number) => void;
   showObstacles?: boolean;
-  showNodeNames?: boolean;
+  nodeDisplayMode?: NodeDisplayMode;
   showEvents?: boolean;
   externalZoom?: number;
   resetTrigger?: number;
@@ -720,6 +700,7 @@ function MapCanvas({
 }) {
   const { buildings, nodes: allNodes, edges: allEdges, destinations: allDestinations, events: allEvents } = publishedData;
   const svgRef = useRef<SVGSVGElement | null>(null);
+  const showNames = nodeDisplayMode === "ALL";
 
   // Interactive Pan & Zoom State
   const [internalZoom, setInternalZoom] = useState(1);
@@ -1128,7 +1109,7 @@ function MapCanvas({
       setVisualZoom(1);
       setInternalZoom(1);
     }
-  }, [resetTrigger, route, fromSelected?.id, toSelected?.id, livePosition, gps?.canvasPos, bounds, findNode]);
+  }, [resetTrigger, route?.id, fromSelected?.id, toSelected?.id]);
 
   const floorById = useMemo(() => {
     const map = new Map<string, Floor>();
@@ -1485,23 +1466,7 @@ function MapCanvas({
       e.preventDefault();
       onUserPan?.();
 
-      let zoomMultiplier: number;
-      if (e.ctrlKey) {
-        const clampedDelta = Math.min(60, Math.max(-60, e.deltaY));
-        zoomMultiplier = Math.exp(-clampedDelta * 0.008);
-      } else if (e.deltaMode === WheelEvent.DOM_DELTA_PIXEL) {
-        const clampedDelta = Math.min(80, Math.max(-80, e.deltaY));
-        zoomMultiplier = Math.exp(-clampedDelta * 0.0012);
-      } else {
-        let delta = e.deltaY;
-        if (e.deltaMode === WheelEvent.DOM_DELTA_LINE) {
-          delta *= 20;
-        } else if (e.deltaMode === WheelEvent.DOM_DELTA_PAGE) {
-          delta *= 200;
-        }
-        const normalizedDelta = Math.min(120, Math.max(-120, delta));
-        zoomMultiplier = Math.exp(-normalizedDelta * 0.0018);
-      }
+      const zoomMultiplier = computeDesktopWheelMultiplier(e.deltaY, e.ctrlKey, e.deltaMode);
 
       const prevVisualZoom = visualZoomRef.current || 1;
       const targetTotal = Math.min(MAX_MAP_ZOOM, Math.max(MIN_MAP_ZOOM, prevVisualZoom * zoomMultiplier));
@@ -2131,7 +2096,7 @@ function MapCanvas({
               />
 
               {/* 4. Clean Floating Google-Maps-Style Building Header Badge Centered on Polygon Centroid */}
-              {showNodeNames && (
+              {showNames && (
                 <g transform={`translate(${centerPos.x}, ${centerPos.y})`}>
                   <rect
                     x={-badgeWidth / 2}
@@ -2175,7 +2140,7 @@ function MapCanvas({
               <rect x="-22" y="-5" width="6" height="10" rx="2" fill="#d97706" stroke="#ffffff" strokeWidth="1" />
               <rect x="16" y="-5" width="6" height="10" rx="2" fill="#d97706" stroke="#ffffff" strokeWidth="1" />
               {/* Gate Badge */}
-              {showNodeNames && (
+              {showNames && (
                 <g transform="translate(0, -18)">
                   <rect
                     x={-gateWidth / 2}
@@ -2212,7 +2177,7 @@ function MapCanvas({
           return (
             <g key={`entrance-${en.id}`} transform={`translate(${en.x}, ${en.y})`}>
               {/* Entrance Canopy Pill Badge */}
-              {showNodeNames && (
+              {showNames && (
                 <>
                   <rect
                     x={-badgeW / 2}
@@ -2493,6 +2458,12 @@ function MapCanvas({
             const isRoom = n.type === "ROOM" || n.type === "LABORATORY" || n.type === "OFFICE" || n.type === "WASHROOM";
             const isStairOrLift = isStair || isLift;
 
+            // When nodeDisplayMode === "HIDDEN", keep only on-route nodes & destination nodes visible
+            const shouldRenderCircle = nodeDisplayMode !== "HIDDEN" || onRoute || isDest;
+            if (!shouldRenderCircle) return null;
+
+            const shouldRenderName = nodeDisplayMode === "ALL";
+
             const nodeColor = isDest
               ? "#10b981"
               : isStairOrLift
@@ -2540,7 +2511,7 @@ function MapCanvas({
                   className={isDest ? "animate-pulse" : undefined}
                 />
 
-                {rawName.length > 0 && showNodeNames && (
+                {rawName.length > 0 && shouldRenderName && (
                   <g transform={`translate(${n.x}, ${labelY})`}>
                     <rect
                       x={-labelWidth / 2}
@@ -2570,7 +2541,7 @@ function MapCanvas({
           })}
 
         {/* Floor Transition Badges for Stair & Lift Nodes on Route */}
-        {route && showNodeNames &&
+        {route && nodeDisplayMode !== "HIDDEN" &&
           routeNodes.map((n, idx) => {
             if (n.type !== "STAIR" && n.type !== "LIFT") return null;
             const nodeIdx = route.nodes.findIndex((rn) => rn.id === n.id);

@@ -310,8 +310,9 @@ export function NavigateShell() {
       endDest,
     ];
 
-    // Compute alternative second shortest route if direct 2-point route
-    if (waypoints.length === 2) {
+    // Compute alternative second shortest route if direct 2-point route and enabled in Admin settings
+    const isAltRouteEnabled = campusStore.getShowAlternativeRoute();
+    if (isAltRouteEnabled && waypoints.length === 2) {
       const segStart = waypoints[0];
       const segEnd = waypoints[1];
       const sId = segStart.id === YOUR_LOCATION_ID && liveStartCandidates.length > 0

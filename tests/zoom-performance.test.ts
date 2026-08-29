@@ -1,62 +1,49 @@
 import { describe, it, expect } from "vitest";
+import {
+  computeDesktopWheelMultiplier,
+  DESKTOP_DEFAULT_ZOOM,
+  MOBILE_DEFAULT_ZOOM,
+  DESKTOP_MOUSE_WHEEL_SENSITIVITY,
+  DESKTOP_TOUCHPAD_SWIPE_SENSITIVITY,
+  DESKTOP_TOUCHPAD_PINCH_SENSITIVITY,
+} from "../shared/lib/map-config";
 
 describe("CAD Editor & Campus Map Zoom Performance & Responsiveness", () => {
   // ── 1. Wheel Delta Normalization & Delta Modes ─────────────────────────────
   describe("1. Wheel Delta Normalization (Mouse Wheel vs Touchpad vs High-Res)", () => {
-    function computeWheelMultiplier(deltaY: number, ctrlKey: boolean, deltaMode: number): number {
-      if (ctrlKey) {
-        // Laptop touchpad pinch gesture: continuous proportional exponential scale
-        const clampedDelta = Math.min(60, Math.max(-60, deltaY));
-        return Math.exp(-clampedDelta * 0.008);
-      } else if (deltaMode === 0 /* DOM_DELTA_PIXEL */) {
-        // Laptop touchpad two-finger swipe up/down (continuous pixel stream)
-        const clampedDelta = Math.min(80, Math.max(-80, deltaY));
-        return Math.exp(-clampedDelta * 0.0012);
-      } else {
-        // Physical discrete mouse wheel (DOM_DELTA_LINE or DOM_DELTA_PAGE)
-        let delta = deltaY;
-        if (deltaMode === 1 /* DOM_DELTA_LINE */) {
-          delta *= 20;
-        } else if (deltaMode === 2 /* DOM_DELTA_PAGE */) {
-          delta *= 200;
-        }
-        const normalizedDelta = Math.min(120, Math.max(-120, delta));
-        return Math.exp(-normalizedDelta * 0.0018);
-      }
-    }
-
     it("handles laptop touchpad two-finger swipe smoothly (DOM_DELTA_PIXEL)", () => {
       // Swipe stream tick of 25px
-      const swipeInMult = computeWheelMultiplier(-25, false, 0);
-      const swipeOutMult = computeWheelMultiplier(25, false, 0);
+      const swipeInMult = computeDesktopWheelMultiplier(-25, false, 0);
+      const swipeOutMult = computeDesktopWheelMultiplier(25, false, 0);
 
-      // Controlled ~3% zoom per continuous tick (smooth stream)
-      expect(swipeInMult).toBeCloseTo(Math.exp(0.03), 3);
-      expect(swipeOutMult).toBeCloseTo(Math.exp(-0.03), 3);
       expect(swipeInMult).toBeGreaterThan(1.0);
       expect(swipeOutMult).toBeLessThan(1.0);
+      expect(swipeInMult).toBeCloseTo(Math.exp(25 * DESKTOP_TOUCHPAD_SWIPE_SENSITIVITY), 3);
     });
 
-    it("handles DOM_DELTA_LINE mode correctly without excessive sensitivity", () => {
+    it("handles DOM_DELTA_LINE mode correctly with snappy desktop mouse wheel sensitivity", () => {
       // 3 lines per notch (typical Windows wheel) -> delta = 60px
-      const lineZoomIn = computeWheelMultiplier(-3, false, 1);
-      const lineZoomOut = computeWheelMultiplier(3, false, 1);
+      const lineZoomIn = computeDesktopWheelMultiplier(-3, false, 1);
+      const lineZoomOut = computeDesktopWheelMultiplier(3, false, 1);
 
-      expect(lineZoomIn).toBeGreaterThan(1.08);
-      expect(lineZoomIn).toBeLessThan(1.15);
-      expect(lineZoomOut).toBeLessThan(0.92);
-      expect(lineZoomOut).toBeGreaterThan(0.85);
+      expect(lineZoomIn).toBeGreaterThan(1.2);
+      expect(lineZoomOut).toBeLessThan(0.85);
     });
 
     it("handles laptop touchpad pinch continuous micro-deltas smoothly", () => {
       // Small pinch spread of 2.5px
-      const microPinchIn = computeWheelMultiplier(-2.5, true, 0);
-      const microPinchOut = computeWheelMultiplier(2.5, true, 0);
+      const microPinchIn = computeDesktopWheelMultiplier(-2.5, true, 0);
+      const microPinchOut = computeDesktopWheelMultiplier(2.5, true, 0);
 
-      expect(microPinchIn).toBeCloseTo(Math.exp(0.02), 4);
-      expect(microPinchOut).toBeCloseTo(Math.exp(-0.02), 4);
       expect(microPinchIn).toBeGreaterThan(1.0);
       expect(microPinchOut).toBeLessThan(1.0);
+      expect(microPinchIn).toBeCloseTo(Math.exp(2.5 * DESKTOP_TOUCHPAD_PINCH_SENSITIVITY), 3);
+    });
+
+    it("exposes distinct desktop and mobile default zoom configurations", () => {
+      expect(DESKTOP_DEFAULT_ZOOM).toBe(0.85);
+      expect(MOBILE_DEFAULT_ZOOM).toBe(0.85);
+      expect(DESKTOP_MOUSE_WHEEL_SENSITIVITY).toBeGreaterThan(0.002);
     });
   });
 

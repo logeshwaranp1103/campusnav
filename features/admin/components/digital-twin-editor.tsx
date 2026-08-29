@@ -70,7 +70,7 @@ import {
   Flame,
   Accessibility,
 } from "lucide-react";
-import { MAX_MAP_ZOOM, MIN_MAP_ZOOM, cleanStairLiftDisplayName } from "@/shared/lib/map-config";
+import { MAX_MAP_ZOOM, MIN_MAP_ZOOM, computeDesktopWheelMultiplier, cleanStairLiftDisplayName } from "@/shared/lib/map-config";
 
 import { Button } from "@/shared/components/ui/button";
 import { Input } from "@/shared/components/ui/input";
@@ -749,26 +749,7 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
     const handleWheel = (e: WheelEvent) => {
       e.preventDefault();
 
-      let zoomMultiplier: number;
-      if (e.ctrlKey) {
-        // Laptop touchpad pinch gesture: continuous proportional exponential scale
-        const clampedDelta = Math.min(60, Math.max(-60, e.deltaY));
-        zoomMultiplier = Math.exp(-clampedDelta * 0.008);
-      } else if (e.deltaMode === WheelEvent.DOM_DELTA_PIXEL) {
-        // Laptop touchpad two-finger swipe up/down (continuous pixel stream)
-        const clampedDelta = Math.min(80, Math.max(-80, e.deltaY));
-        zoomMultiplier = Math.exp(-clampedDelta * 0.0012);
-      } else {
-        // Physical discrete mouse wheel (DOM_DELTA_LINE or DOM_DELTA_PAGE)
-        let delta = e.deltaY;
-        if (e.deltaMode === WheelEvent.DOM_DELTA_LINE) {
-          delta *= 20;
-        } else if (e.deltaMode === WheelEvent.DOM_DELTA_PAGE) {
-          delta *= 200;
-        }
-        const normalizedDelta = Math.min(120, Math.max(-120, delta));
-        zoomMultiplier = Math.exp(-normalizedDelta * 0.0018);
-      }
+      const zoomMultiplier = computeDesktopWheelMultiplier(e.deltaY, e.ctrlKey, e.deltaMode);
 
       const currentZoom = zoomRef.current || 1;
       const currentPan = panOffsetRef.current;
