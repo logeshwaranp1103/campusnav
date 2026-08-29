@@ -157,19 +157,19 @@ export function NavigateShell() {
   useEffect(() => {
     if (!live || !gps.isGpsActive) return;
     const matchedNode = livePos?.node ?? null;
-    updateGpsProgress(
+    useNavigationStore.getState().updateGpsProgress(
       gps.lat,
       gps.lng,
       matchedNode,
       publishedData.nodes || [],
-      (fromId, toId) => shortestPath(fromId, toId, { travelMode }),
+      (fromId: string, toId: string) => shortestPath(fromId, toId, { travelMode }),
       {
         canvasPos: gps.canvasPos,
         heading: gps.heading,
         speed: gps.speed,
       }
     );
-  }, [live, gps.lat, gps.lng, gps.isGpsActive, gps.canvasPos, gps.heading, gps.speed, livePos?.node, publishedData.nodes, travelMode, updateGpsProgress]);
+  }, [live, gps.lat, gps.lng, gps.isGpsActive, gps.canvasPos, gps.heading, gps.speed, livePos?.node, publishedData.nodes, travelMode]);
 
   // Handle URL query parameters for deep linking (?to=dest-id or ?from=dest-id)
   useEffect(() => {
