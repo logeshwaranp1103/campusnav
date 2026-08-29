@@ -224,4 +224,36 @@ describe("Production Backend & API Services", () => {
       expect(dbObstacle?.reason).toBe("Maintenance");
     }
   });
+
+  it("preserves the node when deleting or clearing reference photo metadata", () => {
+    const testNode: Node = {
+      id: "node-photo-preserve-test",
+      type: "ROOM",
+      name: "Chemistry Lab A",
+      floorId: "f-out",
+      x: 150,
+      y: 200,
+      photoUrl: "https://example.com/photo.jpg",
+      physicalVerified: true,
+    };
+
+    campusStore.addNode(testNode);
+    expect(campusStore.getWorkingData().nodes.find((n) => n.id === testNode.id)).toBeDefined();
+    expect(campusStore.getWorkingData().nodes.find((n) => n.id === testNode.id)?.photoUrl).toBe("https://example.com/photo.jpg");
+
+    // Remove photo from node (simulating the Remove Photo action)
+    campusStore.updateNode(testNode.id, {
+      photoUrl: undefined,
+      physicalVerified: false,
+    });
+
+    const updatedNode = campusStore.getWorkingData().nodes.find((n) => n.id === testNode.id);
+    expect(updatedNode).toBeDefined();
+    expect(updatedNode?.id).toBe(testNode.id);
+    expect(updatedNode?.name).toBe("Chemistry Lab A");
+    expect(updatedNode?.x).toBe(150);
+    expect(updatedNode?.y).toBe(200);
+    expect(updatedNode?.photoUrl).toBeUndefined();
+    expect(updatedNode?.physicalVerified).toBe(false);
+  });
 });

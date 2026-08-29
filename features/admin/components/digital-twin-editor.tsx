@@ -2872,6 +2872,7 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
                   const toN = storeData.nodes.find((n) => n.id === e.to);
                   if (!fromN || !toN) return null;
                   const isSelected = selectedElement?.type === "edge" && selectedElement.id === e.id;
+                  const isRoad = e.type === "ROAD" || e.pathType === "EV";
 
                   const isBlockedByObstacle = floorObstacles.some(
                     (obs) => obs.edgeIds && (obs.edgeIds.includes(e.id) || obs.edgeIds.includes(`${e.id}_rev`))
@@ -2879,14 +2880,14 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
 
                   return (
                     <g key={e.id}>
-                      {/* Transparent 14px hit target for instant single-click selection */}
+                      {/* Transparent 18px hit target for instant single-click selection */}
                       <line
                         x1={fromN.x}
                         y1={fromN.y}
                         x2={toN.x}
                         y2={toN.y}
                         stroke="transparent"
-                        strokeWidth="14"
+                        strokeWidth="18"
                         style={{ pointerEvents: "stroke" }}
                         onClick={(evt) => {
                           evt.stopPropagation();
@@ -2912,45 +2913,69 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
                         }}
                         className="cursor-pointer"
                       />
-                      <line
-                        x1={fromN.x}
-                        y1={fromN.y}
-                        x2={toN.x}
-                        y2={toN.y}
-                        stroke={
-                          isBlockedByObstacle
-                            ? "#ef4444"
-                            : isSelected
-                              ? "#4f46e5"
-                              : "#64748b"
-                        }
-                        strokeWidth={isSelected ? 4 : isBlockedByObstacle ? 3.5 : 2.5}
-                        strokeDasharray={isBlockedByObstacle ? "6 4" : e.type === "STAIRS" ? "4 4" : undefined}
-                        strokeOpacity={0.8}
-                        onClick={(evt) => {
-                          evt.stopPropagation();
-                          if (activeTool === "NODE") {
-                            const { x: rawX, y: rawY } = getCanvasCoords(evt);
-                            const dx = toN.x - fromN.x;
-                            const dy = toN.y - fromN.y;
-                            const l2 = dx * dx + dy * dy;
-                            let t = l2 === 0 ? 0 : ((rawX - fromN.x) * dx + (rawY - fromN.y) * dy) / l2;
-                            t = Math.max(0, Math.min(1, t));
-                            const projX = Math.round(fromN.x + t * dx);
-                            const projY = Math.round(fromN.y + t * dy);
 
-                            const newId = campusStore.splitEdgeWithNode(e.id, projX, projY, nodeType, nodeName);
-                            if (newId) {
-                              setSelectedElement({ type: "node", id: newId });
-                              toast({ type: "success", title: "Edge Split", description: `Inserted node on edge at (${projX}, ${projY}).` });
-                              setNodeName("");
-                            }
-                          } else if (activeTool !== "SIMULATE") {
-                            setSelectedElement({ type: "edge", id: e.id });
+                      {/* EV Path / Roadway Rendering: Asphalt base with curbs and dashed centerline */}
+                      {isRoad ? (
+                        <>
+                          {/* Outer Road Curb Casing */}
+                          <line
+                            x1={fromN.x}
+                            y1={fromN.y}
+                            x2={toN.x}
+                            y2={toN.y}
+                            stroke={isBlockedByObstacle ? "#ef4444" : isSelected ? "#4f46e5" : "#475569"}
+                            strokeWidth={isSelected ? 14 : 12}
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            opacity={0.9}
+                          />
+                          {/* Asphalt Core Roadbed */}
+                          <line
+                            x1={fromN.x}
+                            y1={fromN.y}
+                            x2={toN.x}
+                            y2={toN.y}
+                            stroke={isBlockedByObstacle ? "#fee2e2" : "#1e293b"}
+                            strokeWidth={isSelected ? 10 : 8}
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                          />
+                          {/* White Centerline Divider */}
+                          {!isBlockedByObstacle && (
+                            <line
+                              x1={fromN.x}
+                              y1={fromN.y}
+                              x2={toN.x}
+                              y2={toN.y}
+                              stroke="#f8fafc"
+                              strokeWidth="1.2"
+                              strokeDasharray="4 6"
+                              strokeOpacity="0.85"
+                              strokeLinecap="round"
+                            />
+                          )}
+                        </>
+                      ) : (
+                        /* Standard Pedestrian Path */
+                        <line
+                          x1={fromN.x}
+                          y1={fromN.y}
+                          x2={toN.x}
+                          y2={toN.y}
+                          stroke={
+                            isBlockedByObstacle
+                              ? "#ef4444"
+                              : isSelected
+                                ? "#4f46e5"
+                                : "#64748b"
                           }
-                        }}
-                        className="cursor-pointer hover:stroke-indigo-500 transition-colors"
-                      />
+                          strokeWidth={isSelected ? 4 : isBlockedByObstacle ? 3.5 : 2.5}
+                          strokeDasharray={isBlockedByObstacle ? "6 4" : e.type === "STAIRS" ? "4 4" : undefined}
+                          strokeOpacity={0.8}
+                          strokeLinecap="round"
+                          className="cursor-pointer hover:stroke-indigo-500 transition-colors"
+                        />
+                      )}
                     </g>
                   );
                 })}
@@ -4970,24 +4995,87 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
                       <div className="relative w-full overflow-hidden rounded-md border border-[rgb(var(--border))] bg-transparent flex items-center justify-center">
                         <img src={selectedNode.photoUrl} alt="Reference" className="w-full h-auto max-h-36 object-contain rounded-md" />
                       </div>
+                      <div className="grid grid-cols-2 gap-1.5">
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => setViewingPhotoNode({
+                            id: selectedNode.id,
+                            name: selectedNode.name || `Node ${selectedNode.id}`,
+                            photoUrl: selectedNode.photoUrl!,
+                            lat: selectedNode.lat,
+                            lng: selectedNode.lng,
+                            physicalVerified: selectedNode.physicalVerified,
+                          })}
+                          className="w-full text-[11px] h-7 gap-1"
+                        >
+                          <Eye className="h-3 w-3" /> View
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => {
+                            campusStore.updateNode(selectedNode.id, {
+                              photoUrl: undefined,
+                              photoUploadedAt: undefined,
+                              physicalVerified: false,
+                            });
+                            fetch(`/api/nodes/${selectedNode.id}/photo`, { method: "DELETE" }).catch(() => {});
+                            toast({
+                              type: "info",
+                              title: "Photo Removed",
+                              description: `Removed photo from ${selectedNode.name || selectedNode.id}. The node remains intact.`,
+                            });
+                          }}
+                          className="w-full text-[11px] h-7 gap-1 text-red-500 border-red-500/30 hover:bg-red-500/10"
+                        >
+                          <Trash2 className="h-3 w-3" /> Remove Photo
+                        </Button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="space-y-1.5">
+                      <p className="text-[11px] text-[rgb(var(--muted-fg))]">No physical reference photo attached for this node.</p>
+                      <input
+                        type="file"
+                        id={`node-photo-upload-${selectedNode.id}`}
+                        accept="image/*"
+                        className="hidden"
+                        onChange={async (e) => {
+                          const file = e.target.files?.[0];
+                          if (!file) return;
+                          const reader = new FileReader();
+                          reader.onload = async (ev) => {
+                            const dataUrl = ev.target?.result as string;
+                            if (dataUrl) {
+                              campusStore.updateNode(selectedNode.id, {
+                                photoUrl: dataUrl,
+                                photoUploadedAt: new Date().toISOString(),
+                              });
+                              fetch(`/api/nodes/${selectedNode.id}/photo`, {
+                                method: "POST",
+                                headers: { "Content-Type": "application/json" },
+                                body: JSON.stringify({ photoData: dataUrl }),
+                              }).catch(() => {});
+                              toast({
+                                type: "success",
+                                title: "Photo Attached",
+                                description: `Attached reference photo to ${selectedNode.name || selectedNode.id}.`,
+                              });
+                            }
+                          };
+                          reader.readAsDataURL(file);
+                        }}
+                      />
                       <Button
                         size="sm"
                         variant="outline"
-                        onClick={() => setViewingPhotoNode({
-                          id: selectedNode.id,
-                          name: selectedNode.name || `Node ${selectedNode.id}`,
-                          photoUrl: selectedNode.photoUrl!,
-                          lat: selectedNode.lat,
-                          lng: selectedNode.lng,
-                          physicalVerified: selectedNode.physicalVerified,
-                        })}
-                        className="w-full text-xs h-7 gap-1"
+                        onClick={() => document.getElementById(`node-photo-upload-${selectedNode.id}`)?.click()}
+                        className="w-full text-[11px] h-7 gap-1 text-[rgb(var(--primary))] border-[rgb(var(--primary))/30] hover:bg-[rgb(var(--primary))/10]"
                       >
-                        <Eye className="h-3 w-3" /> View Photo Details
+                        <Upload className="h-3 w-3" /> Attach Photo
                       </Button>
                     </div>
-                  ) : (
-                    <p className="text-[11px] text-[rgb(var(--muted-fg))]">No physical reference photo attached for this node.</p>
                   )}
                 </div>
 
@@ -5996,7 +6084,29 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
               )}
             </div>
 
-            <div className="flex justify-end pt-1">
+            <div className="flex items-center justify-between border-t pt-3">
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => {
+                  if (!viewingPhotoNode) return;
+                  campusStore.updateNode(viewingPhotoNode.id, {
+                    photoUrl: undefined,
+                    photoUploadedAt: undefined,
+                    physicalVerified: false,
+                  });
+                  fetch(`/api/nodes/${viewingPhotoNode.id}/photo`, { method: "DELETE" }).catch(() => {});
+                  toast({
+                    type: "info",
+                    title: "Photo Deleted",
+                    description: `Removed photo from ${viewingPhotoNode.name}. The node remains intact.`,
+                  });
+                  setViewingPhotoNode(null);
+                }}
+                className="text-red-500 border-red-500/30 hover:bg-red-500/10 gap-1.5"
+              >
+                <Trash2 className="h-4 w-4" /> Delete Photo Only
+              </Button>
               <Button size="sm" onClick={() => setViewingPhotoNode(null)} className="bg-[rgb(var(--primary))] text-white px-5">
                 Close
               </Button>

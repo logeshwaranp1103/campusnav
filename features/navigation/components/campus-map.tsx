@@ -132,8 +132,11 @@ export function CampusMap({
   const activeNavRoute = useNavigationStore((s) => s.activeRoute);
   const currentNavSegIdx = useNavigationStore((s) => s.currentSegmentIndex);
 
-  // ── Auto-select the starting floor & Auto-switch floor as user navigates through floors ──
+  // ── Auto-select starting floor on launch & auto-switch when route advances to a different floor ──
+  const prevNavFloorRef = useRef<string | null>(null);
+  const prevNavSegIdxRef = useRef<number | null>(null);
   const prevNavStatusRef = useRef(navStatus);
+
   useEffect(() => {
     const isNowNavigating = navStatus === "NAVIGATING" || navStatus === "OFF_ROUTE" || navStatus === "REROUTING" || isNavigating;
     const wasNavigating = prevNavStatusRef.current === "NAVIGATING" || prevNavStatusRef.current === "OFF_ROUTE" || prevNavStatusRef.current === "REROUTING";
@@ -158,12 +161,22 @@ export function CampusMap({
           ? gps.canvasPos.floorId
           : "f-out";
 
-      if (activeFloor && view !== activeFloor) {
+      // Only auto-switch floor when navigation first begins, or when navigation actually advances to a new floor/segment
+      const navJustStarted = !wasNavigating;
+      const navFloorChanged = prevNavFloorRef.current !== activeFloor;
+      const navSegChanged = prevNavSegIdxRef.current !== currentNavSegIdx;
+
+      if (activeFloor && (navJustStarted || navFloorChanged || navSegChanged)) {
         setView(activeFloor);
+        prevNavFloorRef.current = activeFloor;
+        prevNavSegIdxRef.current = currentNavSegIdx;
       }
+    } else {
+      prevNavFloorRef.current = null;
+      prevNavSegIdxRef.current = null;
     }
     prevNavStatusRef.current = navStatus;
-  }, [navStatus, isNavigating, navFloorId, activeNavRoute, currentNavSegIdx, fromSelected?.floorId, route, gps.canvasPos?.floorId, view]);
+  }, [navStatus, isNavigating, navFloorId, activeNavRoute, currentNavSegIdx, fromSelected?.floorId, route, gps.canvasPos?.floorId]);
 
   // Contextual Floor Filter
   const indoorFloors = useMemo(() => {
