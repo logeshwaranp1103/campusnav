@@ -157,7 +157,7 @@ export function NavigateShell() {
   useEffect(() => {
     if (!live || !gps.isGpsActive) return;
     const matchedNode = livePos?.node ?? null;
-    navSession.updateGpsProgress(
+    updateGpsProgress(
       gps.lat,
       gps.lng,
       matchedNode,
@@ -169,7 +169,7 @@ export function NavigateShell() {
         speed: gps.speed,
       }
     );
-  }, [live, gps.lat, gps.lng, gps.isGpsActive, gps.canvasPos, gps.heading, gps.speed, livePos?.node, publishedData.nodes, travelMode]);
+  }, [live, gps.lat, gps.lng, gps.isGpsActive, gps.canvasPos, gps.heading, gps.speed, livePos?.node, publishedData.nodes, travelMode, updateGpsProgress]);
 
   // Handle URL query parameters for deep linking (?to=dest-id or ?from=dest-id)
   useEffect(() => {

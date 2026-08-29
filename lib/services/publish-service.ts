@@ -35,9 +35,20 @@ export function sanitizeSnapshotForPayload(snapshot: DraftSnapshot): DraftSnapsh
     return safeNode;
   });
 
+  const safeEdges = (snapshot.edges || []).map((e) => {
+    const pathType = e.pathType || (e.type === "ROAD" ? "EV" : "WALK");
+    const edgeType = (pathType === "EV" && (!e.type || e.type === "WALK")) ? "ROAD" : (e.type || "WALK");
+    return {
+      ...e,
+      type: edgeType,
+      pathType,
+    };
+  });
+
   return {
     ...snapshot,
     nodes: safeNodes,
+    edges: safeEdges,
   };
 }
 
@@ -527,7 +538,7 @@ export async function getRelationalGraphFromDatabase(): Promise<DraftSnapshot | 
       fromNodeId: e.fromNodeId,
       toNodeId: e.toNodeId,
       type: e.type as Edge["type"],
-      pathType: (e.pathType as Edge["pathType"]) || "WALK",
+      pathType: (e.pathType as Edge["pathType"]) || (e.type === "ROAD" ? "EV" : "WALK"),
       distance: e.distance,
       bidirectional: e.bidirectional ?? true,
     }));

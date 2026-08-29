@@ -2102,7 +2102,18 @@ class CampusStore {
     if (idx === -1) return;
     this.saveSnapshotToUndo();
     const prev = { ...this.edges[idx] };
-    this.edges[idx] = { ...this.edges[idx], ...patch };
+
+    // Auto-sync type and pathType when either is set to EV or ROAD
+    const finalPatch = { ...patch };
+    if (finalPatch.pathType === "EV" && finalPatch.type === undefined) {
+      finalPatch.type = "ROAD";
+    } else if (finalPatch.type === "ROAD" && finalPatch.pathType === undefined) {
+      finalPatch.pathType = "EV";
+    } else if (finalPatch.pathType === "WALK" && finalPatch.type === "ROAD") {
+      finalPatch.type = "WALK";
+    }
+
+    this.edges[idx] = { ...this.edges[idx], ...finalPatch };
     const updated = this.edges[idx];
 
     // Sync reverse edge properties if twin exists
@@ -2112,9 +2123,9 @@ class CampusStore {
     if (revIdx !== -1) {
       this.edges[revIdx] = {
         ...this.edges[revIdx],
-        ...(patch.pathType !== undefined ? { pathType: patch.pathType } : {}),
-        ...(patch.type !== undefined ? { type: patch.type } : {}),
-        ...(patch.distance !== undefined ? { distance: patch.distance } : {}),
+        ...(finalPatch.pathType !== undefined ? { pathType: finalPatch.pathType } : {}),
+        ...(finalPatch.type !== undefined ? { type: finalPatch.type } : {}),
+        ...(finalPatch.distance !== undefined ? { distance: finalPatch.distance } : {}),
       };
     }
 
@@ -2128,6 +2139,7 @@ class CampusStore {
       prevData: prev,
       newData: this.edges[idx],
     });
+    this.persistWorkingDraft();
     this.notify();
   }
 

@@ -962,10 +962,10 @@ function MapCanvas({
           const dHeading = (((targetHeading - cur.heading + 540) % 360) - 180);
 
           // Continuous Delta-Time Exponential Smoothing (60Hz / 90Hz / 120Hz invariant)
-          const gpsAlpha = 1 - Math.exp(-10.0 * dt);
-          const headingAlpha = 1 - Math.exp(-8.0 * dt);
+          const gpsAlpha = 1 - Math.exp(-9.0 * dt);
+          const headingAlpha = 1 - Math.exp(-7.0 * dt);
 
-          if (Math.abs(dx) > 0.02 || Math.abs(dy) > 0.02 || Math.abs(dHeading) > 0.05) {
+          if (Math.abs(dx) > 0.35 || Math.abs(dy) > 0.35 || Math.abs(dHeading) > 0.8) {
             const nextX = cur.x + dx * gpsAlpha;
             const nextY = cur.y + dy * gpsAlpha;
             const nextHeading = (cur.heading + dHeading * headingAlpha + 360) % 360;
@@ -983,12 +983,12 @@ function MapCanvas({
       }
 
       // 2. Momentum Inertia Panning (when user released gesture)
-      if (!isInteractingRef.current && (Math.abs(velocityRef.current.vx) > 0.04 || Math.abs(velocityRef.current.vy) > 0.04)) {
+      if (!isInteractingRef.current && (Math.abs(velocityRef.current.vx) > 0.15 || Math.abs(velocityRef.current.vy) > 0.15)) {
         const friction = Math.pow(0.92, dt / 0.016);
         velocityRef.current.vx *= friction;
         velocityRef.current.vy *= friction;
 
-        if (Math.hypot(velocityRef.current.vx, velocityRef.current.vy) < 0.04) {
+        if (Math.hypot(velocityRef.current.vx, velocityRef.current.vy) < 0.15) {
           velocityRef.current = { vx: 0, vy: 0 };
         } else {
           const curPan = panRef.current;
@@ -1000,7 +1000,7 @@ function MapCanvas({
       }
 
       // 3. Navigation Follow Mode (Glide camera pan & rotate map when user is not manually dragging)
-      if (isFollowingUser && !isInteractingRef.current && Math.hypot(velocityRef.current.vx, velocityRef.current.vy) < 0.1) {
+      if (isFollowingUser && !isInteractingRef.current && Math.hypot(velocityRef.current.vx, velocityRef.current.vy) < 0.15) {
         const curMarker = visualGpsRef.current;
         const targetFollowX = targetGpsPos ? targetGpsPos.x : curMarker.x;
         const targetFollowY = targetGpsPos ? targetGpsPos.y : curMarker.y;
@@ -1015,9 +1015,9 @@ function MapCanvas({
         const panDx = targetPanX - curPan.x;
         const panDy = targetPanY - curPan.y;
 
-        const panAlpha = 1 - Math.exp(-8.5 * dt);
+        const panAlpha = 1 - Math.exp(-7.5 * dt);
 
-        if (Math.abs(panDx) > 0.04 || Math.abs(panDy) > 0.04) {
+        if (Math.abs(panDx) > 0.35 || Math.abs(panDy) > 0.35) {
           const nextPanX = curPan.x + panDx * panAlpha;
           const nextPanY = curPan.y + panDy * panAlpha;
           panRef.current = { x: nextPanX, y: nextPanY };
@@ -1887,14 +1887,7 @@ function MapCanvas({
     };
   }, [onUserPan, onBearingChange]);
 
-  const [nowMs, setNowMs] = useState(() => Date.now());
 
-  useEffect(() => {
-    const timer = setInterval(() => {
-      setNowMs(Date.now());
-    }, 5000);
-    return () => clearInterval(timer);
-  }, []);
 
   const boundsCenterX = bounds.x + bounds.w / 2;
   const boundsCenterY = bounds.y + bounds.h / 2;
@@ -2033,7 +2026,7 @@ function MapCanvas({
 
         {/* ── 3. Roadway Network (Asphalt Roads with Dual Curbing & Centerline Markings) ── */}
         {scopeEdges
-          .filter((e) => e.type === "ROAD" || e.pathType === "EV")
+          .filter((e) => e.type === "ROAD" || e.pathType === "EV" || String(e.type).toUpperCase() === "ROAD" || String(e.pathType).toUpperCase() === "EV")
           .map((e) => {
             const from = findNode(e.fromNodeId ?? e.from);
             const to = findNode(e.toNodeId ?? e.to);
@@ -2091,7 +2084,7 @@ function MapCanvas({
 
         {/* ── 4. Pedestrian Walking Paths (Paved Walkways) ── */}
         {scopeEdges
-          .filter((e) => e.type !== "ROAD" && e.pathType !== "EV")
+          .filter((e) => e.type !== "ROAD" && e.pathType !== "EV" && String(e.type).toUpperCase() !== "ROAD" && String(e.pathType).toUpperCase() !== "EV")
           .map((e) => {
             const from = findNode(e.fromNodeId ?? e.from);
             const to = findNode(e.toNodeId ?? e.to);
