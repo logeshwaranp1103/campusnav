@@ -11,8 +11,8 @@ export const DEFAULT_MAP_ZOOM = 100.0;
 /**
  * Desktop & Device-Specific Default Zoom Configurations
  */
-export const DESKTOP_DEFAULT_ZOOM = 0.85;
-export const MOBILE_DEFAULT_ZOOM = 0.85;
+export const DESKTOP_DEFAULT_ZOOM = 0.80;
+export const MOBILE_DEFAULT_ZOOM = 1.10;
 
 /**
  * Desktop Zoom Sensitivity Multipliers (Mouse Wheel, Trackpad Swipe & Pinch)
