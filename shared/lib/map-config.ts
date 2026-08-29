@@ -6,7 +6,7 @@
  */
 export const MAX_MAP_ZOOM = 400.0;
 export const MIN_MAP_ZOOM = 0.5;
-export const DEFAULT_MAP_ZOOM = 80.0;
+export const DEFAULT_MAP_ZOOM = 100.0;
 
 /**
  * Removes level number and level name from staircase and elevator names.

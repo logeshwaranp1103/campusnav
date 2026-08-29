@@ -42,4 +42,37 @@ describe("Manual Smooth Map Rotation Engine", () => {
     rotation = 0;
     expect(normalizeRotation(rotation)).toBe(0);
   });
+
+  it("resets twisted rotation to 0° North and zoom level to default 1.0 when recenter button is clicked", () => {
+    // 1. Initial State: Normal North-Up (0°) and default zoom 1.0
+    let bearing = 0;
+    let zoomLevel = 1.0;
+    let isFollowingUser = true;
+
+    // 2. User twists and zooms map manually
+    const twistAngle = 72; // User twisted map by 72°
+    const userZoom = 2.4;  // User zoomed in
+    bearing = normalizeRotation(bearing + twistAngle);
+    zoomLevel = userZoom;
+    isFollowingUser = false; // User gesture decouples camera
+
+    expect(bearing).toBe(72);
+    expect(zoomLevel).toBe(2.4);
+    expect(isFollowingUser).toBe(false);
+
+    // 3. User clicks Recenter button
+    const handleRecenter = () => {
+      bearing = 0;
+      zoomLevel = 1.0;
+      isFollowingUser = true;
+    };
+
+    handleRecenter();
+
+    // 4. Verify map returns to default zoom 1.0 and True North 0°
+    expect(bearing).toBe(0);
+    expect(zoomLevel).toBe(1.0);
+    expect(isFollowingUser).toBe(true);
+    expect(calculateSvgTransformString(0, 0, zoomLevel, bearing)).toBe("translate(0px, 0px) scale(1) rotate(0deg)");
+  });
 });

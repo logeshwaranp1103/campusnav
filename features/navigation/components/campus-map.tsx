@@ -297,40 +297,10 @@ export function CampusMap({ route, livePosition, progress, gps: passedGps, onNav
   const allBuildings = publishedData.buildings;
   const allFloors = publishedData.floors;
 
-  // ── Smooth North-Up / Bearing Reset via Controlled Single RAF ──
-  const bearingAnimFrameRef = useRef<number | null>(null);
-
+  // ── Smooth North-Up / Bearing Reset ──
   const resetBearingToNorth = useCallback(() => {
-    if (bearingAnimFrameRef.current !== null) {
-      cancelAnimationFrame(bearingAnimFrameRef.current);
-      bearingAnimFrameRef.current = null;
-    }
-
-    const currentB = bearing;
-    if (Math.abs(currentB) < 0.5) {
-      setBearing(0);
-      return;
-    }
-
-    const diff = ((0 - currentB + 540) % 360) - 180;
-    const start = performance.now();
-    const duration = 280;
-    const initial = currentB;
-
-    const animate = (timestamp: number) => {
-      const elapsed = timestamp - start;
-      const progress = Math.min(1, elapsed / duration);
-      const ease = 1 - Math.pow(1 - progress, 3);
-      const nextB = (initial + diff * ease + 360) % 360;
-      setBearing(progress >= 1 ? 0 : nextB);
-      if (progress < 1) {
-        bearingAnimFrameRef.current = requestAnimationFrame(animate);
-      } else {
-        bearingAnimFrameRef.current = null;
-      }
-    };
-    bearingAnimFrameRef.current = requestAnimationFrame(animate);
-  }, [bearing]);
+    setBearing(0);
+  }, []);
 
   const rotateMapBy = useCallback((deltaDegrees: number) => {
     setIsFollowingUser(false);
@@ -341,14 +311,6 @@ export function CampusMap({ route, livePosition, progress, gps: passedGps, onNav
       }
       return next;
     });
-  }, []);
-
-  useEffect(() => {
-    return () => {
-      if (bearingAnimFrameRef.current !== null) {
-        cancelAnimationFrame(bearingAnimFrameRef.current);
-      }
-    };
   }, []);
 
   // ── Smooth North-Up Reset when Navigation Session Ends/Exits ──
@@ -409,6 +371,8 @@ export function CampusMap({ route, livePosition, progress, gps: passedGps, onNav
     }
     useNavigationStore.getState().resetManualStepping();
     setIsFollowingUser(true);
+    setBearing(0);
+    setZoomLevel(1);
     setResetTrigger((t) => t + 1);
   }, [gps]);
 
@@ -751,13 +715,13 @@ function MapCanvas({
   const internalZoomRef = useRef(internalZoom);
   internalZoomRef.current = internalZoom;
   const bearingRef = useRef(bearing);
-  bearingRef.current = bearing;
 
   // Velocity tracking & Momentum Inertia Panning
   const velocityRef = useRef<{ vx: number; vy: number }>({ vx: 0, vy: 0 });
   const isInteractingRef = useRef<boolean>(false);
   const lastTouchTimeRef = useRef<number>(0);
   const lastTouchPosRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
+  const lastBearingReportTimeRef = useRef<number>(0);
   const animFrameRef = useRef<number | null>(null);
   const lastTapTimeRef = useRef<number>(0);
 
@@ -778,7 +742,13 @@ function MapCanvas({
   const visualBearingRef = useRef(bearing);
   visualBearingRef.current = visualBearing;
   const targetBearingRef = useRef(bearing);
-  targetBearingRef.current = bearing;
+
+  useEffect(() => {
+    if (!isInteractingRef.current) {
+      bearingRef.current = bearing;
+      targetBearingRef.current = bearing;
+    }
+  }, [bearing]);
 
   // ── Smooth Visual GPS Marker State (Interpolated Glide) ──
   const [visualGps, setVisualGps] = useState<{ x: number; y: number; heading: number }>({
@@ -881,18 +851,20 @@ function MapCanvas({
       }
 
       // 0c. Smooth Visual Bearing Glide (Shortest-angle continuous circular interpolation)
-      const targetB = targetBearingRef.current;
-      const curB = visualBearingRef.current;
-      const dB = (((targetB - curB + 540) % 360) - 180);
-      if (Math.abs(dB) > 0.04) {
-        const rotSpeed = isInteractingRef.current ? 24.0 : 8.5;
-        const rotAlpha = 1 - Math.exp(-rotSpeed * dt);
-        const nextB = (curB + dB * rotAlpha + 360) % 360;
-        visualBearingRef.current = nextB;
-        setVisualBearing(nextB);
-      } else if (curB !== targetB) {
-        visualBearingRef.current = targetB;
-        setVisualBearing(targetB);
+      if (!isInteractingRef.current) {
+        const targetB = targetBearingRef.current;
+        const curB = visualBearingRef.current;
+        const dB = (((targetB - curB + 540) % 360) - 180);
+        if (Math.abs(dB) > 0.04) {
+          const rotSpeed = 18.0;
+          const rotAlpha = 1 - Math.exp(-rotSpeed * dt);
+          const nextB = (curB + dB * rotAlpha + 360) % 360;
+          visualBearingRef.current = nextB;
+          setVisualBearing(nextB);
+        } else if (curB !== targetB) {
+          visualBearingRef.current = targetB;
+          setVisualBearing(targetB);
+        }
       }
 
       // 1. Visual GPS Marker Smooth Gliding
@@ -996,6 +968,10 @@ function MapCanvas({
       cancelAnimationFrame(animFrameRef.current);
       animFrameRef.current = null;
     }
+    targetBearingRef.current = 0;
+    bearingRef.current = 0;
+    visualBearingRef.current = 0;
+    setVisualBearing(0);
     // ── Intelligent Auto-Fit for Active Route or Destination Pair ──
     if (route && route.nodes && route.nodes.length >= 2) {
       let minRx = Infinity, minRy = Infinity, maxRx = -Infinity, maxRy = -Infinity;
@@ -1512,29 +1488,40 @@ function MapCanvas({
           return;
         }
 
-        // 1. Pinch Zoom Scaling (Pure Zoom & Pan, Locked North-Up)
+        // 1. Pinch Zoom Scaling (Pure Zoom & Pan)
         const ratio = currentDist / gState.initialDist;
         const extZ = externalZoomRef.current || 1;
         const targetTotal = Math.min(MAX_MAP_ZOOM, Math.max(MIN_MAP_ZOOM, gState.initialZoom * ratio));
         const newInternal = targetTotal / extZ;
         internalZoomRef.current = newInternal;
         targetZoomRef.current = targetTotal;
+        visualZoomRef.current = targetTotal;
+        setVisualZoom(targetTotal);
+        setInternalZoom(newInternal);
 
         // 2. Two-Finger Pan Midpoint Tracking
         const rawDx = (currentCenter.x - gState.lastCenter.x) * uniformScale;
         const rawDy = (currentCenter.y - gState.lastCenter.y) * uniformScale;
-        panRef.current = { x: panRef.current.x + rawDx, y: panRef.current.y + rawDy };
+        const nextPan = { x: panRef.current.x + rawDx, y: panRef.current.y + rawDy };
+        panRef.current = nextPan;
         gState.lastCenter = currentCenter;
+        setPan(nextPan);
 
-        // 3. Two-Finger Touch Rotation (Bearing Twist)
+        // 3. Two-Finger Touch Rotation (Bearing Twist) - Instantaneous 1:1 Direct Tracking
         const angleDelta = currentAngle - gState.initialAngle;
         let newBearing = (gState.initialBearing + angleDelta + 360) % 360;
-        if (Math.abs(newBearing) < 2.5 || Math.abs(newBearing - 360) < 2.5) {
+        if (Math.abs(newBearing) < 2.0 || Math.abs(newBearing - 360) < 2.0) {
           newBearing = 0;
         }
         targetBearingRef.current = newBearing;
         bearingRef.current = newBearing;
-        onBearingChange?.(newBearing);
+        visualBearingRef.current = newBearing;
+        setVisualBearing(newBearing);
+
+        if (now - lastBearingReportTimeRef.current > 40) {
+          lastBearingReportTimeRef.current = now;
+          onBearingChange?.(newBearing);
+        }
         onUserPan?.();
       } else if (e.touches.length === 1) {
         e.preventDefault();
