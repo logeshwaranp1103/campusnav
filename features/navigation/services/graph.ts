@@ -798,3 +798,69 @@ function buildInstructions(
 
   return merged;
 }
+
+export function findAlternativeRoutes(
+  startId: string,
+  endId: string,
+  options?: ShortestPathOptions
+): { primary: Route | null; alternative: Route | null } {
+  const primary = shortestPath(startId, endId, options);
+  if (!primary || primary.edges.length === 0) {
+    return { primary, alternative: null };
+  }
+
+  const primaryEdgeIds = new Set(primary.edges.map((e) => e.id));
+  const data = options?.graphData || campusStore.getPublishedData();
+  if (!data || !data.edges || data.edges.length === 0) {
+    return { primary, alternative: null };
+  }
+
+  const penalizedEdges: Edge[] = data.edges.map((e: Edge) => {
+    if (primaryEdgeIds.has(e.id) || primaryEdgeIds.has(e.id.replace(/_rev$/, ""))) {
+      return { ...e, distance: e.distance * 2.5 };
+    }
+    return e;
+  });
+
+  const altData = { ...data, edges: penalizedEdges };
+  const altRouteRaw = shortestPath(startId, endId, {
+    ...options,
+    graphData: altData,
+  });
+
+  if (!altRouteRaw || altRouteRaw.nodes.length === 0) {
+    return { primary, alternative: null };
+  }
+
+  const primaryNodeKey = primary.nodes.map((n) => n.id).join("->");
+  const altNodeKey = altRouteRaw.nodes.map((n) => n.id).join("->");
+  if (primaryNodeKey === altNodeKey) {
+    return { primary, alternative: null };
+  }
+
+  const originalEdgeMap = new Map(data.edges.map((e: Edge) => [e.id, e]));
+  let trueDistance = 0;
+  const trueEdges: Edge[] = [];
+
+  for (const e of altRouteRaw.edges) {
+    const orig = (originalEdgeMap.get(e.id) || originalEdgeMap.get(e.id.replace(/_rev$/, "")) || e) as Edge;
+    trueDistance += orig.distance;
+    trueEdges.push({ ...orig, pathType: e.pathType });
+  }
+
+  const trueDurationSec = Math.round(trueDistance / (altRouteRaw.travelMode === "EV" ? EV_SPEED : WALK_SPEED));
+
+  const alternative: Route = {
+    ...altRouteRaw,
+    id: `alt-${Date.now()}`,
+    distance: Math.round(trueDistance),
+    durationSec: Math.max(1, trueDurationSec),
+    edges: trueEdges,
+  };
+
+  if (alternative.distance > primary.distance * 2.2) {
+    return { primary, alternative: null };
+  }
+
+  return { primary, alternative };
+}

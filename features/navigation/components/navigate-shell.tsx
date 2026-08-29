@@ -22,8 +22,7 @@ import {
 } from "lucide-react";
 import { campusStore } from "@/shared/lib/campus-store";
 import type { Destination, Node as CampusNode, Edge } from "@/shared/data/campus";
-import { shortestPath, type Route, type RouteInstruction } from "@/features/navigation/services/graph";
-import { useToast } from "@/shared/components/ui/toast";
+import { shortestPath, findAlternativeRoutes, type Route, type RouteInstruction } from "@/features/navigation/services/graph";
 import { cn } from "@/shared/lib/utils";
 import { Input } from "@/shared/components/ui/input";
 import { Button } from "@/shared/components/ui/button";
@@ -55,7 +54,6 @@ const YOUR_LOCATION_DEST: Destination = {
 };
 
 export function NavigateShell() {
-  const { toast } = useToast();
   const [, startTransition] = useTransition();
 
   const [fromQuery, setFromQuery] = useState("");
@@ -68,6 +66,7 @@ export function NavigateShell() {
 
   const [stops, setStops] = useState<StopEntry[]>([]);
   const [route, setRoute] = useState<Route | null>(null);
+  const [alternativeRoute, setAlternativeRoute] = useState<Route | null>(null);
   const [loading, setLoading] = useState(false);
   const [live, setLive] = useState(false);
   const [livePos, setLivePos] = useState<{ node: CampusNode; progress: number } | null>(null);
@@ -298,11 +297,8 @@ export function NavigateShell() {
 
       if (liveStartCandidates.length === 0) {
         setLoading(false);
-        toast({
-          type: "error",
-          title: "Floor Navigation Unavailable",
-          description: "No navigation nodes are available near your current location.",
-        });
+        setRoute(null);
+        setAlternativeRoute(null);
         return null;
       }
     }
@@ -313,6 +309,27 @@ export function NavigateShell() {
       ...currentStops.map((s) => s.dest).filter((d): d is Destination => d !== null),
       endDest,
     ];
+
+    // Compute alternative second shortest route if direct 2-point route
+    if (waypoints.length === 2) {
+      const segStart = waypoints[0];
+      const segEnd = waypoints[1];
+      const sId = segStart.id === YOUR_LOCATION_ID && liveStartCandidates.length > 0
+        ? (liveStartCandidates[0]?.id || "n1")
+        : (segStart.nodeId || segStart.id);
+      const eId = segEnd.id === YOUR_LOCATION_ID
+        ? (liveStartCandidates[0]?.id || segEnd.nodeId || "n1")
+        : (segEnd.nodeId || segEnd.id);
+
+      const altRes = findAlternativeRoutes(sId, eId, { travelMode: mode });
+      if (altRes.alternative && altRes.alternative.distance > 0) {
+        setAlternativeRoute(altRes.alternative);
+      } else {
+        setAlternativeRoute(null);
+      }
+    } else {
+      setAlternativeRoute(null);
+    }
 
     // Chain Dijkstra segments for each consecutive pair
     let totalDistance = 0;
@@ -348,12 +365,7 @@ export function NavigateShell() {
       if (!segRoute) {
         setLoading(false);
         setRoute(null);
-
-        toast({
-          type: "error",
-          title: "No Route Found",
-          description: `No path from "${segStart.name}" to "${segEnd.name}".`,
-        });
+        setAlternativeRoute(null);
         return null;
       }
       totalDistance += segRoute.distance;
@@ -405,31 +417,6 @@ export function NavigateShell() {
       navSession.startNavigationSession(startDest, endDest, clientRoute);
     }
 
-    if (isFallbackWalk) {
-      toast({
-        type: "warning",
-        title: "EV Path Unavailable",
-        description: "EV path not available, Showing walkable route",
-      });
-    } else if (hasObstacles) {
-      toast({
-        type: "warning",
-        title: "All Routes Have Obstacles",
-        description: "No 100% obstacle-free path exists. Routing through the least obstructed path.",
-      });
-    } else if (!live) {
-      const stopCount = currentStops.filter((s) => s.dest).length;
-      const modeSummary = mode === "EV"
-        ? (isMultimodal ? `🚗 ${Math.round(evDist)}m Drive + 🚶 ${Math.round(walkDist)}m Walk` : "🚗 EV Mode")
-        : "🚶 Walk Mode";
-
-      toast({
-        type: "success",
-        title: stopCount > 0 ? `Multi-Stop Route (${stopCount + 2} waypoints)` : `Route to ${endDest.name}`,
-        description: `${Math.round(totalDistance)} m · ~${Math.max(1, Math.round(totalDurationSec / 60))} min · ${modeSummary}`,
-      });
-    }
-
     return clientRoute;
   }
 
@@ -457,15 +444,9 @@ export function NavigateShell() {
       }
     );
 
-    const floorName = (publishedData.floors || []).find((f) => f.id === floorId)?.name || "Floor";
-
     if (!nearestResult.node) {
-      toast({
-        type: "error",
-        title: "Floor Unavailable",
-        description: nearestResult.error || "No navigation nodes are available on this floor.",
-      });
       setRoute(null);
+      setAlternativeRoute(null);
       return;
     }
 
@@ -480,12 +461,6 @@ export function NavigateShell() {
       setLivePos({ node: nearestResult.node, progress: 0 });
     }
 
-    toast({
-      type: "success",
-      title: "Floor Confirmed",
-      description: `Starting from ${nearestResult.node.name || nearestResult.node.id} on ${floorName} (${bld?.name ?? "Building"}). Path calculated!`,
-    });
-
     if (toSelected) {
       calculateRoute(updatedDest, toSelected, stops, floorId, bld?.id, travelMode);
     }
@@ -493,11 +468,6 @@ export function NavigateShell() {
 
   function handleSelectYourLocation() {
     if (gps.status === "unavailable") {
-      toast({
-        type: "error",
-        title: "Geolocation Unavailable",
-        description: "Your browser or device does not support live GPS location.",
-      });
       return;
     }
 
@@ -512,11 +482,6 @@ export function NavigateShell() {
         const singleFloor = (publishedData.floors || []).find((f) => f.buildingId === detectedBuilding.id);
         const floorId = singleFloor?.id || "f-out";
         setSelectedFloorId(floorId);
-        toast({
-          type: "info",
-          title: "Building Detected",
-          description: `You are inside ${detectedBuilding.name}. Starting from Ground Floor.`,
-        });
         if (toSelected) {
           calculateRoute(YOUR_LOCATION_DEST, toSelected, stops, floorId, detectedBuilding.id, travelMode);
         }
@@ -1001,7 +966,6 @@ export function NavigateShell() {
                         });
                       } else {
                         navigator.clipboard.writeText(window.location.href);
-                        toast({ type: "success", title: "Route link copied!" });
                       }
                     }}
                     className="rounded-xl p-2 text-[rgb(var(--muted-fg))] hover:bg-[rgb(var(--muted))] transition-colors"
@@ -1131,7 +1095,6 @@ export function NavigateShell() {
                   destinationId={toSelected.id}
                   fromId={fromSelected?.id || (route?.nodes[0]?.id)}
                   onPosition={(p) => setLivePos(p)}
-                  onArrive={() => toast({ type: "success", title: "Arrived at destination!" })}
                 />
               )}
             </div>
@@ -1143,6 +1106,16 @@ export function NavigateShell() {
       <div className="relative flex-1 bg-[rgb(var(--card))]/30">
         <CampusMap
           route={route}
+          alternativeRoute={alternativeRoute}
+          onSelectAlternativeRoute={() => {
+            if (!alternativeRoute) return;
+            const temp = route;
+            setRoute(alternativeRoute);
+            setAlternativeRoute(temp);
+            if (live && fromSelected && toSelected) {
+              navSession.startNavigationSession(fromSelected, toSelected, alternativeRoute);
+            }
+          }}
           livePosition={livePos?.node}
           progress={livePos?.progress}
           gps={gps}
@@ -1155,8 +1128,8 @@ export function NavigateShell() {
         {live && (navSession.status === "NAVIGATING" || navSession.status === "OFF_ROUTE" || navSession.status === "REROUTING" || navSession.status === "ARRIVED" || navSession.status === "GPS_SIGNAL_LOST") && (() => {
           const allRouteSteps = navSession.activeRoute?.instructions || route?.instructions || [];
           const stepIndex = Math.max(0, Math.min(Math.max(0, allRouteSteps.length - 1), navSession.currentSegmentIndex));
-          const activeStep = navSession.currentInstruction || allRouteSteps[stepIndex] || null;
-          const upcomingStep = navSession.nextInstruction || allRouteSteps[stepIndex + 1] || null;
+          const activeStep = allRouteSteps[stepIndex] || navSession.currentInstruction || null;
+          const upcomingStep = allRouteSteps[stepIndex + 1] || navSession.nextInstruction || null;
 
           return (
             <TurnByTurnBar

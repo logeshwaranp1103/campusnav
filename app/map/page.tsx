@@ -963,7 +963,7 @@ export default function VisitorPage() {
             onClick={() => {
               if (!gps.isTracking) gps.startTracking();
               const container = svgContainerRef.current;
-              const defaultScale = 1.5;
+              const defaultScale = 2;
               if (container) {
                 const rect = container.getBoundingClientRect();
                 if (gps.isGpsActive && gps.canvasPos) {

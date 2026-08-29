@@ -49,6 +49,8 @@ function getWallFacets(basePts: { x: number; y: number }[], roofPts: { x: number
 
 type Props = {
   route: Route | null;
+  alternativeRoute?: Route | null;
+  onSelectAlternativeRoute?: () => void;
   livePosition?: Node | null;
   progress?: number;
   gps?: ReturnType<typeof useVisitorGps>;
@@ -57,7 +59,17 @@ type Props = {
   toSelected?: Destination | null;
 };
 
-export function CampusMap({ route, livePosition, progress, gps: passedGps, onNavigateToDest, fromSelected, toSelected }: Props) {
+export function CampusMap({
+  route,
+  alternativeRoute,
+  onSelectAlternativeRoute,
+  livePosition,
+  progress,
+  gps: passedGps,
+  onNavigateToDest,
+  fromSelected,
+  toSelected,
+}: Props) {
   const [mounted, setMounted] = useState(false);
   const [publishedData, setPublishedData] = useState(() => campusStore.getPublishedData());
   const [view, setView] = useState<string>("f-out");
@@ -392,6 +404,8 @@ export function CampusMap({ route, livePosition, progress, gps: passedGps, onNav
       <MapCanvas
         floorId={activeView === "f-out" ? "f-out" : activeView}
         route={route}
+        alternativeRoute={alternativeRoute}
+        onSelectAlternativeRoute={onSelectAlternativeRoute}
         livePosition={livePosition}
         progress={progress}
         publishedData={publishedData}
@@ -662,6 +676,8 @@ function FloorButton({
 function MapCanvas({
   floorId,
   route,
+  alternativeRoute,
+  onSelectAlternativeRoute,
   livePosition,
   progress,
   publishedData,
@@ -682,6 +698,8 @@ function MapCanvas({
 }: {
   floorId: string;
   route: Route | null;
+  alternativeRoute?: Route | null;
+  onSelectAlternativeRoute?: () => void;
   livePosition?: Node | null;
   progress?: number;
   publishedData: ReturnType<typeof campusStore.getPublishedData>;
@@ -964,6 +982,17 @@ function MapCanvas({
     };
   }, [targetGpsPos, targetHeading, isFollowingUser, isNavigating, onBearingChange, gps?.speed, gps?.heading, gps?.isGpsActive]);
 
+  const nodeLookupMap = useMemo(() => {
+    const map = new Map<string, Node>();
+    allNodes.forEach((n) => map.set(n.id, n));
+    if (route?.nodes) {
+      route.nodes.forEach((n) => map.set(n.id, n));
+    }
+    return map;
+  }, [allNodes, route]);
+
+  const findNode = useCallback((id: string) => nodeLookupMap.get(id), [nodeLookupMap]);
+
   // Recenter / Reset Action Trigger
   useEffect(() => {
     if (animFrameRef.current !== null) {
@@ -1004,15 +1033,21 @@ function MapCanvas({
         const fitZoomY = availH / routeSpanY;
         const routeFitZoom = Math.min(1.35, Math.max(0.45, Math.min(fitZoomX, fitZoomY)));
 
-        setPan({ x: centerX - routeCenterX, y: centerY - routeCenterY });
+        const nextPan = { x: centerX - routeCenterX, y: centerY - routeCenterY };
+        panRef.current = nextPan;
+        visualZoomRef.current = routeFitZoom;
+        internalZoomRef.current = routeFitZoom;
+        targetZoomRef.current = routeFitZoom;
+        setPan(nextPan);
+        setVisualZoom(routeFitZoom);
         setInternalZoom(routeFitZoom);
         return;
       }
     }
 
     // ── Auto-Fit Selected Start and Destination Nodes ──
-    const startNode = fromSelected?.nodeId ? allNodes.find((n) => n.id === fromSelected.nodeId) : null;
-    const endNode = toSelected?.nodeId ? allNodes.find((n) => n.id === toSelected.nodeId) : null;
+    const startNode = fromSelected?.nodeId ? findNode(fromSelected.nodeId) : null;
+    const endNode = toSelected?.nodeId ? findNode(toSelected.nodeId) : null;
 
     if (startNode && endNode) {
       const minX = Math.min(startNode.x, endNode.x);
@@ -1031,8 +1066,14 @@ function MapCanvas({
       const availW = Math.max(280, isMobile ? bounds.w * 0.76 : bounds.w * 0.72);
       const availH = Math.max(280, isMobile ? bounds.h * 0.56 : bounds.h * 0.68);
       const fitZoom = Math.min(1.35, Math.max(0.45, Math.min(availW / spanX, availH / spanY)));
+      const nextPan = { x: centerX - cX, y: centerY - cY };
 
-      setPan({ x: centerX - cX, y: centerY - cY });
+      panRef.current = nextPan;
+      visualZoomRef.current = fitZoom;
+      internalZoomRef.current = fitZoom;
+      targetZoomRef.current = fitZoom;
+      setPan(nextPan);
+      setVisualZoom(fitZoom);
       setInternalZoom(fitZoom);
       return;
     }
@@ -1047,35 +1088,47 @@ function MapCanvas({
       if (targetCanvas) {
         const centerX = bounds.x + bounds.w / 2;
         const centerY = bounds.y + bounds.h / 2;
-        setPan({ x: centerX - targetCanvas.x, y: centerY - targetCanvas.y });
+        const nextPan = { x: centerX - targetCanvas.x, y: centerY - targetCanvas.y };
+        panRef.current = nextPan;
+        visualZoomRef.current = 0.85;
+        internalZoomRef.current = 0.85;
+        targetZoomRef.current = 0.85;
+        setPan(nextPan);
+        setVisualZoom(0.85);
         setInternalZoom(0.85);
       }
     } else if (livePosition) {
       const centerX = bounds.x + bounds.w / 2;
       const centerY = bounds.y + bounds.h / 2;
-      setPan({ x: centerX - livePosition.x, y: centerY - livePosition.y });
+      const nextPan = { x: centerX - livePosition.x, y: centerY - livePosition.y };
+      panRef.current = nextPan;
+      visualZoomRef.current = 0.85;
+      internalZoomRef.current = 0.85;
+      targetZoomRef.current = 0.85;
+      setPan(nextPan);
+      setVisualZoom(0.85);
       setInternalZoom(0.85);
     } else if (startNode) {
       const centerX = bounds.x + bounds.w / 2;
       const centerY = bounds.y + bounds.h / 2;
-      setPan({ x: centerX - startNode.x, y: centerY - startNode.y });
+      const nextPan = { x: centerX - startNode.x, y: centerY - startNode.y };
+      panRef.current = nextPan;
+      visualZoomRef.current = 0.85;
+      internalZoomRef.current = 0.85;
+      targetZoomRef.current = 0.85;
+      setPan(nextPan);
+      setVisualZoom(0.85);
       setInternalZoom(0.85);
     } else {
-      setInternalZoom(1);
+      panRef.current = { x: 0, y: 0 };
+      visualZoomRef.current = 1;
+      internalZoomRef.current = 1;
+      targetZoomRef.current = 1;
       setPan({ x: 0, y: 0 });
+      setVisualZoom(1);
+      setInternalZoom(1);
     }
-  }, [resetTrigger, route, fromSelected?.id, toSelected?.id]);
-
-  const nodeLookupMap = useMemo(() => {
-    const map = new Map<string, Node>();
-    allNodes.forEach((n) => map.set(n.id, n));
-    if (route?.nodes) {
-      route.nodes.forEach((n) => map.set(n.id, n));
-    }
-    return map;
-  }, [allNodes, route]);
-
-  const findNode = useCallback((id: string) => nodeLookupMap.get(id), [nodeLookupMap]);
+  }, [resetTrigger, route, fromSelected?.id, toSelected?.id, livePosition, gps?.canvasPos, bounds, findNode]);
 
   const floorById = useMemo(() => {
     const map = new Map<string, Floor>();
@@ -1302,6 +1355,53 @@ function MapCanvas({
       return (fromThisFloor && toThisFloor) || (fromThisFloor && toEnt) || (toThisFloor && fromEnt);
     });
   }, [route?.edges, findNode, isOutdoorFloor, isNodeOutdoor, isEntranceNode, isGroundFloor, isGroundFloorNode, floorId]);
+
+  const alternativeRouteEdges = useMemo(() => {
+    if (!alternativeRoute?.edges) return [];
+    return alternativeRoute.edges.filter((e) => {
+      const from = findNode(e.from);
+      const to = findNode(e.to);
+      if (!from || !to) return false;
+
+      if (isOutdoorFloor) {
+        const fromOut = isNodeOutdoor(from);
+        const toOut = isNodeOutdoor(to);
+        const fromEnt = isEntranceNode(from) && (from.floorId === "f-out" || from.floorId === "outdoor" || !from.floorId);
+        const toEnt = isEntranceNode(to) && (to.floorId === "f-out" || to.floorId === "outdoor" || !to.floorId);
+        return (fromOut && toOut) || (fromOut && toEnt) || (toOut && fromEnt);
+      }
+
+      if (isGroundFloor) {
+        const fromThisFloor = from.floorId === floorId;
+        const toThisFloor = to.floorId === floorId;
+        const isFromOut = isNodeOutdoor(from);
+        const isToOut = isNodeOutdoor(to);
+        const fromEnt = isEntranceNode(from);
+        const toEnt = isEntranceNode(to);
+
+        if (fromThisFloor && toThisFloor) return true;
+        if (isFromOut && isToOut) return true;
+        if ((fromThisFloor && (toEnt || isToOut)) || (toThisFloor && (fromEnt || isFromOut))) return true;
+        if ((fromEnt && isToOut) || (toEnt && isFromOut)) return true;
+        if (isGroundFloorNode(from) && isGroundFloorNode(to)) return true;
+      }
+
+      const fromThisFloor = from.floorId === floorId;
+      const toThisFloor = to.floorId === floorId;
+      const fromEnt = isGroundFloor && isEntranceNode(from);
+      const toEnt = isGroundFloor && isEntranceNode(to);
+
+      return (fromThisFloor && toThisFloor) || (fromThisFloor && toEnt) || (toThisFloor && fromEnt);
+    });
+  }, [alternativeRoute?.edges, findNode, isOutdoorFloor, isNodeOutdoor, isEntranceNode, isGroundFloor, isGroundFloorNode, floorId]);
+
+  const alternativeBadgePos = useMemo(() => {
+    if (!alternativeRoute?.nodes || alternativeRoute.nodes.length < 2) return null;
+    const midIdx = Math.floor(alternativeRoute.nodes.length / 2);
+    const midNode = alternativeRoute.nodes[midIdx];
+    if (!midNode) return null;
+    return { x: midNode.x, y: midNode.y };
+  }, [alternativeRoute?.nodes]);
 
   const blockedEdgeIds = useMemo(() => {
     return getObstructedEdgeIds(allNodes, allEdges, publishedData.obstacles);
@@ -2210,6 +2310,89 @@ function MapCanvas({
                   </g>
                 );
               })}
+          </g>
+        )}
+
+        {/* Secondary / Alternative Route Lines (Muted Light Opacity with Interactive Hitbox) */}
+        {alternativeRouteEdges.map((e, i) => {
+          const from = findNode(e.from);
+          const to = findNode(e.to);
+          if (!from || !to) return null;
+
+          return (
+            <g
+              key={`alt-edge-${e.id}-${i}`}
+              onClick={onSelectAlternativeRoute}
+              className="cursor-pointer group"
+            >
+              {/* Wide Invisible Hitbox for Easy Tap / Click on Canvas */}
+              <line
+                x1={from.x}
+                y1={from.y}
+                x2={to.x}
+                y2={to.y}
+                stroke="transparent"
+                strokeWidth={28}
+                strokeLinecap="round"
+              />
+              {/* Outer Muted Glow */}
+              <line
+                x1={from.x}
+                y1={from.y}
+                x2={to.x}
+                y2={to.y}
+                stroke="#64748b"
+                strokeWidth={7}
+                strokeOpacity={0.35}
+                strokeLinecap="round"
+                strokeDasharray="6 4"
+              />
+              {/* Core Alternative Line */}
+              <line
+                x1={from.x}
+                y1={from.y}
+                x2={to.x}
+                y2={to.y}
+                stroke="#94a3b8"
+                strokeWidth={4}
+                strokeOpacity={0.85}
+                strokeLinecap="round"
+                strokeDasharray="6 4"
+                className="group-hover:stroke-indigo-500 transition-colors"
+              />
+            </g>
+          );
+        })}
+
+        {/* Alternative Route Midpoint Interactive Pill */}
+        {alternativeRoute && alternativeBadgePos && (
+          <g
+            transform={`translate(${alternativeBadgePos.x}, ${alternativeBadgePos.y - 14})`}
+            onClick={onSelectAlternativeRoute}
+            className="cursor-pointer select-none group"
+          >
+            <rect
+              x="-56"
+              y="-11"
+              width="112"
+              height="22"
+              rx="11"
+              fill="#ffffff"
+              stroke="#64748b"
+              strokeWidth="1.5"
+              className="shadow-md group-hover:fill-indigo-50 group-hover:stroke-indigo-600 transition-colors"
+            />
+            <text
+              x="0"
+              y="3.5"
+              textAnchor="middle"
+              fill="#334155"
+              fontSize="9"
+              fontWeight="800"
+              className="pointer-events-none"
+            >
+              Alt Route · {Math.round(alternativeRoute.distance)}m
+            </text>
           </g>
         )}
 
