@@ -128,7 +128,11 @@ export function CampusMap({
     };
   }, []);
 
-  // ── Auto-select the starting floor & Auto-hide node names when Start Navigation is clicked ──
+  const navFloorId = useNavigationStore((s) => s.currentFloorId);
+  const activeNavRoute = useNavigationStore((s) => s.activeRoute);
+  const currentNavSegIdx = useNavigationStore((s) => s.currentSegmentIndex);
+
+  // ── Auto-select the starting floor & Auto-switch floor as user navigates through floors ──
   const prevNavStatusRef = useRef(navStatus);
   useEffect(() => {
     const isNowNavigating = navStatus === "NAVIGATING" || navStatus === "OFF_ROUTE" || navStatus === "REROUTING" || isNavigating;
@@ -137,26 +141,29 @@ export function CampusMap({
     if (isNowNavigating && (!wasNavigating || !isNavigating)) {
       // Auto-hide all object and node names & background circles instantly when navigation starts
       setNodeDisplayMode("HIDDEN");
+    }
 
-      // Find the starting floor from selected origin, route origin, or live location
-      const storeFloorId = useNavigationStore.getState().currentFloorId;
-      const startFloorId =
-        (fromSelected?.floorId && fromSelected.floorId !== "outdoor")
+    if (isNowNavigating) {
+      // Find the active floor from navigation store, current route segment, or live position
+      const activeFloor =
+        (navFloorId && navFloorId !== "outdoor")
+          ? navFloorId
+          : (activeNavRoute?.nodes[currentNavSegIdx]?.floorId && activeNavRoute.nodes[currentNavSegIdx].floorId !== "outdoor")
+          ? activeNavRoute.nodes[currentNavSegIdx].floorId
+          : (fromSelected?.floorId && fromSelected.floorId !== "outdoor")
           ? fromSelected.floorId
-          : (storeFloorId && storeFloorId !== "outdoor")
-          ? storeFloorId
           : (route?.nodes[0]?.floorId && route.nodes[0].floorId !== "outdoor")
           ? route.nodes[0].floorId
           : (gps.canvasPos?.floorId && gps.canvasPos.floorId !== "outdoor")
           ? gps.canvasPos.floorId
           : "f-out";
 
-      if (startFloorId) {
-        setView(startFloorId);
+      if (activeFloor && view !== activeFloor) {
+        setView(activeFloor);
       }
     }
     prevNavStatusRef.current = navStatus;
-  }, [navStatus, isNavigating, fromSelected?.floorId, route, gps.canvasPos?.floorId]);
+  }, [navStatus, isNavigating, navFloorId, activeNavRoute, currentNavSegIdx, fromSelected?.floorId, route, gps.canvasPos?.floorId, view]);
 
   // Contextual Floor Filter
   const indoorFloors = useMemo(() => {

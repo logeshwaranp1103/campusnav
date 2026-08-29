@@ -204,8 +204,8 @@ export function projectUserOntoRoute(
       projCanvasY = proj.projY;
     }
 
-    // Hysteresis penalty: past segments penalized, future segments slightly favored if at boundary
-    const penalty = i < previousSegmentIndex ? 4.0 : (i === previousSegmentIndex ? 0 : 0.4);
+    // Hysteresis penalty: past segments heavily penalized, future segments require affirmative proximity
+    const penalty = i < previousSegmentIndex ? 5.0 : (i === previousSegmentIndex ? 0 : 2.0);
     const score = distMeters + penalty;
 
     if (score < minScore) {
@@ -218,8 +218,8 @@ export function projectUserOntoRoute(
     }
   }
 
-  // Advance segment if user is at or past junction (t >= 0.95) and closer to next segment
-  if (bestT >= 0.95 && bestSegmentIndex < numSegments - 1) {
+  // Advance segment if user is physically at or past junction (t >= 0.96) and closer to next segment
+  if (bestT >= 0.96 && bestSegmentIndex < numSegments - 1) {
     bestSegmentIndex += 1;
     bestT = 0;
     bestProjX = routeNodes[bestSegmentIndex].x;
@@ -299,17 +299,34 @@ export function computeLiveTurnGuidance(
   const lastNode = nodes[nodes.length - 1];
   let distToFinalDest = projection.distanceRemaining;
 
+  let ux = userPos.x;
+  let uy = userPos.y;
+  if ((ux === undefined || uy === undefined || isNaN(ux) || isNaN(uy)) && userPos.lat && userPos.lng) {
+    const canvas = gpsToCanvas(userPos.lat, userPos.lng);
+    ux = canvas.x;
+    uy = canvas.y;
+  }
+
   if (lastNode && userPos.lat && userPos.lng && lastNode.lat && lastNode.lng) {
     distToFinalDest = calculateGeographicDistance(userPos.lat, userPos.lng, lastNode.lat, lastNode.lng);
-  } else if (lastNode) {
-    distToFinalDest = Math.hypot(lastNode.x - userPos.x, lastNode.y - userPos.y) / PIXELS_PER_METER;
+  } else if (lastNode && ux !== undefined && uy !== undefined && !isNaN(ux) && !isNaN(uy)) {
+    distToFinalDest = Math.hypot(lastNode.x - ux, lastNode.y - uy) / PIXELS_PER_METER;
   }
 
   const isMatchedAtDest = Boolean(
     options?.matchedNodeId && lastNode && options.matchedNodeId === lastNode.id
   );
 
-  const isPhysicallyAtDest = Boolean(lastNode && (distToFinalDest <= arrivalThreshold || isMatchedAtDest));
+  // Arrival is ONLY possible when the user has traversed to the final segment (or near end) AND is on the destination's floor
+  const isNearEndOfRoute = segIndex >= Math.max(0, nodes.length - 2);
+  const isSameFloorAsDest = !lastNode?.floorId || !userPos.floorId || userPos.floorId === lastNode.floorId || userPos.floorId === "f-out";
+
+  const isPhysicallyAtDest = Boolean(
+    isNearEndOfRoute &&
+    isSameFloorAsDest &&
+    lastNode &&
+    (distToFinalDest <= arrivalThreshold || isMatchedAtDest)
+  );
 
   if (isPhysicallyAtDest) {
     const landmark = cleanLandmarkName(lastNode?.name);
@@ -340,8 +357,6 @@ export function computeLiveTurnGuidance(
   const toNode = nodes[segIndex + 1] ?? lastNode;
   const nextTargetNode = nodes[segIndex + 2] ?? null;
 
-  let ux = userPos.x;
-  let uy = userPos.y;
   if ((ux === undefined || uy === undefined || isNaN(ux) || isNaN(uy)) && userPos.lat && userPos.lng) {
     const canvas = gpsToCanvas(userPos.lat, userPos.lng);
     ux = canvas.x;

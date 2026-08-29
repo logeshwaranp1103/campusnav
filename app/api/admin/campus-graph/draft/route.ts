@@ -113,6 +113,36 @@ export async function PUT(req: Request) {
         create: { id: "active-draft", snapshot: snapshot as unknown as import("@prisma/client").Prisma.InputJsonValue },
       });
 
+      // Keep active-published in database populated so public visitor map never becomes empty on code changes
+      const dbPublished = await prisma.publishedGraph.findUnique({
+        where: { id: "active-published" },
+      }).catch(() => null);
+
+      const pubSnap = dbPublished?.snapshot as unknown as import("@/lib/services/publish-service").DraftSnapshot | undefined;
+      const pubHasEntities = pubSnap && (
+        (Array.isArray(pubSnap.buildings) && pubSnap.buildings.length > 0) ||
+        (Array.isArray(pubSnap.nodes) && pubSnap.nodes.length > 0)
+      );
+
+      if (!pubHasEntities && hasEntities) {
+        await prisma.publishedGraph.upsert({
+          where: { id: "active-published" },
+          update: {
+            version: 1,
+            snapshot: snapshot as unknown as import("@prisma/client").Prisma.InputJsonValue,
+            publishedAt: new Date(),
+            publishedBy: "auto-draft-sync",
+          },
+          create: {
+            id: "active-published",
+            version: 1,
+            snapshot: snapshot as unknown as import("@prisma/client").Prisma.InputJsonValue,
+            publishedAt: new Date(),
+            publishedBy: "auto-draft-sync",
+          },
+        }).catch(() => null);
+      }
+
       console.log(`[DraftRoute:PUT] Successfully saved active-draft to database: ${snapshot.buildings?.length ?? 0} buildings, ${snapshot.nodes?.length ?? 0} nodes, ${snapshot.edges?.length ?? 0} edges`);
     }
     return NextResponse.json({ success: true });

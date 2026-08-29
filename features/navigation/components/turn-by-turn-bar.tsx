@@ -81,11 +81,15 @@ export function TurnByTurnBar({
     : (cleanLandmarkName(nextStep?.targetNodeName) || nextStep?.text || "Upcoming Landmark");
 
   // Real physical distance-based progress (0% when stationary at start, smoothly advancing only as user actually travels)
+  const effectiveRemainingDistance = (currentStepIndex < totalStepsCount - 1 && remainingDistanceMeters <= 0)
+    ? (allSteps || []).slice(currentStepIndex).reduce((sum, s) => sum + ((s as any).distance ?? (s as any).distanceMeters ?? 0), 0)
+    : remainingDistanceMeters;
+
   const progressPct = totalDistanceMeters > 0
-    ? Math.min(100, Math.max(0, Math.round(((totalDistanceMeters - remainingDistanceMeters) / totalDistanceMeters) * 100)))
+    ? Math.min(100, Math.max(0, Math.round(((totalDistanceMeters - effectiveRemainingDistance) / totalDistanceMeters) * 100)))
     : (currentStepIndex >= totalStepsCount - 1 && totalStepsCount > 0 ? 100 : 0);
 
-  const etaMinutes = Math.max(1, Math.round(remainingDistanceMeters / 70));
+  const etaMinutes = Math.max(1, Math.round(effectiveRemainingDistance / 70));
 
   // Compute estimated arrival time string (e.g. "4:25 PM")
   const arrivalTime = new Date(Date.now() + etaMinutes * 60 * 1000).toLocaleTimeString([], {
@@ -324,7 +328,7 @@ export function TurnByTurnBar({
                   {etaMinutes} <span className="text-sm font-semibold text-slate-500">min</span>
                 </span>
                 <span className="text-sm text-slate-500 font-semibold">
-                  ({formatDistance(remainingDistanceMeters)})
+                  ({formatDistance(effectiveRemainingDistance)})
                 </span>
               </div>
               <div className="text-xs text-slate-500 flex items-center gap-1.5 mt-0.5 font-medium">

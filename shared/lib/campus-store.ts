@@ -562,24 +562,24 @@ class CampusStore {
       return pb;
     });
 
-    const hasPublished = Boolean(
-      (this.publishedGraph.buildings && this.publishedGraph.buildings.length > 0) ||
-      (this.publishedGraph.nodes && this.publishedGraph.nodes.length > 0) ||
-      (this.publishedGraph.floors && this.publishedGraph.floors.length > 0)
-    );
+    const hasPubBlds = Array.isArray(this.publishedGraph.buildings) && this.publishedGraph.buildings.length > 0;
+    const hasPubNodes = Array.isArray(this.publishedGraph.nodes) && this.publishedGraph.nodes.length > 0;
+    const hasPubFloors = Array.isArray(this.publishedGraph.floors) && this.publishedGraph.floors.length > 0;
+    const hasPubEdges = Array.isArray(this.publishedGraph.edges) && this.publishedGraph.edges.length > 0;
+    const hasPubDest = Array.isArray(this.publishedGraph.destinations) && this.publishedGraph.destinations.length > 0;
 
     return {
       campus: this.campus,
-      buildings: hasPublished ? publishedBuildings : this.buildings,
-      floors: hasPublished ? (this.publishedGraph.floors || []) : this.floors,
-      nodes: hasPublished ? (this.publishedGraph.nodes || []) : this.nodes,
-      edges: hasPublished ? (this.publishedGraph.edges || []) : this.edges,
-      destinations: hasPublished ? (this.publishedGraph.destinations || []) : this.destinations,
-      events: hasPublished ? (this.publishedGraph.events || []) : this.events,
+      buildings: hasPubBlds ? publishedBuildings : this.buildings,
+      floors: hasPubFloors ? (this.publishedGraph.floors || []) : this.floors,
+      nodes: hasPubNodes ? (this.publishedGraph.nodes || []) : this.nodes,
+      edges: hasPubEdges ? (this.publishedGraph.edges || []) : this.edges,
+      destinations: hasPubDest ? (this.publishedGraph.destinations || []) : this.destinations,
+      events: (this.publishedGraph.events && this.publishedGraph.events.length > 0) ? this.publishedGraph.events : (this.events || []),
       obstacles: mergedObstacles,
-      stairGroups: hasPublished ? (this.publishedGraph.stairGroups || []) : this.stairGroups,
-      liftGroups: hasPublished ? (this.publishedGraph.liftGroups || []) : this.liftGroups,
-      doors: hasPublished ? (this.publishedGraph.doors || []) : this.doors,
+      stairGroups: (this.publishedGraph.stairGroups && this.publishedGraph.stairGroups.length > 0) ? this.publishedGraph.stairGroups : this.stairGroups,
+      liftGroups: (this.publishedGraph.liftGroups && this.publishedGraph.liftGroups.length > 0) ? this.publishedGraph.liftGroups : this.liftGroups,
+      doors: (this.publishedGraph.doors && this.publishedGraph.doors.length > 0) ? this.publishedGraph.doors : this.doors,
     };
   }
 
@@ -2605,222 +2605,86 @@ class CampusStore {
     this.isSyncing = true;
     const isAdmin = typeof window !== "undefined" && window.location.pathname.startsWith("/admin");
     try {
-      if (isAdmin) {
-        // Admin: fetch draft and published graph in parallel
-        const [resDraft, resPub] = await Promise.all([
-          fetch("/api/admin/campus-graph/draft", { cache: "no-store" }).catch(() => null),
-          fetch("/api/published-graph", { cache: "no-store" }).catch(() => null),
-        ]);
+      // Always fetch draft and published graph in parallel so draft data is never wiped on public page reloads
+      const [resDraft, resPub] = await Promise.all([
+        fetch("/api/admin/campus-graph/draft", { cache: "no-store" }).catch(() => null),
+        fetch("/api/published-graph", { cache: "no-store" }).catch(() => null),
+      ]);
 
-        let draftLoaded = false;
-        if (resDraft && resDraft.ok) {
-          const jsonDraft = await resDraft.json();
-          const draft = jsonDraft?.draft;
-          if (draft && typeof draft === "object") {
-            const hasServerEntities =
-              (Array.isArray(draft.buildings) && draft.buildings.length > 0) ||
-              (Array.isArray(draft.nodes) && draft.nodes.length > 0);
+      let draftLoaded = false;
+      if (resDraft && resDraft.ok) {
+        const jsonDraft = await resDraft.json();
+        const draft = jsonDraft?.draft;
+        if (draft && typeof draft === "object") {
+          const hasServerEntities =
+            (Array.isArray(draft.buildings) && draft.buildings.length > 0) ||
+            (Array.isArray(draft.nodes) && draft.nodes.length > 0);
 
-            if (hasServerEntities) {
-              this.buildings = Array.isArray(draft.buildings) ? draft.buildings : [];
-              this.floors = Array.isArray(draft.floors) ? draft.floors : [];
-              this.nodes = Array.isArray(draft.nodes) ? draft.nodes : [];
-              this.edges = Array.isArray(draft.edges) ? draft.edges : [];
-              this.destinations = Array.isArray(draft.destinations) ? draft.destinations : [];
-              this.events = Array.isArray(draft.events) ? draft.events : [];
-              this.obstacles = Array.isArray(draft.obstacles) ? draft.obstacles : [];
-              this.stairGroups = Array.isArray(draft.stairGroups) ? draft.stairGroups : [];
-              this.liftGroups = Array.isArray(draft.liftGroups) ? draft.liftGroups : [];
-              this.doors = Array.isArray(draft.doors) ? draft.doors : [];
-              this.ensureDefaultGroundFloors();
-              (this.stairGroups || []).forEach((sg) => this.rebuildStairGroupConnections(sg));
+          if (hasServerEntities) {
+            this.buildings = Array.isArray(draft.buildings) ? draft.buildings : [];
+            this.floors = Array.isArray(draft.floors) ? draft.floors : [];
+            this.nodes = Array.isArray(draft.nodes) ? draft.nodes : [];
+            this.edges = Array.isArray(draft.edges) ? draft.edges : [];
+            this.destinations = Array.isArray(draft.destinations) ? draft.destinations : [];
+            this.events = Array.isArray(draft.events) ? draft.events : [];
+            this.obstacles = Array.isArray(draft.obstacles) ? draft.obstacles : [];
+            this.stairGroups = Array.isArray(draft.stairGroups) ? draft.stairGroups : [];
+            this.liftGroups = Array.isArray(draft.liftGroups) ? draft.liftGroups : [];
+            this.doors = Array.isArray(draft.doors) ? draft.doors : [];
+            this.ensureDefaultGroundFloors();
+            (this.stairGroups || []).forEach((sg) => this.rebuildStairGroupConnections(sg));
+            draftLoaded = true;
+            if (typeof window !== "undefined") {
+              try {
+                localStorage.setItem("campusnav_draft_cache", JSON.stringify(this.getWorkingData()));
+              } catch {}
+            }
+          } else {
+            // Server has no draft, but if local memory/storage has entities, keep local and sync to server
+            const hasLocal = this.buildings.length > 0 || this.nodes.length > 0;
+            if (hasLocal) {
               draftLoaded = true;
-              if (typeof window !== "undefined") {
-                try {
-                  localStorage.setItem("campusnav_draft_cache", JSON.stringify(this.getWorkingData()));
-                } catch {}
-              }
-            } else {
-              // Server has no draft, but if local memory/storage has entities, keep local and sync to server
-              const hasLocal = this.buildings.length > 0 || this.nodes.length > 0;
-              if (hasLocal) {
-                draftLoaded = true;
-                this.saveWorkingDraftToDatabase(false);
-              }
+              this.saveWorkingDraftToDatabase(false);
             }
           }
         }
+      }
 
-        if (resPub && resPub.ok) {
-          const jsonPub = await resPub.json();
-          const graph = jsonPub?.graph;
-          if (graph && typeof graph === "object") {
-            this.publishedGraph = {
-              buildings: graph.buildings || [],
-              floors: graph.floors || [],
-              nodes: graph.nodes || [],
-              edges: graph.edges || [],
-              destinations: graph.destinations || [],
-              events: graph.events || [],
-              obstacles: graph.obstacles || [],
-              stairGroups: graph.stairGroups || [],
-              liftGroups: graph.liftGroups || [],
-              doors: graph.doors || [],
-            };
+      if (resPub && resPub.ok) {
+        const jsonPub = await resPub.json();
+        const graph = jsonPub?.graph;
+        if (graph && typeof graph === "object") {
+          if (jsonPub.version) this.publishedVersion = `v${jsonPub.version}`;
+          this.publishedGraph = {
+            buildings: Array.isArray(graph.buildings) ? graph.buildings : [],
+            floors: Array.isArray(graph.floors) ? graph.floors : [],
+            nodes: Array.isArray(graph.nodes) ? graph.nodes : [],
+            edges: Array.isArray(graph.edges) ? graph.edges : [],
+            destinations: Array.isArray(graph.destinations) ? graph.destinations : [],
+            events: Array.isArray(graph.events) ? graph.events : [],
+            obstacles: Array.isArray(graph.obstacles) ? graph.obstacles : [],
+            stairGroups: Array.isArray(graph.stairGroups) ? graph.stairGroups : [],
+            liftGroups: Array.isArray(graph.liftGroups) ? graph.liftGroups : [],
+            doors: Array.isArray(graph.doors) ? graph.doors : [],
+          };
 
-            // If draft was not loaded, populate from published graph
-            if (!draftLoaded) {
-              this.buildings = JSON.parse(JSON.stringify(this.publishedGraph.buildings));
-              this.floors = JSON.parse(JSON.stringify(this.publishedGraph.floors));
-              this.nodes = JSON.parse(JSON.stringify(this.publishedGraph.nodes));
-              this.edges = JSON.parse(JSON.stringify(this.publishedGraph.edges));
-              this.destinations = JSON.parse(JSON.stringify(this.publishedGraph.destinations));
-              this.events = JSON.parse(JSON.stringify(this.publishedGraph.events || []));
-              this.obstacles = JSON.parse(JSON.stringify(this.publishedGraph.obstacles || []));
-              this.stairGroups = JSON.parse(JSON.stringify(this.publishedGraph.stairGroups || []));
-              this.liftGroups = JSON.parse(JSON.stringify(this.publishedGraph.liftGroups || []));
-              this.doors = JSON.parse(JSON.stringify(this.publishedGraph.doors || []));
-              if (typeof window !== "undefined") {
-                try {
-                  localStorage.setItem("campusnav_draft_cache", JSON.stringify(this.getWorkingData()));
-                } catch {}
-              }
+          // If draft was not loaded and local working data is empty, initialize working data from published graph
+          if (!draftLoaded && this.buildings.length === 0 && this.nodes.length === 0) {
+            this.buildings = JSON.parse(JSON.stringify(this.publishedGraph.buildings));
+            this.floors = JSON.parse(JSON.stringify(this.publishedGraph.floors));
+            this.nodes = JSON.parse(JSON.stringify(this.publishedGraph.nodes));
+            this.edges = JSON.parse(JSON.stringify(this.publishedGraph.edges));
+            this.destinations = JSON.parse(JSON.stringify(this.publishedGraph.destinations));
+            this.events = JSON.parse(JSON.stringify(this.publishedGraph.events || []));
+            this.obstacles = JSON.parse(JSON.stringify(this.publishedGraph.obstacles || []));
+            this.stairGroups = JSON.parse(JSON.stringify(this.publishedGraph.stairGroups || []));
+            this.liftGroups = JSON.parse(JSON.stringify(this.publishedGraph.liftGroups || []));
+            this.doors = JSON.parse(JSON.stringify(this.publishedGraph.doors || []));
+            if (typeof window !== "undefined") {
+              try {
+                localStorage.setItem("campusnav_draft_cache", JSON.stringify(this.getWorkingData()));
+              } catch {}
             }
-          }
-        }
-      } else {
-        // Visitor: fetch only the published graph from database with no-cache
-        let loaded = false;
-        try {
-          const resPub = await fetch(`/api/published-graph?_t=${Date.now()}`, {
-            cache: "no-store",
-            headers: {
-              Pragma: "no-cache",
-              "Cache-Control": "no-cache, no-store, must-revalidate",
-            },
-          });
-          if (resPub.ok) {
-            const jsonPub = await resPub.json();
-            const graph = jsonPub?.graph;
-            if (graph && typeof graph === "object") {
-              if (jsonPub.version) this.publishedVersion = `v${jsonPub.version}`;
-              this.publishedGraph = {
-                buildings: graph.buildings || [],
-                floors: graph.floors || [],
-                nodes: graph.nodes || [],
-                edges: graph.edges || [],
-                destinations: graph.destinations || [],
-                events: graph.events || [],
-                obstacles: graph.obstacles || [],
-                stairGroups: graph.stairGroups || [],
-                liftGroups: graph.liftGroups || [],
-                doors: graph.doors || [],
-              };
-              this.buildings = graph.buildings || [];
-              this.floors = graph.floors || [];
-              this.nodes = graph.nodes || [];
-              this.edges = graph.edges || [];
-              this.destinations = graph.destinations || [];
-              this.events = graph.events || [];
-              this.obstacles = graph.obstacles || [];
-              this.stairGroups = graph.stairGroups || [];
-              this.liftGroups = graph.liftGroups || [];
-              this.doors = graph.doors || [];
-              if (this.buildings.length > 0 || this.nodes.length > 0) {
-                loaded = true;
-              }
-            }
-          }
-        } catch (e) {
-          console.warn("Failed to fetch /api/published-graph:", e);
-        }
-
-        // Fallback 1: Try /api/campus/main/graph if primary published endpoint did not return entities
-        if (!loaded) {
-          try {
-            const resSlug = await fetch(`/api/campus/main/graph?_t=${Date.now()}`, {
-              cache: "no-store",
-              headers: {
-                Pragma: "no-cache",
-                "Cache-Control": "no-cache, no-store, must-revalidate",
-              },
-            });
-            if (resSlug.ok) {
-              const jsonSlug = await resSlug.json();
-              const graph = jsonSlug?.data;
-              if (graph && (graph.buildings?.length > 0 || graph.nodes?.length > 0)) {
-                if (jsonSlug.version) this.publishedVersion = `v${jsonSlug.version}`;
-                this.publishedGraph = {
-                  buildings: graph.buildings || [],
-                  floors: graph.floors || [],
-                  nodes: graph.nodes || [],
-                  edges: graph.edges || [],
-                  destinations: graph.destinations || [],
-                  events: graph.events || [],
-                  obstacles: graph.obstacles || [],
-                  stairGroups: graph.stairGroups || [],
-                  liftGroups: graph.liftGroups || [],
-                  doors: graph.doors || [],
-                };
-                this.buildings = graph.buildings || [];
-                this.floors = graph.floors || [];
-                this.nodes = graph.nodes || [];
-                this.edges = graph.edges || [];
-                this.destinations = graph.destinations || [];
-                this.events = graph.events || [];
-                this.obstacles = graph.obstacles || [];
-                this.stairGroups = graph.stairGroups || [];
-                this.liftGroups = graph.liftGroups || [];
-                this.doors = graph.doors || [];
-                loaded = true;
-              }
-            }
-          } catch (e) {
-            console.warn("Failed to fetch /api/campus/main/graph fallback:", e);
-          }
-        }
-
-        // Fallback 2: Try /api/admin/campus-graph/draft if active published record was not yet created
-        if (!loaded) {
-          try {
-            const resDraft = await fetch(`/api/admin/campus-graph/draft?_t=${Date.now()}`, {
-              cache: "no-store",
-              headers: {
-                Pragma: "no-cache",
-                "Cache-Control": "no-cache, no-store, must-revalidate",
-              },
-            });
-            if (resDraft.ok) {
-              const jsonDraft = await resDraft.json();
-              const draft = jsonDraft?.draft;
-              if (draft && (draft.buildings?.length > 0 || draft.nodes?.length > 0)) {
-                this.publishedGraph = {
-                  buildings: draft.buildings || [],
-                  floors: draft.floors || [],
-                  nodes: draft.nodes || [],
-                  edges: draft.edges || [],
-                  destinations: draft.destinations || [],
-                  events: draft.events || [],
-                  obstacles: draft.obstacles || [],
-                  stairGroups: draft.stairGroups || [],
-                  liftGroups: draft.liftGroups || [],
-                  doors: draft.doors || [],
-                };
-                this.buildings = draft.buildings || [];
-                this.floors = draft.floors || [];
-                this.nodes = draft.nodes || [];
-                this.edges = draft.edges || [];
-                this.destinations = draft.destinations || [];
-                this.events = draft.events || [];
-                this.obstacles = draft.obstacles || [];
-                this.stairGroups = draft.stairGroups || [];
-                this.liftGroups = draft.liftGroups || [];
-                this.doors = draft.doors || [];
-                loaded = true;
-              }
-            }
-          } catch (e) {
-            console.warn("Failed to fetch /api/admin/campus-graph/draft fallback:", e);
           }
         }
       }
@@ -2865,20 +2729,6 @@ class CampusStore {
 
     if (version) {
       this.publishedVersion = String(version).startsWith("v") ? String(version) : `v${version}`;
-    }
-
-    const isVisitor = typeof window !== "undefined" && !window.location.pathname.startsWith("/admin");
-    if (isVisitor) {
-      this.buildings = this.publishedGraph.buildings;
-      this.floors = this.publishedGraph.floors;
-      this.nodes = this.publishedGraph.nodes;
-      this.edges = this.publishedGraph.edges;
-      this.destinations = this.publishedGraph.destinations;
-      this.events = this.publishedGraph.events;
-      this.obstacles = this.publishedGraph.obstacles;
-      this.stairGroups = this.publishedGraph.stairGroups || [];
-      this.liftGroups = this.publishedGraph.liftGroups || [];
-      this.doors = this.publishedGraph.doors || [];
     }
 
     this.listeners.forEach((l) => l());
