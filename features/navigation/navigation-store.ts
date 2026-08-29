@@ -75,7 +75,15 @@ export interface NavigationSessionState {
   startNavigationSession: (
     origin: Destination,
     destination: Destination,
-    route: Route
+    route: Route,
+    liveUserPosOptions?: {
+      x?: number;
+      y?: number;
+      lat?: number;
+      lng?: number;
+      floorId?: string;
+      canvasPos?: { x: number; y: number; floorId?: string };
+    }
   ) => void;
   updateGpsProgress: (
     gpsLat: number,
@@ -101,6 +109,7 @@ export interface NavigationSessionState {
   cancelNavigationSession: () => void;
   advanceToNextStep: () => void;
   advanceToPrevStep: () => void;
+  jumpToStep: (stepIndex: number) => void;
   resetManualStepping: () => void;
   setGpsSignalLost: () => void;
   setNavigationStatus: (status: NavigationStatus, errorMessage?: string) => void;
@@ -155,16 +164,30 @@ export const useNavigationStore = create<NavigationSessionState>((set, get) => (
       navigationMode: floorId === "f-out" ? "OUTDOOR" : "INDOOR",
     }),
 
-  startNavigationSession: (origin, destination, route) => {
+  startNavigationSession: (origin, destination, route, liveUserPosOptions) => {
     const firstNode = route.nodes[0];
-    const initialFloorId = firstNode?.floorId || "f-out";
+    const initialFloorId = liveUserPosOptions?.canvasPos?.floorId ?? liveUserPosOptions?.floorId ?? firstNode?.floorId ?? "f-out";
     const initialMode: NavigationMode = initialFloorId === "f-out" ? "OUTDOOR" : "INDOOR";
 
+    let ux = liveUserPosOptions?.canvasPos?.x ?? liveUserPosOptions?.x;
+    let uy = liveUserPosOptions?.canvasPos?.y ?? liveUserPosOptions?.y;
+    const uLat = liveUserPosOptions?.lat ?? (origin as any).lat ?? firstNode?.lat;
+    const uLng = liveUserPosOptions?.lng ?? (origin as any).lng ?? firstNode?.lng;
+
+    if ((ux === undefined || uy === undefined || isNaN(ux) || isNaN(uy)) && uLat && uLng) {
+      const canvas = gpsToCanvas(uLat, uLng);
+      ux = canvas.x;
+      uy = canvas.y;
+    } else if (ux === undefined || uy === undefined || isNaN(ux) || isNaN(uy)) {
+      ux = origin.x ?? firstNode?.x ?? 0;
+      uy = origin.y ?? firstNode?.y ?? 0;
+    }
+
     const initialPos: LiveUserPosition = {
-      x: origin.x ?? firstNode?.x ?? 0,
-      y: origin.y ?? firstNode?.y ?? 0,
-      lat: (origin as any).lat ?? firstNode?.lat,
-      lng: (origin as any).lng ?? firstNode?.lng,
+      x: ux,
+      y: uy,
+      lat: uLat,
+      lng: uLng,
       floorId: initialFloorId,
     };
 
@@ -177,6 +200,7 @@ export const useNavigationStore = create<NavigationSessionState>((set, get) => (
         outdoorThresholdMeters: OFF_ROUTE_THRESHOLD_METERS,
         indoorThresholdMeters: 10.0,
         arrivalThresholdMeters: ARRIVAL_THRESHOLD_METERS,
+        isInitialSessionStart: true,
       }
     );
 
@@ -187,22 +211,30 @@ export const useNavigationStore = create<NavigationSessionState>((set, get) => (
       { arrivalThresholdMeters: ARRIVAL_THRESHOLD_METERS }
     );
 
+    const initialIndex = initialGuidance.currentSegmentIndex;
+    const currentInstruction = (route.instructions && route.instructions.length > initialIndex)
+      ? route.instructions[initialIndex]
+      : initialGuidance.currentInstruction;
+    const nextInstruction = (route.instructions && route.instructions.length > initialIndex + 1)
+      ? route.instructions[initialIndex + 1]
+      : initialGuidance.nextInstruction;
+
     set((state) => ({
       status: "NAVIGATING",
       navigationMode: initialMode,
       origin,
       destination,
       activeRoute: route,
-      currentSegmentIndex: 0,
-      matchedNodeId: origin.nodeId || firstNode?.id || null,
+      currentSegmentIndex: initialIndex,
+      matchedNodeId: route.nodes[initialIndex]?.id || origin.nodeId || firstNode?.id || null,
       currentFloorId: initialFloorId,
-      currentBuildingId: (firstNode as any)?.buildingId ?? null,
+      currentBuildingId: (route.nodes[initialIndex] as any)?.buildingId ?? (firstNode as any)?.buildingId ?? null,
       indoorPositionSource: initialFloorId === "f-out" ? "OUTDOOR_GPS" : "BUILDING_ENTRANCE",
       positionConfidence: "HIGH",
-      distanceRemaining: route.distance || initialGuidance.distanceRemaining,
-      etaSeconds: Math.round(route.durationSec || initialGuidance.distanceRemaining / AVERAGE_WALKING_SPEED_MPS),
-      currentInstruction: (route.instructions && route.instructions.length > 0) ? route.instructions[0] : initialGuidance.currentInstruction,
-      nextInstruction: (route.instructions && route.instructions.length > 1) ? route.instructions[1] : initialGuidance.nextInstruction,
+      distanceRemaining: initialGuidance.distanceRemaining,
+      etaSeconds: Math.max(1, Math.round(initialGuidance.distanceRemaining / AVERAGE_WALKING_SPEED_MPS)),
+      currentInstruction,
+      nextInstruction,
       consecutiveOffRouteCount: 0,
       lastRerouteTimestamp: Date.now(),
       activeRequestId: state.activeRequestId + 1,
@@ -496,6 +528,30 @@ export const useNavigationStore = create<NavigationSessionState>((set, get) => (
       currentSegmentIndex: prevIndex,
       matchedNodeId: matchedNode?.id ?? state.matchedNodeId,
       currentFloorId: matchedNode?.floorId ?? state.currentFloorId,
+      distanceRemaining: Math.round(remainingDistance),
+      etaSeconds: Math.max(1, Math.round(remainingDistance / AVERAGE_WALKING_SPEED_MPS)),
+      currentInstruction,
+      nextInstruction,
+      isManualStepping: true,
+    });
+  },
+
+  jumpToStep: (stepIndex: number) => {
+    const state = get();
+    const instructions = state.activeRoute?.instructions || [];
+    if (instructions.length === 0) return;
+
+    const clamped = Math.max(0, Math.min(instructions.length - 1, stepIndex));
+    const currentInstruction = instructions[clamped] || null;
+    const nextInstruction = instructions[clamped + 1] || null;
+
+    let remainingDistance = 0;
+    for (let i = clamped; i < instructions.length; i++) {
+      remainingDistance += instructions[i]?.distance || 0;
+    }
+
+    set({
+      currentSegmentIndex: clamped,
       distanceRemaining: Math.round(remainingDistance),
       etaSeconds: Math.max(1, Math.round(remainingDistance / AVERAGE_WALKING_SPEED_MPS)),
       currentInstruction,

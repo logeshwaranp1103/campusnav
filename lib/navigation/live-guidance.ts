@@ -54,6 +54,7 @@ export interface RouteProjectionOptions {
   indoorThresholdMeters?: number;  // default: 10m
   arrivalThresholdMeters?: number; // default: 12m
   matchedNodeId?: string | null;
+  isInitialSessionStart?: boolean;
 }
 
 /**
@@ -160,9 +161,10 @@ export function projectUserOntoRoute(
   let bestT = 0;
   let bestActualDistMeters = 0;
 
-  // Incremental forward lookahead: only check immediate current and next segment to prevent skipping steps
-  const startIndex = Math.max(0, previousSegmentIndex);
-  const endIndex = Math.min(numSegments - 1, previousSegmentIndex + 1);
+  // If initial session start, evaluate across all route segments to align to user's current mid-route location (e.g. at D in A->F)
+  const isInitialStart = options.isInitialSessionStart || previousSegmentIndex < 0;
+  const startIndex = isInitialStart ? 0 : Math.max(0, previousSegmentIndex);
+  const endIndex = isInitialStart ? numSegments - 1 : Math.min(numSegments - 1, previousSegmentIndex + 1);
 
   for (let i = startIndex; i <= endIndex; i++) {
     const n1 = routeNodes[i];

@@ -42,6 +42,7 @@ export interface TurnByTurnBarProps {
   onRecalculate?: () => void;
   onNextStep?: () => void;
   onPrevStep?: () => void;
+  onJumpToStep?: (index: number) => void;
   isOffRoute?: boolean;
 }
 
@@ -57,15 +58,20 @@ export function TurnByTurnBar({
   onRecalculate,
   onNextStep,
   onPrevStep,
+  onJumpToStep,
   isOffRoute,
 }: TurnByTurnBarProps) {
   const [isExpanded, setIsExpanded] = useState(false);
   const [activePhotoModal, setActivePhotoModal] = useState<{ url: string; title: string; nodeId?: string } | null>(null);
   const [imageError, setImageError] = useState(false);
 
-  // Swipe gesture tracking refs
-  const touchStartY = useRef<number | null>(null);
-  const touchEndY = useRef<number | null>(null);
+  // Swipe gesture tracking refs for bottom bar (swipe up to expand)
+  const bottomTouchStartY = useRef<number | null>(null);
+  const bottomTouchEndY = useRef<number | null>(null);
+
+  // Swipe gesture tracking refs for top drawer handle (swipe down to collapse)
+  const headerTouchStartY = useRef<number | null>(null);
+  const headerTouchEndY = useRef<number | null>(null);
 
   if (!currentStep) return null;
 
@@ -74,22 +80,10 @@ export function TurnByTurnBar({
     ? (cleanLandmarkName(currentStep.targetNodeName) || currentStep.text || "Reference Location")
     : (cleanLandmarkName(nextStep?.targetNodeName) || nextStep?.text || "Upcoming Landmark");
 
-  const stepProgressPct = totalStepsCount > 1
-    ? ((currentStepIndex + 1) / totalStepsCount) * 100
-    : 100;
-
-  const distanceProgressPct = totalDistanceMeters > 0
-    ? ((totalDistanceMeters - remainingDistanceMeters) / totalDistanceMeters) * 100
-    : 0;
-
-  // Accurately show progress starting from step 1 (1/N) up to the final step (N/N)
-  const progressPct = Math.min(
-    100,
-    Math.max(
-      Math.min(100, Math.round(stepProgressPct)),
-      Math.min(100, Math.max(0, Math.round(distanceProgressPct)))
-    )
-  );
+  // Real physical distance-based progress (0% when stationary at start, smoothly advancing only as user actually travels)
+  const progressPct = totalDistanceMeters > 0
+    ? Math.min(100, Math.max(0, Math.round(((totalDistanceMeters - remainingDistanceMeters) / totalDistanceMeters) * 100)))
+    : (currentStepIndex >= totalStepsCount - 1 && totalStepsCount > 0 ? 100 : 0);
 
   const etaMinutes = Math.max(1, Math.round(remainingDistanceMeters / 70));
 
@@ -137,29 +131,44 @@ export function TurnByTurnBar({
     return `${Math.round(meters)} m`;
   };
 
-  // Touch gesture handlers for swiping
-  const handleTouchStart = (e: React.TouchEvent) => {
-    touchStartY.current = e.targetTouches[0].clientY;
-    touchEndY.current = null;
+  // Touch gesture handlers for Bottom Bar (Swipe UP to expand)
+  const handleBottomTouchStart = (e: React.TouchEvent) => {
+    bottomTouchStartY.current = e.targetTouches[0].clientY;
+    bottomTouchEndY.current = null;
   };
 
-  const handleTouchMove = (e: React.TouchEvent) => {
-    touchEndY.current = e.targetTouches[0].clientY;
+  const handleBottomTouchMove = (e: React.TouchEvent) => {
+    bottomTouchEndY.current = e.targetTouches[0].clientY;
   };
 
-  const handleTouchEnd = () => {
-    if (touchStartY.current === null || touchEndY.current === null) return;
-    const deltaY = touchEndY.current - touchStartY.current;
-    // Swipe UP (deltaY < -35) -> Expand full route
+  const handleBottomTouchEnd = () => {
+    if (bottomTouchStartY.current === null || bottomTouchEndY.current === null) return;
+    const deltaY = bottomTouchEndY.current - bottomTouchStartY.current;
     if (deltaY < -35 && !isExpanded) {
       setIsExpanded(true);
     }
-    // Swipe DOWN (deltaY > 35) -> Collapse full route
+    bottomTouchStartY.current = null;
+    bottomTouchEndY.current = null;
+  };
+
+  // Touch gesture handlers for Header Drag Pill (Swipe DOWN to collapse)
+  const handleHeaderTouchStart = (e: React.TouchEvent) => {
+    headerTouchStartY.current = e.targetTouches[0].clientY;
+    headerTouchEndY.current = null;
+  };
+
+  const handleHeaderTouchMove = (e: React.TouchEvent) => {
+    headerTouchEndY.current = e.targetTouches[0].clientY;
+  };
+
+  const handleHeaderTouchEnd = () => {
+    if (headerTouchStartY.current === null || headerTouchEndY.current === null) return;
+    const deltaY = headerTouchEndY.current - headerTouchStartY.current;
     if (deltaY > 35 && isExpanded) {
       setIsExpanded(false);
     }
-    touchStartY.current = null;
-    touchEndY.current = null;
+    headerTouchStartY.current = null;
+    headerTouchEndY.current = null;
   };
 
   return (
@@ -281,9 +290,9 @@ export function TurnByTurnBar({
       {/* ══════════════════════════════════════════════════════════ */}
       <div
         className="fixed bottom-3 left-3 right-3 sm:left-4 sm:right-4 z-40 mx-auto max-w-lg pointer-events-none"
-        onTouchStart={handleTouchStart}
-        onTouchMove={handleTouchMove}
-        onTouchEnd={handleTouchEnd}
+        onTouchStart={handleBottomTouchStart}
+        onTouchMove={handleBottomTouchMove}
+        onTouchEnd={handleBottomTouchEnd}
       >
         <motion.div
           initial={{ opacity: 0, y: 30 }}
@@ -403,13 +412,15 @@ export function TurnByTurnBar({
               animate={{ y: 0 }}
               exit={{ y: "100%" }}
               transition={{ type: "spring", damping: 28, stiffness: 300 }}
-              onTouchStart={handleTouchStart}
-              onTouchMove={handleTouchMove}
-              onTouchEnd={handleTouchEnd}
               className="relative w-full max-w-lg mx-auto max-h-[82vh] flex flex-col rounded-t-3xl border-t border-slate-200 bg-white shadow-2xl text-slate-900 overflow-hidden"
             >
               {/* Sheet Header & Swipe-Down Handle */}
-              <div className="p-4 border-b border-slate-100 bg-white sticky top-0 z-10">
+              <div
+                className="p-4 border-b border-slate-100 bg-white sticky top-0 z-10 select-none"
+                onTouchStart={handleHeaderTouchStart}
+                onTouchMove={handleHeaderTouchMove}
+                onTouchEnd={handleHeaderTouchEnd}
+              >
                 {/* Drag Handle */}
                 <button
                   type="button"
@@ -420,7 +431,7 @@ export function TurnByTurnBar({
                   <div className="h-1.5 w-12 rounded-full bg-slate-300 group-hover:bg-slate-400 transition-colors" />
                   <div className="flex items-center gap-1 text-[11px] font-semibold text-slate-400 pt-1.5 group-hover:text-slate-600 transition-colors">
                     <ChevronDown className="h-3.5 w-3.5" />
-                    <span>Tap to close</span>
+                    <span>Tap or swipe down to close</span>
                   </div>
                 </button>
 
@@ -460,12 +471,18 @@ export function TurnByTurnBar({
                   return (
                     <div
                       key={idx}
+                      onClick={() => {
+                        if (onJumpToStep) {
+                          onJumpToStep(idx);
+                          setIsExpanded(false);
+                        }
+                      }}
                       className={cn(
-                        "relative flex items-start gap-3.5 p-3 rounded-2xl border transition-all",
+                        "relative flex items-start gap-3.5 p-3 rounded-2xl border transition-all cursor-pointer",
                         isCurrent
                           ? "bg-emerald-50/90 border-emerald-300 shadow-xs ring-1 ring-emerald-400/40 text-slate-900"
                           : isPast
-                          ? "bg-slate-50/50 border-slate-150 opacity-50 text-slate-500"
+                          ? "bg-slate-50/50 border-slate-150 opacity-60 text-slate-500 hover:opacity-90"
                           : "bg-slate-50 border-slate-200 hover:bg-slate-100/80 text-slate-900"
                       )}
                     >

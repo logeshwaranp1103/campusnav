@@ -225,12 +225,19 @@ export function findContextAwareNearestNodes(
   }
 
   const getDistance = (n: Node) => {
+    // 1. If we have canvas coordinates for both user and node, prioritize high-precision canvas distance
+    if (context.userCanvasPos && typeof n.x === "number" && typeof n.y === "number") {
+      const isSameFloor =
+        !context.floorId ||
+        context.floorId === n.floorId ||
+        ((context.floorId === "f-out" || context.floorId === "outdoor") && (!n.floorId || n.floorId === "f-out" || n.floorId === "outdoor"));
+      const floorPenalty = isSameFloor ? 0 : 500;
+      return Math.hypot(context.userCanvasPos.x - n.x, context.userCanvasPos.y - n.y) + floorPenalty;
+    }
+    // 2. Geographic coordinates fallback
     const g = getNodeGeographicCoordinates(n);
     if (userCoords.lat !== 0 && userCoords.lng !== 0 && g.lat !== 0 && g.lng !== 0) {
       return calculateGeographicDistance(userCoords.lat, userCoords.lng, g.lat, g.lng);
-    }
-    if (context.userCanvasPos && typeof n.x === "number" && typeof n.y === "number") {
-      return Math.hypot(context.userCanvasPos.x - n.x, context.userCanvasPos.y - n.y);
     }
     return Infinity;
   };
@@ -250,7 +257,17 @@ export function findContextAwareNearestNodes(
       }
     }
 
-    // Priority 2: Direct building entrance nodes
+    // Priority 2: All indoor nodes of this building sorted by true distance
+    const buildingNodes = validNodes.filter((n) => {
+      const nodeFloor = context.floors?.find((f) => f.id === n.floorId);
+      const extNode = n as Node & { buildingId?: string };
+      return nodeFloor?.buildingId === bldId || (n.floorId && bldFloorIds.has(n.floorId)) || extNode.buildingId === bldId;
+    });
+    if (buildingNodes.length > 0) {
+      candidatePool.push(...buildingNodes.slice().sort((a, b) => getDistance(a) - getDistance(b)));
+    }
+
+    // Priority 3: Direct building entrance nodes
     const buildingEntranceNodes = validNodes.filter((n) => {
       const isEnt = n.type === "ENTRANCE" || n.type === "BUILDING_ENTRANCE" || n.isEntranceNode;
       if (!isEnt) return false;
@@ -263,16 +280,6 @@ export function findContextAwareNearestNodes(
     });
     if (buildingEntranceNodes.length > 0) {
       candidatePool.push(...buildingEntranceNodes.slice().sort((a, b) => getDistance(a) - getDistance(b)));
-    }
-
-    // Priority 3: All indoor nodes of this building (ground floor first)
-    const buildingNodes = validNodes.filter((n) => {
-      const nodeFloor = context.floors?.find((f) => f.id === n.floorId);
-      const extNode = n as Node & { buildingId?: string };
-      return nodeFloor?.buildingId === bldId || (n.floorId && bldFloorIds.has(n.floorId)) || extNode.buildingId === bldId;
-    });
-    if (buildingNodes.length > 0) {
-      candidatePool.push(...buildingNodes.slice().sort((a, b) => getDistance(a) - getDistance(b)));
     }
 
     if (candidatePool.length > 0) {

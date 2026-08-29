@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { findAlternativeRoutes, shortestPath } from "../features/navigation/services/graph";
+import { findAlternativeRoutes, shortestPath, type Route, type RouteInstruction } from "../features/navigation/services/graph";
 import { useNavigationStore } from "../features/navigation/navigation-store";
 import { campusStore } from "../shared/lib/campus-store";
 import type { Node, Edge, Destination, Floor } from "../shared/data/campus";
@@ -173,6 +173,77 @@ describe("Alternative (Second Shortest) Route & Turn-by-Turn Stepping Suite", ()
 
       campusStore.setInstantLiveSync(false);
       expect(campusStore.getInstantLiveSync()).toBe(false);
+    });
+  });
+
+  describe("6. Mid-Route Live Start Point Alignment (A->F with user at D)", () => {
+    it("initializes current step at point D, marks A-C as completed, and shows remaining route from D to F", () => {
+      const nodes: Node[] = [
+        { id: "A", name: "Gate A", x: 0, y: 0, floorId: "f-out", type: "GATE" },
+        { id: "B", name: "Corridor B", x: 50, y: 0, floorId: "f-out", type: "CORRIDOR" },
+        { id: "C", name: "Corridor C", x: 100, y: 0, floorId: "f-out", type: "CORRIDOR" },
+        { id: "D", name: "Midpoint D", x: 150, y: 0, floorId: "f-out", type: "CORRIDOR" },
+        { id: "E", name: "Corridor E", x: 200, y: 0, floorId: "f-out", type: "CORRIDOR" },
+        { id: "F", name: "Destination F", x: 250, y: 0, floorId: "f-out", type: "ROOM" },
+      ];
+
+      const edges: Edge[] = [
+        { id: "e1", from: "A", to: "B", distance: 50, bidirectional: true, type: "WALK" },
+        { id: "e2", from: "B", to: "C", distance: 50, bidirectional: true, type: "WALK" },
+        { id: "e3", from: "C", to: "D", distance: 50, bidirectional: true, type: "WALK" },
+        { id: "e4", from: "D", to: "E", distance: 50, bidirectional: true, type: "WALK" },
+        { id: "e5", from: "E", to: "F", distance: 50, bidirectional: true, type: "WALK" },
+      ];
+
+      const route: Route = {
+        id: "A->F",
+        nodes,
+        edges,
+        distance: 250,
+        durationSec: 200,
+        instructions: [
+          { text: "Head straight towards Corridor B", distance: 50, icon: "straight", targetNodeId: "B" },
+          { text: "Continue towards Corridor C", distance: 50, icon: "straight", targetNodeId: "C" },
+          { text: "Proceed to Midpoint D", distance: 50, icon: "straight", targetNodeId: "D" },
+          { text: "Walk towards Corridor E", distance: 50, icon: "straight", targetNodeId: "E" },
+          { text: "Arrive at Destination F", distance: 50, icon: "arrive", targetNodeId: "F" },
+        ],
+      };
+
+      const origin: Destination = { id: "dest-a", name: "Gate A", nodeId: "A", category: "GATE", aliases: [] };
+      const destination: Destination = { id: "dest-f", name: "Destination F", nodeId: "F", category: "ROOM", aliases: [] };
+
+      // User hits Start Navigation while physically standing at Midpoint D (x=150, y=0)
+      useNavigationStore.getState().startNavigationSession(origin, destination, route, {
+        x: 150,
+        y: 0,
+        floorId: "f-out",
+        canvasPos: { x: 150, y: 0, floorId: "f-out" },
+      });
+
+      const session = useNavigationStore.getState();
+
+      // Session should immediately be matched to D (segment index 3)
+      expect(session.currentSegmentIndex).toBe(3);
+      expect(session.matchedNodeId).toBe("D");
+
+      // Current instruction should be step 3 (towards E)
+      expect(session.currentInstruction?.text).toBe("Walk towards Corridor E");
+
+      // Distance remaining should only be D->E->F (100m) instead of full 250m
+      expect(session.distanceRemaining).toBeLessThanOrEqual(105);
+
+      // In the full instruction list of 5 steps:
+      // Steps 0, 1, 2 (A to C) are past / completed (idx < 3)
+      const allInstructions: RouteInstruction[] = route.instructions || [];
+      const pastSteps = allInstructions.filter((_: RouteInstruction, idx: number) => idx < session.currentSegmentIndex);
+      const currentStep = allInstructions[session.currentSegmentIndex];
+      const futureSteps = allInstructions.filter((_: RouteInstruction, idx: number) => idx > session.currentSegmentIndex);
+
+      expect(pastSteps.length).toBe(3);
+      expect(currentStep.text).toBe("Walk towards Corridor E");
+      expect(futureSteps.length).toBe(1);
+      expect(futureSteps[0].text).toBe("Arrive at Destination F");
     });
   });
 });

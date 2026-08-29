@@ -938,7 +938,7 @@ class CampusStore {
       const defaultName =
         ord < 0
           ? ord === -1
-            ? "Level -1 Basement"
+            ? "Basement"
             : `Basement ${Math.abs(ord)}`
           : ord === 0
           ? "Ground Floor"
@@ -1030,7 +1030,7 @@ class CampusStore {
     if (srcFloor.ordinal < 0) {
       const minOrdinal = Math.min(...buildingFloors.map((f) => f.ordinal), 0);
       nextOrdinal = Math.min(0, minOrdinal) - 1;
-      newFloorName = nextOrdinal === -1 ? "Level -1 Basement" : `Basement ${Math.abs(nextOrdinal)}`;
+      newFloorName = nextOrdinal === -1 ? "Basement" : `Basement ${Math.abs(nextOrdinal)}`;
     } else {
       const maxOrdinal = Math.max(...buildingFloors.map((f) => f.ordinal), 0);
       nextOrdinal = Math.max(0, maxOrdinal) + 1;

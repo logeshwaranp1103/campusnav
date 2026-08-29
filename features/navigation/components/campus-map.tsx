@@ -303,11 +303,22 @@ export function CampusMap({
     return cleanFirst !== "BLD" && cleanFirst.length > 0 ? cleanFirst.slice(0, 5) : (name || "Campus");
   }, []);
 
+  const cleanFloorName = (name: string | undefined | null): string => {
+    if (!name) return "Floor";
+    return name
+      .replace(/Level\s*[-–]?\s*1\s*[-–:\s]*Basement/gi, "Basement")
+      .replace(/Level\s*[-–]\s*1\s*[-–:\s]*Basement/gi, "Basement")
+      .replace(/Level\s*[-–]\s*1\b/gi, "Basement")
+      .replace(/\s+/g, " ")
+      .trim();
+  };
+
   const getFloorButtonLabel = useCallback((f: Floor | undefined): string => {
     if (!f) return "Floor";
     const b = getBuildingForFloor(f);
     const bCode = resolveCleanBuildingCode(b, f.buildingId);
-    return bCode ? `${bCode} - ${f.name || "Floor"}` : (f.name || "Floor");
+    const rawFloorName = cleanFloorName(f.name);
+    return bCode ? `${bCode} - ${rawFloorName}` : rawFloorName;
   }, [getBuildingForFloor, resolveCleanBuildingCode]);
 
   const activeFloorLabel = useMemo(() => {
@@ -478,8 +489,8 @@ export function CampusMap({
               if (!f) return null;
               const b = getBuildingForFloor(f);
               const bCode = resolveCleanBuildingCode(b, f.buildingId);
-              const floorDisplay = f.name || "Floor";
-              const cleanLabel = `${bCode} - ${floorDisplay}`;
+              const floorDisplay = cleanFloorName(f.name);
+              const cleanLabel = bCode ? `${bCode} - ${floorDisplay}` : floorDisplay;
 
               return (
                 <FloorButton
@@ -644,7 +655,7 @@ function FloorButton({
     <button
       suppressHydrationWarning
       onClick={onClick}
-      className={`flex items-center gap-1.5 rounded-xl px-3 py-2 text-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[rgb(var(--primary))] min-h-[38px] ${active ? "bg-[rgb(var(--primary))] text-[rgb(var(--primary-fg))] font-bold shadow-xs" : "hover:bg-[rgb(var(--muted))] text-[rgb(var(--fg))]"
+      className={`flex items-center gap-2 rounded-xl px-3 py-2 text-xs transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 min-h-[38px] ${active ? "bg-indigo-600 text-white font-bold shadow-md shadow-indigo-500/25 ring-1 ring-indigo-400/80" : "hover:bg-[rgb(var(--muted))] text-[rgb(var(--fg))]"
         }`}
     >
       {icon}
@@ -761,16 +772,53 @@ function MapCanvas({
   visualGpsRef.current = visualGps;
   const hasGpsFixRef = useRef(false);
 
-  // Target GPS position (strictly only computed when real GPS is active)
+  // Target GPS position with route line snapping during navigation
   const targetGpsPos = useMemo(() => {
+    let rawPos: { x: number; y: number; floorId?: string } | null = null;
     if (gps && gps.isGpsActive && gps.lat && gps.lng) {
-      return gpsToCanvas(gps.lat, gps.lng);
+      rawPos = gpsToCanvas(gps.lat, gps.lng);
+    } else if (gps && gps.isGpsActive && gps.canvasPos) {
+      rawPos = gps.canvasPos;
     }
-    if (gps && gps.isGpsActive && gps.canvasPos) {
-      return gps.canvasPos;
+
+    if (!rawPos) return null;
+
+    // If navigating along a route on the current floor, snap smoothly to the active route segment
+    if (route && route.nodes && route.nodes.length >= 2) {
+      const currentFloorNodes = route.nodes.filter(
+        (n) => !n.floorId || n.floorId === floorId || ((floorId === "f-out" || floorId === "outdoor") && (!n.floorId || n.floorId === "f-out" || n.floorId === "outdoor"))
+      );
+      if (currentFloorNodes.length >= 2) {
+        let bestSnap = rawPos;
+        let minSqDist = 30 * 30; // 30 canvas units threshold (~15 meters snapping corridor)
+
+        for (let i = 0; i < currentFloorNodes.length - 1; i++) {
+          const p1 = currentFloorNodes[i];
+          const p2 = currentFloorNodes[i + 1];
+          if (typeof p1.x !== "number" || typeof p2.x !== "number") continue;
+
+          const dx = p2.x - p1.x;
+          const dy = p2.y - p1.y;
+          const lenSq = dx * dx + dy * dy;
+          if (lenSq === 0) continue;
+
+          // Projection factor t clamped to segment [0, 1]
+          const t = Math.max(0, Math.min(1, ((rawPos.x - p1.x) * dx + (rawPos.y - p1.y) * dy) / lenSq));
+          const projX = p1.x + t * dx;
+          const projY = p1.y + t * dy;
+          const sqDist = (rawPos.x - projX) * (rawPos.x - projX) + (rawPos.y - projY) * (rawPos.y - projY);
+
+          if (sqDist < minSqDist) {
+            minSqDist = sqDist;
+            bestSnap = { x: projX, y: projY, floorId: rawPos.floorId };
+          }
+        }
+        return bestSnap;
+      }
     }
-    return null;
-  }, [gps?.isGpsActive, gps?.lat, gps?.lng, gps?.canvasPos]);
+
+    return rawPos;
+  }, [gps?.isGpsActive, gps?.lat, gps?.lng, gps?.canvasPos, route, floorId]);
 
   const targetHeading = gps?.heading ?? 0;
 

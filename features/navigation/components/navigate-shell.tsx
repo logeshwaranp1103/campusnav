@@ -556,7 +556,15 @@ export function NavigateShell() {
     if (gps && !gps.isTracking) {
       gps.startTracking();
     }
-    useNavigationStore.getState().startNavigationSession(fromSelected, toSelected, targetRoute);
+    const liveUserPosOptions = {
+      lat: gps?.lat,
+      lng: gps?.lng,
+      floorId: selectedFloorId,
+      canvasPos: gps?.canvasPos,
+      x: gps?.canvasPos?.x,
+      y: gps?.canvasPos?.y,
+    };
+    useNavigationStore.getState().startNavigationSession(fromSelected, toSelected, targetRoute, liveUserPosOptions);
   }
 
   async function handleConfirmTransportMode(mode: TravelMode) {
@@ -1176,6 +1184,9 @@ export function NavigateShell() {
               }}
               onPrevStep={() => {
                 navSession.advanceToPrevStep();
+              }}
+              onJumpToStep={(idx) => {
+                navSession.jumpToStep(idx);
               }}
             />
           );

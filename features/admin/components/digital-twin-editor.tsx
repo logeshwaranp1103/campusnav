@@ -4620,7 +4620,7 @@ export function DigitalTwinEditor({ initialTool = "SELECT" }: { initialTool?: To
                         const buildingFloors = storeData.floors.filter((f) => f.buildingId === selectedBuilding.id);
                         const minOrdinal = buildingFloors.length > 0 ? Math.min(...buildingFloors.map((f) => f.ordinal)) : 0;
                         const nextBasementOrd = Math.min(0, minOrdinal) - 1;
-                        const floorName = nextBasementOrd === -1 ? "Level -1 Basement" : `Basement ${Math.abs(nextBasementOrd)}`;
+                        const floorName = nextBasementOrd === -1 ? "Basement" : `Basement ${Math.abs(nextBasementOrd)}`;
                         const code = getFloorCode(nextBasementOrd, floorName);
                         const newFloor = campusStore.addFloor(selectedBuilding.id, floorName, nextBasementOrd, code);
                         setActiveFloorId(newFloor.id);
