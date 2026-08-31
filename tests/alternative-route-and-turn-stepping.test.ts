@@ -215,6 +215,7 @@ describe("Alternative (Second Shortest) Route & Turn-by-Turn Stepping Suite", ()
 
       // User hits Start Navigation while physically standing at Midpoint D (x=150, y=0)
       useNavigationStore.getState().startNavigationSession(origin, destination, route, {
+        isGpsActive: true,
         x: 150,
         y: 0,
         floorId: "f-out",
@@ -244,6 +245,121 @@ describe("Alternative (Second Shortest) Route & Turn-by-Turn Stepping Suite", ()
       expect(currentStep.text).toBe("Walk towards Corridor E");
       expect(futureSteps.length).toBe(1);
       expect(futureSteps[0].text).toBe("Arrive at Destination F");
+    });
+
+    it("starts strictly at Step 1 (Origin) when Live GPS is inactive or turned off", () => {
+      const nodes: Node[] = [
+        { id: "A", name: "Gate A", x: 0, y: 0, floorId: "f-out", type: "GATE" },
+        { id: "B", name: "Corridor B", x: 50, y: 0, floorId: "f-out", type: "CORRIDOR" },
+        { id: "C", name: "Corridor C", x: 100, y: 0, floorId: "f-out", type: "CORRIDOR" },
+        { id: "D", name: "Corridor D", x: 150, y: 0, floorId: "f-out", type: "CORRIDOR" },
+        { id: "E", name: "Corridor E", x: 200, y: 0, floorId: "f-out", type: "CORRIDOR" },
+        { id: "F", name: "Destination F", x: 250, y: 0, floorId: "f-out", type: "ROOM" },
+      ];
+
+      const edges: Edge[] = [
+        { id: "e1", from: "A", to: "B", distance: 50, bidirectional: true, type: "WALK" },
+        { id: "e2", from: "B", to: "C", distance: 50, bidirectional: true, type: "WALK" },
+        { id: "e3", from: "C", to: "D", distance: 50, bidirectional: true, type: "WALK" },
+        { id: "e4", from: "D", to: "E", distance: 50, bidirectional: true, type: "WALK" },
+        { id: "e5", from: "E", to: "F", distance: 50, bidirectional: true, type: "WALK" },
+      ];
+
+      const route: Route = {
+        id: "A->F",
+        nodes,
+        edges,
+        distance: 250,
+        durationSec: 200,
+        instructions: [
+          { text: "Head straight towards Corridor B", distance: 50, icon: "straight", targetNodeId: "B" },
+          { text: "Continue towards Corridor C", distance: 50, icon: "straight", targetNodeId: "C" },
+          { text: "Proceed to Midpoint D", distance: 50, icon: "straight", targetNodeId: "D" },
+          { text: "Walk towards Corridor E", distance: 50, icon: "straight", targetNodeId: "E" },
+          { text: "Arrive at Destination F", distance: 50, icon: "arrive", targetNodeId: "F" },
+        ],
+      };
+
+      const origin: Destination = { id: "dest-a", name: "Gate A", nodeId: "A", category: "GATE", aliases: [] };
+      const destination: Destination = { id: "dest-f", name: "Destination F", nodeId: "F", category: "ROOM", aliases: [] };
+
+      // User starts navigation without GPS (or GPS inactive with dummy canvas coordinates)
+      useNavigationStore.getState().startNavigationSession(origin, destination, route, {
+        isGpsActive: false,
+        x: 400,
+        y: 300,
+        canvasPos: { x: 400, y: 300, floorId: "f-out" },
+      });
+
+      const session = useNavigationStore.getState();
+
+      // Session MUST start at step 0 (Origin), not jump to end
+      expect(session.currentSegmentIndex).toBe(0);
+      expect(session.matchedNodeId).toBe("A");
+      expect(session.currentInstruction?.text).toBe("Head straight towards Corridor B");
+      expect(session.distanceRemaining).toBe(250);
+      expect(session.status).toBe("NAVIGATING");
+    });
+
+    it("starts at Point C and marks A->C as completed when user has live location at Point C", () => {
+      const nodes: Node[] = [
+        { id: "A", name: "Gate A", x: 0, y: 0, floorId: "f-out", type: "GATE" },
+        { id: "B", name: "Corridor B", x: 50, y: 0, floorId: "f-out", type: "CORRIDOR" },
+        { id: "C", name: "Corridor C", x: 100, y: 0, floorId: "f-out", type: "CORRIDOR" },
+        { id: "D", name: "Corridor D", x: 150, y: 0, floorId: "f-out", type: "CORRIDOR" },
+        { id: "E", name: "Corridor E", x: 200, y: 0, floorId: "f-out", type: "CORRIDOR" },
+        { id: "F", name: "Destination F", x: 250, y: 0, floorId: "f-out", type: "ROOM" },
+      ];
+
+      const edges: Edge[] = [
+        { id: "e1", from: "A", to: "B", distance: 50, bidirectional: true, type: "WALK" },
+        { id: "e2", from: "B", to: "C", distance: 50, bidirectional: true, type: "WALK" },
+        { id: "e3", from: "C", to: "D", distance: 50, bidirectional: true, type: "WALK" },
+        { id: "e4", from: "D", to: "E", distance: 50, bidirectional: true, type: "WALK" },
+        { id: "e5", from: "E", to: "F", distance: 50, bidirectional: true, type: "WALK" },
+      ];
+
+      const route: Route = {
+        id: "A->F",
+        nodes,
+        edges,
+        distance: 250,
+        durationSec: 200,
+        instructions: [
+          { text: "Head straight towards Corridor B", distance: 50, icon: "straight", targetNodeId: "B" },
+          { text: "Continue towards Corridor C", distance: 50, icon: "straight", targetNodeId: "C" },
+          { text: "Proceed to Midpoint D", distance: 50, icon: "straight", targetNodeId: "D" },
+          { text: "Walk towards Corridor E", distance: 50, icon: "straight", targetNodeId: "E" },
+          { text: "Arrive at Destination F", distance: 50, icon: "arrive", targetNodeId: "F" },
+        ],
+      };
+
+      const origin: Destination = { id: "dest-a", name: "Gate A", nodeId: "A", category: "GATE", aliases: [] };
+      const destination: Destination = { id: "dest-f", name: "Destination F", nodeId: "F", category: "ROOM", aliases: [] };
+
+      // User provides origin A and end F, but user is physically at Point C (x=100, y=0) with live location ON
+      useNavigationStore.getState().startNavigationSession(origin, destination, route, {
+        isGpsActive: true,
+        x: 100,
+        y: 0,
+        floorId: "f-out",
+        canvasPos: { x: 100, y: 0, floorId: "f-out" },
+      });
+
+      const session = useNavigationStore.getState();
+
+      // Session should match to C (segment index 2)
+      expect(session.currentSegmentIndex).toBe(2);
+      expect(session.matchedNodeId).toBe("C");
+      expect(session.currentInstruction?.text).toBe("Proceed to Midpoint D");
+      expect(session.distanceRemaining).toBeLessThanOrEqual(155);
+
+      // Steps 0 and 1 (A to C) are completed (idx < 2)
+      const allInstructions: RouteInstruction[] = route.instructions || [];
+      const pastSteps = allInstructions.filter((_, idx) => idx < session.currentSegmentIndex);
+      expect(pastSteps.length).toBe(2);
+      expect(pastSteps[0].text).toBe("Head straight towards Corridor B");
+      expect(pastSteps[1].text).toBe("Continue towards Corridor C");
     });
   });
 });

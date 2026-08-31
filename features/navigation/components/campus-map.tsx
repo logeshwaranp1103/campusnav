@@ -739,6 +739,7 @@ function MapCanvas({
   const { buildings, nodes: allNodes, edges: allEdges, destinations: allDestinations, events: allEvents } = publishedData;
   const svgRef = useRef<SVGSVGElement | null>(null);
   const showNames = nodeDisplayMode === "ALL";
+  const currentNavSegIdx = useNavigationStore((s) => s.currentSegmentIndex);
 
   // Interactive Pan & Zoom State
   const [internalZoom, setInternalZoom] = useState(1);
@@ -2429,7 +2430,7 @@ function MapCanvas({
           </g>
         )}
 
-        {/* Stable Vibrant Route Highlight Lines */}
+        {/* Stable Vibrant Route Highlight Lines with Completed vs Active Segments */}
         {routeEdges.map((e, i) => {
           const from = findNode(e.from);
           const to = findNode(e.to);
@@ -2443,17 +2444,27 @@ function MapCanvas({
 
           const isEvEdge = e.pathType === "EV";
 
+          // Determine if this segment is already completed (past the current active segment)
+          const routeEdgeIndex = route?.edges
+            ? route.edges.findIndex((re) => re.id === e.id || (re.from === e.from && re.to === e.to) || (re.from === e.to && re.to === e.from))
+            : -1;
+          const isCompletedSegment = isNavigating && routeEdgeIndex >= 0 && routeEdgeIndex < currentNavSegIdx;
+
           const strokeGlow = isSegmentBlocked
             ? "#ef4444"
-            : isEvEdge
-              ? "#059669"
-              : "#2563eb";
+            : isCompletedSegment
+              ? "#94a3b8"
+              : isEvEdge
+                ? "#059669"
+                : "#2563eb";
 
           const strokeCore = isSegmentBlocked
             ? "#ef4444"
-            : isEvEdge
-              ? "#10b981"
-              : "#3b82f6";
+            : isCompletedSegment
+              ? "#94a3b8"
+              : isEvEdge
+                ? "#10b981"
+                : "#3b82f6";
 
           return (
             <g key={`r-group-${e.id}-${i}`}>
@@ -2464,9 +2475,9 @@ function MapCanvas({
                 x2={to.x}
                 y2={to.y}
                 stroke={strokeGlow}
-                strokeWidth={isSegmentBlocked ? 8 : isEvEdge ? 10 : 8}
-                strokeOpacity={isSegmentBlocked ? 0.4 : isEvEdge ? 0.35 : 0.3}
-                strokeDasharray={isSegmentBlocked ? "6 4" : (!isEvEdge && route?.travelMode === "MULTIMODAL" ? "5 4" : undefined)}
+                strokeWidth={isSegmentBlocked ? 8 : isCompletedSegment ? 6 : isEvEdge ? 10 : 8}
+                strokeOpacity={isSegmentBlocked ? 0.4 : isCompletedSegment ? 0.2 : isEvEdge ? 0.35 : 0.3}
+                strokeDasharray={isSegmentBlocked ? "6 4" : isCompletedSegment ? "4 4" : (!isEvEdge && route?.travelMode === "MULTIMODAL" ? "5 4" : undefined)}
                 strokeLinecap="round"
               />
               {/* Inner Solid High-Contrast Path Line */}
@@ -2476,8 +2487,9 @@ function MapCanvas({
                 x2={to.x}
                 y2={to.y}
                 stroke={strokeCore}
-                strokeWidth={isSegmentBlocked ? 5 : isEvEdge ? 5.5 : 4}
-                strokeDasharray={isSegmentBlocked ? "6 4" : (!isEvEdge && route?.travelMode === "MULTIMODAL" ? "5 4" : undefined)}
+                strokeWidth={isSegmentBlocked ? 5 : isCompletedSegment ? 3.5 : isEvEdge ? 5.5 : 4}
+                strokeOpacity={isCompletedSegment ? 0.45 : 1}
+                strokeDasharray={isSegmentBlocked ? "6 4" : isCompletedSegment ? "4 4" : (!isEvEdge && route?.travelMode === "MULTIMODAL" ? "5 4" : undefined)}
                 strokeLinecap="round"
               />
             </g>

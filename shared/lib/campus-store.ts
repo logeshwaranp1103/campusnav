@@ -264,24 +264,18 @@ class CampusStore {
     }
 
     const performSync = () => {
-      if (this.isSyncing || !this.isInitialized && !isExplicitReset) {
-        return;
-      }
-      const hasEntities =
-        this.buildings.length > 0 ||
-        this.nodes.length > 0 ||
-        this.floors.length > 0 ||
-        this.destinations.length > 0;
-
-      if (!hasEntities && !isExplicitReset) {
-        console.warn("[CampusStore] Protected database from accidental empty snapshot overwrite.");
+      if (this.isSyncing || (!this.isInitialized && !isExplicitReset)) {
         return;
       }
       try {
         fetch("/api/admin/campus-graph/draft", {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ snapshot: this.getWorkingData(), isExplicitReset }),
+          body: JSON.stringify({
+            snapshot: this.getWorkingData(),
+            isExplicitReset,
+            instantLiveSync: this.getInstantLiveSync(),
+          }),
           keepalive: true,
         }).catch((e) => console.warn("Failed to sync working draft to database:", e));
       } catch (e) {

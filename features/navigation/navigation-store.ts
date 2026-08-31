@@ -77,6 +77,7 @@ export interface NavigationSessionState {
     destination: Destination,
     route: Route,
     liveUserPosOptions?: {
+      isGpsActive?: boolean;
       x?: number;
       y?: number;
       lat?: number;
@@ -166,58 +167,88 @@ export const useNavigationStore = create<NavigationSessionState>((set, get) => (
 
   startNavigationSession: (origin, destination, route, liveUserPosOptions) => {
     const firstNode = route.nodes[0];
-    const initialFloorId = liveUserPosOptions?.canvasPos?.floorId ?? liveUserPosOptions?.floorId ?? firstNode?.floorId ?? "f-out";
-    const initialMode: NavigationMode = initialFloorId === "f-out" ? "OUTDOOR" : "INDOOR";
+    const hasLiveGps = Boolean(
+      liveUserPosOptions?.isGpsActive !== false &&
+      (
+        (typeof liveUserPosOptions?.lat === "number" && typeof liveUserPosOptions?.lng === "number" && (liveUserPosOptions.lat !== 0 || liveUserPosOptions.lng !== 0)) ||
+        (liveUserPosOptions?.isGpsActive === true && (liveUserPosOptions?.x !== undefined || liveUserPosOptions?.canvasPos?.x !== undefined))
+      )
+    );
 
-    let ux = liveUserPosOptions?.canvasPos?.x ?? liveUserPosOptions?.x;
-    let uy = liveUserPosOptions?.canvasPos?.y ?? liveUserPosOptions?.y;
-    const uLat = liveUserPosOptions?.lat ?? (origin as any).lat ?? firstNode?.lat;
-    const uLng = liveUserPosOptions?.lng ?? (origin as any).lng ?? firstNode?.lng;
+    let initialIndex = 0;
+    let distanceRemaining = route.distance;
+    let initialFloorId = firstNode?.floorId ?? origin.floorId ?? "f-out";
+    let currentInstruction: RouteInstruction | null = null;
+    let nextInstruction: RouteInstruction | null = null;
 
-    if ((ux === undefined || uy === undefined || isNaN(ux) || isNaN(uy)) && uLat && uLng) {
-      const canvas = gpsToCanvas(uLat, uLng);
-      ux = canvas.x;
-      uy = canvas.y;
-    } else if (ux === undefined || uy === undefined || isNaN(ux) || isNaN(uy)) {
-      ux = origin.x ?? firstNode?.x ?? 0;
-      uy = origin.y ?? firstNode?.y ?? 0;
+    if (!hasLiveGps) {
+      // 1. Without live GPS: Start navigation strictly at Step 1 (Origin)
+      initialIndex = 0;
+      distanceRemaining = route.distance;
+      initialFloorId = firstNode?.floorId ?? origin.floorId ?? "f-out";
+      currentInstruction = (route.instructions && route.instructions.length > 0)
+        ? route.instructions[0]
+        : { text: "Head towards " + (route.nodes[1]?.name || "destination"), distance: route.distance, icon: "straight" };
+      nextInstruction = (route.instructions && route.instructions.length > 1)
+        ? route.instructions[1]
+        : null;
+    } else {
+      // 2. With live GPS: Project user onto route to support starting mid-route (e.g., at Point C along A->F)
+      initialFloorId = liveUserPosOptions?.canvasPos?.floorId ?? liveUserPosOptions?.floorId ?? firstNode?.floorId ?? "f-out";
+
+      let ux = liveUserPosOptions?.canvasPos?.x ?? liveUserPosOptions?.x;
+      let uy = liveUserPosOptions?.canvasPos?.y ?? liveUserPosOptions?.y;
+      const uLat = liveUserPosOptions?.lat ?? (origin as any).lat ?? firstNode?.lat;
+      const uLng = liveUserPosOptions?.lng ?? (origin as any).lng ?? firstNode?.lng;
+
+      if ((ux === undefined || uy === undefined || isNaN(ux) || isNaN(uy)) && uLat && uLng) {
+        const canvas = gpsToCanvas(uLat, uLng);
+        ux = canvas.x;
+        uy = canvas.y;
+      } else if (ux === undefined || uy === undefined || isNaN(ux) || isNaN(uy)) {
+        ux = origin.x ?? firstNode?.x ?? 0;
+        uy = origin.y ?? firstNode?.y ?? 0;
+      }
+
+      const initialPos: LiveUserPosition = {
+        x: ux,
+        y: uy,
+        lat: uLat,
+        lng: uLng,
+        floorId: initialFloorId,
+      };
+
+      const initialProjection = projectUserOntoRoute(
+        initialPos,
+        route.nodes,
+        route.edges,
+        0,
+        {
+          outdoorThresholdMeters: OFF_ROUTE_THRESHOLD_METERS,
+          indoorThresholdMeters: 10.0,
+          arrivalThresholdMeters: ARRIVAL_THRESHOLD_METERS,
+          isInitialSessionStart: true,
+        }
+      );
+
+      const initialGuidance = computeLiveTurnGuidance(
+        initialPos,
+        route,
+        initialProjection,
+        { arrivalThresholdMeters: ARRIVAL_THRESHOLD_METERS }
+      );
+
+      initialIndex = initialGuidance.currentSegmentIndex;
+      distanceRemaining = initialGuidance.distanceRemaining;
+      currentInstruction = (route.instructions && route.instructions.length > initialIndex)
+        ? route.instructions[initialIndex]
+        : initialGuidance.currentInstruction;
+      nextInstruction = (route.instructions && route.instructions.length > initialIndex + 1)
+        ? route.instructions[initialIndex + 1]
+        : initialGuidance.nextInstruction;
     }
 
-    const initialPos: LiveUserPosition = {
-      x: ux,
-      y: uy,
-      lat: uLat,
-      lng: uLng,
-      floorId: initialFloorId,
-    };
-
-    const initialProjection = projectUserOntoRoute(
-      initialPos,
-      route.nodes,
-      route.edges,
-      0,
-      {
-        outdoorThresholdMeters: OFF_ROUTE_THRESHOLD_METERS,
-        indoorThresholdMeters: 10.0,
-        arrivalThresholdMeters: ARRIVAL_THRESHOLD_METERS,
-        isInitialSessionStart: true,
-      }
-    );
-
-    const initialGuidance = computeLiveTurnGuidance(
-      initialPos,
-      route,
-      initialProjection,
-      { arrivalThresholdMeters: ARRIVAL_THRESHOLD_METERS }
-    );
-
-    const initialIndex = initialGuidance.currentSegmentIndex;
-    const currentInstruction = (route.instructions && route.instructions.length > initialIndex)
-      ? route.instructions[initialIndex]
-      : initialGuidance.currentInstruction;
-    const nextInstruction = (route.instructions && route.instructions.length > initialIndex + 1)
-      ? route.instructions[initialIndex + 1]
-      : initialGuidance.nextInstruction;
+    const initialMode: NavigationMode = initialFloorId === "f-out" ? "OUTDOOR" : "INDOOR";
 
     set((state) => ({
       status: "NAVIGATING",
@@ -231,8 +262,8 @@ export const useNavigationStore = create<NavigationSessionState>((set, get) => (
       currentBuildingId: (route.nodes[initialIndex] as any)?.buildingId ?? (firstNode as any)?.buildingId ?? null,
       indoorPositionSource: initialFloorId === "f-out" ? "OUTDOOR_GPS" : "BUILDING_ENTRANCE",
       positionConfidence: "HIGH",
-      distanceRemaining: initialGuidance.distanceRemaining,
-      etaSeconds: Math.max(1, Math.round(initialGuidance.distanceRemaining / AVERAGE_WALKING_SPEED_MPS)),
+      distanceRemaining,
+      etaSeconds: Math.max(1, Math.round(distanceRemaining / AVERAGE_WALKING_SPEED_MPS)),
       currentInstruction,
       nextInstruction,
       consecutiveOffRouteCount: 0,

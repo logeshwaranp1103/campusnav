@@ -548,7 +548,6 @@ export function NavigateShell() {
     setShowTransportPrompt(false);
   }
 
-  // ── Auto-Focus on Start Navigation Session ──
   function startLive(targetRoute: Route | null = route) {
     if (!fromSelected || !toSelected || !targetRoute) return;
     setLive(true);
@@ -556,13 +555,20 @@ export function NavigateShell() {
     if (gps && !gps.isTracking) {
       gps.startTracking();
     }
+    const isGpsValid = Boolean(
+      gps?.isGpsActive &&
+      typeof gps.lat === "number" &&
+      typeof gps.lng === "number" &&
+      (gps.lat !== 0 || gps.lng !== 0)
+    );
     const liveUserPosOptions = {
-      lat: gps?.lat,
-      lng: gps?.lng,
+      isGpsActive: isGpsValid,
+      lat: isGpsValid ? gps.lat : undefined,
+      lng: isGpsValid ? gps.lng : undefined,
       floorId: selectedFloorId,
-      canvasPos: gps?.canvasPos,
-      x: gps?.canvasPos?.x,
-      y: gps?.canvasPos?.y,
+      canvasPos: isGpsValid ? gps.canvasPos : undefined,
+      x: isGpsValid ? gps.canvasPos?.x : undefined,
+      y: isGpsValid ? gps.canvasPos?.y : undefined,
     };
     useNavigationStore.getState().startNavigationSession(fromSelected, toSelected, targetRoute, liveUserPosOptions);
   }

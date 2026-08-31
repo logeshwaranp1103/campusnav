@@ -487,7 +487,7 @@ export function TurnByTurnBar({
                         isCurrent
                           ? "bg-emerald-50/90 border-emerald-300 shadow-xs ring-1 ring-emerald-400/40 text-slate-900"
                           : isPast
-                          ? "bg-slate-50/50 border-slate-150 opacity-60 text-slate-500 hover:opacity-90"
+                          ? "bg-slate-50/70 border-slate-200 text-slate-500 hover:bg-slate-100/60"
                           : "bg-slate-50 border-slate-200 hover:bg-slate-100/80 text-slate-900"
                       )}
                     >
@@ -498,11 +498,15 @@ export function TurnByTurnBar({
                           isCurrent
                             ? "bg-emerald-600 text-white shadow-emerald-500/20"
                             : isPast
-                            ? "bg-slate-200 text-slate-400"
+                            ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800"
                             : "bg-slate-200 text-slate-600"
                         )}
                       >
-                        {renderIcon(stepIcon, cn("h-5 w-5", isCurrent ? "text-white" : "text-slate-600"))}
+                        {isPast ? (
+                          <CheckCircle2 className="h-5 w-5 text-emerald-600 dark:text-emerald-400" />
+                        ) : (
+                          renderIcon(stepIcon, cn("h-5 w-5", isCurrent ? "text-white" : "text-slate-600"))
+                        )}
                       </div>
 
                       {/* Step Details */}
@@ -515,16 +519,21 @@ export function TurnByTurnBar({
                                 CURRENT
                               </Badge>
                             )}
+                            {isPast && (
+                              <Badge variant="success" className="border border-emerald-300 bg-emerald-50 text-emerald-700 text-[9px] font-bold px-1.5 py-0">
+                                COMPLETED
+                              </Badge>
+                            )}
                           </div>
                           {stepDistance > 0 && (
-                            <span className={cn("text-xs font-extrabold font-mono", isCurrent ? "text-emerald-700" : "text-slate-500")}>
+                            <span className={cn("text-xs font-extrabold font-mono", isCurrent ? "text-emerald-700" : isPast ? "text-slate-400 line-through" : "text-slate-500")}>
                               {formatDistance(stepDistance)}
                             </span>
                           )}
                         </div>
 
                         {/* Main Instruction Text */}
-                        <div className={cn("text-sm font-bold mt-1", isCurrent ? "text-slate-900" : "text-slate-800")}>
+                        <div className={cn("text-sm font-bold mt-1", isCurrent ? "text-slate-900" : isPast ? "text-slate-500" : "text-slate-800")}>
                           {stepText}
                         </div>
 

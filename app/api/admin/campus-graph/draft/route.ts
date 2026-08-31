@@ -84,46 +84,40 @@ export async function PUT(req: Request) {
     }
 
     if (snapshot) {
-      // Safety Guard: Never overwrite active draft with an empty snapshot unless explicit administrative reset is confirmed
-      const hasEntities =
-        (Array.isArray(snapshot.buildings) && snapshot.buildings.length > 0) ||
-        (Array.isArray(snapshot.nodes) && snapshot.nodes.length > 0) ||
-        (Array.isArray(snapshot.floors) && snapshot.floors.length > 0);
-
-      if (!hasEntities && !isExplicitReset) {
-        console.warn("[DraftRoute:PUT] Protected active-draft from accidental empty snapshot overwrite.");
-        return NextResponse.json({ success: true, protected: true });
-      }
-
-      // Save the full working draft snapshot JSON to DraftGraph table (used strictly by CAD Editor / Admin)
+      // 1. Save the full working draft snapshot JSON to DraftGraph table (used strictly by CAD Editor / Admin)
       await prisma.draftGraph.upsert({
         where: { id: "active-draft" },
         update: { snapshot: snapshot as unknown as import("@prisma/client").Prisma.InputJsonValue },
         create: { id: "active-draft", snapshot: snapshot as unknown as import("@prisma/client").Prisma.InputJsonValue },
       });
 
-      // Synchronize active-published in database so visitor navigation across all devices immediately receives the latest graph
-      const { invalidatePublishedCache } = await import("@/lib/services/publish-service");
-      await prisma.publishedGraph.upsert({
-        where: { id: "active-published" },
-        update: {
-          version: 1,
-          snapshot: snapshot as unknown as import("@prisma/client").Prisma.InputJsonValue,
-          publishedAt: new Date(),
-          publishedBy: "auto-draft-sync",
-        },
-        create: {
-          id: "active-published",
-          version: 1,
-          snapshot: snapshot as unknown as import("@prisma/client").Prisma.InputJsonValue,
-          publishedAt: new Date(),
-          publishedBy: "auto-draft-sync",
-        },
-      }).catch(() => null);
+      const instantLiveSync = Boolean(body.instantLiveSync);
 
-      invalidatePublishedCache();
+      // 2. Only if Live Sync is ON: Synchronize active-published in database so visitors receive latest graph on refresh without requiring Publish
+      if (instantLiveSync) {
+        const { invalidatePublishedCache } = await import("@/lib/services/publish-service");
+        await prisma.publishedGraph.upsert({
+          where: { id: "active-published" },
+          update: {
+            version: 1,
+            snapshot: snapshot as unknown as import("@prisma/client").Prisma.InputJsonValue,
+            publishedAt: new Date(),
+            publishedBy: "auto-live-sync",
+          },
+          create: {
+            id: "active-published",
+            version: 1,
+            snapshot: snapshot as unknown as import("@prisma/client").Prisma.InputJsonValue,
+            publishedAt: new Date(),
+            publishedBy: "auto-live-sync",
+          },
+        }).catch(() => null);
 
-      console.log(`[DraftRoute:PUT] Successfully saved active-draft and synced published-graph to database: ${snapshot.buildings?.length ?? 0} buildings, ${snapshot.nodes?.length ?? 0} nodes, ${snapshot.edges?.length ?? 0} edges`);
+        invalidatePublishedCache();
+        console.log(`[DraftRoute:PUT] [LiveSync: ON] Saved active-draft and auto-synced published-graph to database`);
+      } else {
+        console.log(`[DraftRoute:PUT] [LiveSync: OFF] Saved active-draft to database (publish required for visitor view)`);
+      }
     }
     return NextResponse.json({ success: true });
   } catch (err: unknown) {
