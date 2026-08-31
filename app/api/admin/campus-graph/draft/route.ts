@@ -33,17 +33,11 @@ export async function GET() {
 
     if (draftRecord && draftRecord.snapshot && typeof draftRecord.snapshot === "object") {
       const snap = draftRecord.snapshot as unknown as import("@/lib/services/publish-service").DraftSnapshot;
-      const hasSnapEntities =
-        (Array.isArray(snap.buildings) && snap.buildings.length > 0) ||
-        (Array.isArray(snap.nodes) && snap.nodes.length > 0);
-
-      if (hasSnapEntities) {
-        console.log(`[DraftRoute:GET] Loaded active-draft from DB: ${snap.buildings?.length ?? 0} buildings, ${snap.nodes?.length ?? 0} nodes, ${snap.edges?.length ?? 0} edges, ${snap.floors?.length ?? 0} floors, ${snap.destinations?.length ?? 0} destinations`);
-        return NextResponse.json({ draft: sanitizeSnapshotForPayload(snap) });
-      }
+      console.log(`[DraftRoute:GET] Loaded active-draft from DB: ${snap.buildings?.length ?? 0} buildings, ${snap.nodes?.length ?? 0} nodes, ${snap.edges?.length ?? 0} edges, ${snap.floors?.length ?? 0} floors, ${snap.destinations?.length ?? 0} destinations`);
+      return NextResponse.json({ draft: sanitizeSnapshotForPayload(snap) });
     }
 
-    // 2. Query PostgreSQL relational database tables
+    // 2. Query PostgreSQL relational database tables if draftRecord is not found
     const relational = await getRelationalGraphFromDatabase().catch(() => null);
     if (relational) {
       const hasRelationalEntities =
@@ -58,13 +52,8 @@ export async function GET() {
     // 3. Fallback to active published graph if draft is not set
     const published = await getActivePublishedGraph(true).catch(() => null);
     if (published && published.snapshot) {
-      const hasPubEntities =
-        (Array.isArray(published.snapshot.buildings) && published.snapshot.buildings.length > 0) ||
-        (Array.isArray(published.snapshot.nodes) && published.snapshot.nodes.length > 0);
-      if (hasPubEntities) {
-        console.log(`[DraftRoute:GET] Loaded from published graph: ${published.snapshot.buildings?.length ?? 0} buildings, ${published.snapshot.nodes?.length ?? 0} nodes`);
-        return NextResponse.json({ draft: sanitizeSnapshotForPayload(published.snapshot) });
-      }
+      console.log(`[DraftRoute:GET] Loaded from published graph: ${published.snapshot.buildings?.length ?? 0} buildings, ${published.snapshot.nodes?.length ?? 0} nodes`);
+      return NextResponse.json({ draft: sanitizeSnapshotForPayload(published.snapshot) });
     }
 
     console.log("[DraftRoute:GET] Database contains empty draft graph.");

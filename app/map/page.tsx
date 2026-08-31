@@ -131,24 +131,14 @@ export default function VisitorPage() {
       if (res.ok) {
         const json = await res.json();
         const graph = json.graph;
-        if (graph && (graph.buildings?.length > 0 || graph.nodes?.length > 0)) {
+        if (graph) {
           setPublishedData(graph);
           setVersion(json.version ? `v${json.version}` : "v1.0");
           return;
         }
       }
 
-      const resSlug = await fetch(`/api/campus/main/graph?_t=${Date.now()}`, {
-        cache: "no-store",
-      });
-      const jsonSlug = await resSlug.json();
-      if (jsonSlug.data && (jsonSlug.data.buildings?.length > 0 || jsonSlug.data.nodes?.length > 0)) {
-        setPublishedData(jsonSlug.data);
-        setVersion(jsonSlug.version ? `v${jsonSlug.version}` : "v1.0");
-        return;
-      }
-
-      const storePub = campusStore.getPublishedData();
+      const storePub = await campusStore.fetchPublishedData(true);
       setPublishedData(storePub);
       setVersion(campusStore.getPublishedVersion());
     } catch {

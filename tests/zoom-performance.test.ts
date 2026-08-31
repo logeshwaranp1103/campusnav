@@ -41,8 +41,8 @@ describe("CAD Editor & Campus Map Zoom Performance & Responsiveness", () => {
     });
 
     it("exposes distinct desktop and mobile default zoom configurations", () => {
-      expect(DESKTOP_DEFAULT_ZOOM).toBe(0.85);
-      expect(MOBILE_DEFAULT_ZOOM).toBe(0.85);
+      expect(DESKTOP_DEFAULT_ZOOM).toBe(0.80);
+      expect(MOBILE_DEFAULT_ZOOM).toBe(1.10);
       expect(DESKTOP_MOUSE_WHEEL_SENSITIVITY).toBeGreaterThan(0.002);
     });
   });

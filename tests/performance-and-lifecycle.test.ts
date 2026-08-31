@@ -43,8 +43,8 @@ describe("Performance, Concurrency & Navigation Lifecycle Spec", () => {
 
         await Promise.all([p1, p2, p3]);
 
-        // Should only trigger 1 network fetch cycle due to promise deduplication
-        expect(fetchCallCount).toBe(1);
+        // Should only trigger 1 network fetch cycle (2 parallel endpoints: draft + published) due to promise deduplication
+        expect(fetchCallCount).toBe(2);
       } finally {
         global.fetch = originalFetch;
         (global as any).window = originalWindow;

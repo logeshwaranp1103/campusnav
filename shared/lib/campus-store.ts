@@ -162,7 +162,7 @@ class CampusStore {
   private broadcastChannel: BroadcastChannel | null = null;
 
   constructor() {
-    this.loadWorkingDraftFromLocalStorage();
+    this.clearLegacyLocalDraftCache();
     this.initializeStore();
 
     if (typeof window !== "undefined") {
@@ -211,38 +211,17 @@ class CampusStore {
     if (Array.isArray(snapshot.stairGroups)) this.stairGroups = snapshot.stairGroups;
     if (Array.isArray(snapshot.liftGroups)) this.liftGroups = snapshot.liftGroups;
     if (Array.isArray(snapshot.doors)) this.doors = snapshot.doors;
-    if (typeof window !== "undefined") {
-      try {
-        localStorage.setItem("campusnav_draft_cache", JSON.stringify(this.getWorkingData()));
-      } catch {}
-    }
     // Notify local subscribers without re-broadcasting
     this.listeners.forEach((l) => l());
   }
 
-  private loadWorkingDraftFromLocalStorage() {
+  private clearLegacyLocalDraftCache() {
     if (typeof window === "undefined") return;
     try {
-      const cachedStr = localStorage.getItem("campusnav_draft_cache");
-      if (cachedStr) {
-        const cached = JSON.parse(cachedStr);
-        if (cached && typeof cached === "object") {
-          if (Array.isArray(cached.buildings) && cached.buildings.length > 0) this.buildings = cached.buildings;
-          if (Array.isArray(cached.floors) && cached.floors.length > 0) this.floors = cached.floors;
-          if (Array.isArray(cached.nodes) && cached.nodes.length > 0) this.nodes = cached.nodes;
-          if (Array.isArray(cached.edges) && cached.edges.length > 0) this.edges = cached.edges;
-          if (Array.isArray(cached.destinations) && cached.destinations.length > 0) this.destinations = cached.destinations;
-          if (Array.isArray(cached.events)) this.events = cached.events;
-          if (Array.isArray(cached.obstacles)) this.obstacles = cached.obstacles;
-          if (Array.isArray(cached.stairGroups)) this.stairGroups = cached.stairGroups;
-          if (Array.isArray(cached.liftGroups)) this.liftGroups = cached.liftGroups;
-          if (Array.isArray(cached.doors)) this.doors = cached.doors;
-          this.ensureDefaultGroundFloors();
-        }
-      }
-    } catch (e) {
-      console.warn("[CampusStore] Notice reading local draft cache:", e);
-    }
+      localStorage.removeItem("campusnav_draft_cache");
+      localStorage.removeItem("campusnav_working_data");
+      localStorage.removeItem("campusnav_working_data_v2");
+    } catch {}
   }
 
   public flushWorkingDraftSync(isExplicitReset = false) {
@@ -318,14 +297,6 @@ class CampusStore {
   }
 
   private persistWorkingDraft() {
-    if (typeof window !== "undefined") {
-      try {
-        const working = this.getWorkingData();
-        localStorage.setItem("campusnav_draft_cache", JSON.stringify(working));
-      } catch (e) {
-        console.warn("[CampusStore] Notice saving local draft cache:", e);
-      }
-    }
     this.saveWorkingDraftToDatabase();
   }
 
@@ -541,45 +512,18 @@ class CampusStore {
       };
     }
 
-    const workingBldMap = new Map<string, Building>(this.buildings.map((b) => [b.id, b]));
-    const rawPublished = this.publishedGraph.buildings || [];
-    const publishedBuildings = rawPublished.map((pb) => {
-      const wb = workingBldMap.get(pb.id);
-      if (wb && (!pb.footprint || pb.footprint.length < 3) && wb.footprint && wb.footprint.length >= 3) {
-        return {
-          ...pb,
-          footprint: wb.footprint,
-          corner1Lat: wb.corner1Lat,
-          corner1Lng: wb.corner1Lng,
-          corner2Lat: wb.corner2Lat,
-          corner2Lng: wb.corner2Lng,
-          corner3Lat: wb.corner3Lat,
-          corner3Lng: wb.corner3Lng,
-          corner4Lat: wb.corner4Lat,
-          corner4Lng: wb.corner4Lng,
-        };
-      }
-      return pb;
-    });
-
-    const hasPubBlds = Array.isArray(this.publishedGraph.buildings) && this.publishedGraph.buildings.length > 0;
-    const hasPubNodes = Array.isArray(this.publishedGraph.nodes) && this.publishedGraph.nodes.length > 0;
-    const hasPubFloors = Array.isArray(this.publishedGraph.floors) && this.publishedGraph.floors.length > 0;
-    const hasPubEdges = Array.isArray(this.publishedGraph.edges) && this.publishedGraph.edges.length > 0;
-    const hasPubDest = Array.isArray(this.publishedGraph.destinations) && this.publishedGraph.destinations.length > 0;
-
     return {
       campus: this.campus,
-      buildings: hasPubBlds ? publishedBuildings : this.buildings,
-      floors: hasPubFloors ? (this.publishedGraph.floors || []) : this.floors,
-      nodes: hasPubNodes ? (this.publishedGraph.nodes || []) : this.nodes,
-      edges: hasPubEdges ? (this.publishedGraph.edges || []) : this.edges,
-      destinations: hasPubDest ? (this.publishedGraph.destinations || []) : this.destinations,
-      events: (this.publishedGraph.events && this.publishedGraph.events.length > 0) ? this.publishedGraph.events : (this.events || []),
+      buildings: [...(this.publishedGraph.buildings || [])],
+      floors: [...(this.publishedGraph.floors || [])],
+      nodes: [...(this.publishedGraph.nodes || [])],
+      edges: [...(this.publishedGraph.edges || [])],
+      destinations: [...(this.publishedGraph.destinations || [])],
+      events: [...(this.publishedGraph.events || [])],
       obstacles: mergedObstacles,
-      stairGroups: (this.publishedGraph.stairGroups && this.publishedGraph.stairGroups.length > 0) ? this.publishedGraph.stairGroups : this.stairGroups,
-      liftGroups: (this.publishedGraph.liftGroups && this.publishedGraph.liftGroups.length > 0) ? this.publishedGraph.liftGroups : this.liftGroups,
-      doors: (this.publishedGraph.doors && this.publishedGraph.doors.length > 0) ? this.publishedGraph.doors : this.doors,
+      stairGroups: [...(this.publishedGraph.stairGroups || [])],
+      liftGroups: [...(this.publishedGraph.liftGroups || [])],
+      doors: [...(this.publishedGraph.doors || [])],
     };
   }
 
@@ -2628,37 +2572,19 @@ class CampusStore {
         const jsonDraft = await resDraft.json();
         const draft = jsonDraft?.draft;
         if (draft && typeof draft === "object") {
-          const hasServerEntities =
-            (Array.isArray(draft.buildings) && draft.buildings.length > 0) ||
-            (Array.isArray(draft.nodes) && draft.nodes.length > 0);
-
-          if (hasServerEntities) {
-            this.buildings = Array.isArray(draft.buildings) ? draft.buildings : [];
-            this.floors = Array.isArray(draft.floors) ? draft.floors : [];
-            this.nodes = Array.isArray(draft.nodes) ? draft.nodes : [];
-            this.edges = Array.isArray(draft.edges) ? draft.edges : [];
-            this.destinations = Array.isArray(draft.destinations) ? draft.destinations : [];
-            this.events = Array.isArray(draft.events) ? draft.events : [];
-            this.obstacles = Array.isArray(draft.obstacles) ? draft.obstacles : [];
-            this.stairGroups = Array.isArray(draft.stairGroups) ? draft.stairGroups : [];
-            this.liftGroups = Array.isArray(draft.liftGroups) ? draft.liftGroups : [];
-            this.doors = Array.isArray(draft.doors) ? draft.doors : [];
-            this.ensureDefaultGroundFloors();
-            (this.stairGroups || []).forEach((sg) => this.rebuildStairGroupConnections(sg));
-            draftLoaded = true;
-            if (typeof window !== "undefined") {
-              try {
-                localStorage.setItem("campusnav_draft_cache", JSON.stringify(this.getWorkingData()));
-              } catch {}
-            }
-          } else {
-            // Server has no draft, but if local memory/storage has entities, keep local and sync to server
-            const hasLocal = this.buildings.length > 0 || this.nodes.length > 0;
-            if (hasLocal) {
-              draftLoaded = true;
-              this.saveWorkingDraftToDatabase(false);
-            }
-          }
+          this.buildings = Array.isArray(draft.buildings) ? draft.buildings : [];
+          this.floors = Array.isArray(draft.floors) ? draft.floors : [];
+          this.nodes = Array.isArray(draft.nodes) ? draft.nodes : [];
+          this.edges = Array.isArray(draft.edges) ? draft.edges : [];
+          this.destinations = Array.isArray(draft.destinations) ? draft.destinations : [];
+          this.events = Array.isArray(draft.events) ? draft.events : [];
+          this.obstacles = Array.isArray(draft.obstacles) ? draft.obstacles : [];
+          this.stairGroups = Array.isArray(draft.stairGroups) ? draft.stairGroups : [];
+          this.liftGroups = Array.isArray(draft.liftGroups) ? draft.liftGroups : [];
+          this.doors = Array.isArray(draft.doors) ? draft.doors : [];
+          this.ensureDefaultGroundFloors();
+          (this.stairGroups || []).forEach((sg) => this.rebuildStairGroupConnections(sg));
+          draftLoaded = true;
         }
       }
 
@@ -2692,12 +2618,20 @@ class CampusStore {
             this.stairGroups = JSON.parse(JSON.stringify(this.publishedGraph.stairGroups || []));
             this.liftGroups = JSON.parse(JSON.stringify(this.publishedGraph.liftGroups || []));
             this.doors = JSON.parse(JSON.stringify(this.publishedGraph.doors || []));
-            if (typeof window !== "undefined") {
-              try {
-                localStorage.setItem("campusnav_draft_cache", JSON.stringify(this.getWorkingData()));
-              } catch {}
-            }
           }
+        } else if (jsonPub && jsonPub.published === false) {
+          this.publishedGraph = {
+            buildings: [],
+            floors: [],
+            nodes: [],
+            edges: [],
+            destinations: [],
+            events: [],
+            obstacles: [],
+            stairGroups: [],
+            liftGroups: [],
+            doors: [],
+          };
         }
       }
 

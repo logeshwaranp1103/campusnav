@@ -600,10 +600,7 @@ export function invalidatePublishedCache() {
 
 export async function getActivePublishedGraph(forceFresh = false) {
   if (!forceFresh && activePublishedSnapshot) {
-    const hasEntities =
-      (activePublishedSnapshot.snapshot?.buildings?.length ?? 0) > 0 ||
-      (activePublishedSnapshot.snapshot?.nodes?.length ?? 0) > 0;
-    if (hasEntities) return activePublishedSnapshot;
+    return activePublishedSnapshot;
   }
 
   if (prisma) {
@@ -615,45 +612,17 @@ export async function getActivePublishedGraph(forceFresh = false) {
 
       if (dbRecord && dbRecord.snapshot && typeof dbRecord.snapshot === "object") {
         const sanitized = sanitizeSnapshotForPayload(dbRecord.snapshot as DraftSnapshot);
-        const hasSnapEntities =
-          (Array.isArray(sanitized.buildings) && sanitized.buildings.length > 0) ||
-          (Array.isArray(sanitized.nodes) && sanitized.nodes.length > 0);
-        if (hasSnapEntities) {
-          activePublishedSnapshot = {
-            version: dbRecord.version || 1,
-            snapshot: sanitized,
-            publishedAt: dbRecord.publishedAt || new Date(),
-            publishedBy: dbRecord.publishedBy || "admin",
-            notes: "Database published graph",
-          };
-          return activePublishedSnapshot;
-        }
+        activePublishedSnapshot = {
+          version: dbRecord.version || 1,
+          snapshot: sanitized,
+          publishedAt: dbRecord.publishedAt || new Date(),
+          publishedBy: dbRecord.publishedBy || "admin",
+          notes: "Database published graph",
+        };
+        return activePublishedSnapshot;
       }
 
-      // 2. SECOND check if there is any published MapVersion record in database
-      const latestMapVersion = await prisma.mapVersion.findFirst({
-        where: { status: "PUBLISHED" },
-        orderBy: { version: "desc" },
-      }).catch(() => null);
-
-      if (latestMapVersion && latestMapVersion.snapshot && typeof latestMapVersion.snapshot === "object") {
-        const sanitized = sanitizeSnapshotForPayload(latestMapVersion.snapshot as DraftSnapshot);
-        const hasSnapEntities =
-          (Array.isArray(sanitized.buildings) && sanitized.buildings.length > 0) ||
-          (Array.isArray(sanitized.nodes) && sanitized.nodes.length > 0);
-        if (hasSnapEntities) {
-          activePublishedSnapshot = {
-            version: latestMapVersion.version,
-            snapshot: sanitized,
-            publishedAt: latestMapVersion.publishedAt || latestMapVersion.createdAt,
-            publishedBy: latestMapVersion.publishedBy || "admin",
-            notes: latestMapVersion.notes || "Restored from MapVersion",
-          };
-          return activePublishedSnapshot;
-        }
-      }
-
-      // 3. THIRD query PostgreSQL relational tables
+      // 2. SECOND check relational tables if active-published is not yet initialized
       const relational = await getRelationalGraphFromDatabase().catch(() => null);
       if (relational) {
         const hasRelationalEntities =
@@ -670,27 +639,6 @@ export async function getActivePublishedGraph(forceFresh = false) {
             notes: "Auto-assembled from relational database",
           };
           return activePublishedSnapshot;
-        }
-      }
-
-      // 4. FOURTH check active-draft snapshot as fallback
-      const draftRecord = await prisma.draftGraph.findUnique({
-        where: { id: "active-draft" },
-      }).catch(() => null);
-
-      if (draftRecord && draftRecord.snapshot && typeof draftRecord.snapshot === "object") {
-        const sanitized = sanitizeSnapshotForPayload(draftRecord.snapshot as DraftSnapshot);
-        const hasDraftEntities =
-          (Array.isArray(sanitized.buildings) && sanitized.buildings.length > 0) ||
-          (Array.isArray(sanitized.nodes) && sanitized.nodes.length > 0);
-        if (hasDraftEntities) {
-          return {
-            version: 1,
-            snapshot: sanitized,
-            publishedAt: draftRecord.updatedAt,
-            publishedBy: "draft-fallback",
-            notes: "Loaded from draft snapshot",
-          };
         }
       }
     } catch (e) {
